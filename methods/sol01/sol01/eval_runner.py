@@ -31,6 +31,9 @@ def run_official_eval(
     *,
     python_executable: str | None = None,
     outputs_root: Path | None = None,
+    expected_instance_ids: list[str] | None = None,
+    artifact_tag: str | None = None,
+    result_dir: Path | None = None,
     runner: Runner | None = None,
 ) -> dict[str, Any]:
     """Run the official evaluator in exec_result mode and write a summary file."""
@@ -39,11 +42,16 @@ def run_official_eval(
         run_id,
         outputs_root=outputs_root or REPO_ROOT / "methods" / "sol01" / "outputs",
     )
-    command = build_eval_command(run_paths, python_executable=python_executable)
+    command = build_eval_command(
+        run_paths,
+        python_executable=python_executable,
+        result_dir=result_dir,
+    )
     completed = (runner or _run_subprocess)(command, cwd=EVALUATION_SUITE_DIR)
 
-    stdout_path = run_paths.eval_dir / "official_stdout.txt"
-    stderr_path = run_paths.eval_dir / "official_stderr.txt"
+    suffix = f".{artifact_tag}" if artifact_tag else ""
+    stdout_path = run_paths.eval_dir / f"official_stdout{suffix}.txt"
+    stderr_path = run_paths.eval_dir / f"official_stderr{suffix}.txt"
     stdout_path.write_text(completed.stdout or "", encoding="utf-8")
     stderr_path.write_text(completed.stderr or "", encoding="utf-8")
 
@@ -52,13 +60,18 @@ def run_official_eval(
     summary["run_id"] = run_id
     summary["stdout_path"] = str(stdout_path)
     summary["stderr_path"] = str(stderr_path)
-    summary["result_dir"] = str(run_paths.csv_dir)
-    expected_ids = _expected_instance_ids(run_paths)
+    if artifact_tag is None:
+        summary["result_dir"] = str(result_dir or run_paths.csv_dir)
+    expected_ids = (
+        set(expected_instance_ids)
+        if expected_instance_ids is not None
+        else _expected_instance_ids(run_paths)
+    )
     summary["missing_csv_count"] = _missing_csv_count(run_paths, expected_ids=expected_ids)
     summary["missing_instance_ids"] = _missing_instance_ids(run_paths, expected_ids=expected_ids)
     summary["returncode"] = completed.returncode
 
-    summary_path = run_paths.eval_dir / "summary.json"
+    summary_path = run_paths.eval_dir / f"summary{suffix}.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if completed.returncode != 0:
         raise subprocess.CalledProcessError(
@@ -70,14 +83,19 @@ def run_official_eval(
     return summary
 
 
-def build_eval_command(run_paths: RunPaths, *, python_executable: str | None = None) -> list[str]:
+def build_eval_command(
+    run_paths: RunPaths,
+    *,
+    python_executable: str | None = None,
+    result_dir: Path | None = None,
+) -> list[str]:
     """Build the official evaluator subprocess command."""
 
     return [
         python_executable or sys.executable,
         str(EVALUATE_SCRIPT),
         "--result_dir",
-        str(run_paths.csv_dir),
+        str(result_dir or run_paths.csv_dir),
         "--mode",
         "exec_result",
         "--gold_dir",

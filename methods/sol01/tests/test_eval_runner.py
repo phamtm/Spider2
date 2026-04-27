@@ -117,3 +117,30 @@ def test_run_official_eval_persists_output_on_failure(tmp_path: Path):
     ) == "failure details\n"
     summary = (run_paths.eval_dir / "summary.json").read_text(encoding="utf-8")
     assert '"returncode": 2' in summary
+
+
+def test_run_official_eval_with_artifact_tag_keeps_shared_summary_name_free(tmp_path: Path):
+    run_paths = ensure_run_paths("filtered-run", outputs_root=tmp_path)
+    run_paths.manifest_path.write_text('{"task_ids": ["local003"]}\n', encoding="utf-8")
+
+    def fake_runner(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="Final score: 1.0, Correct examples: 1, Total examples: 1\n",
+            stderr="",
+        )
+
+    run_official_eval(
+        "filtered-run",
+        outputs_root=tmp_path,
+        expected_instance_ids=["local003"],
+        artifact_tag="filtered-local003",
+        runner=fake_runner,
+    )
+
+    assert not (run_paths.eval_dir / "summary.json").exists()
+    tagged_summary = run_paths.eval_dir / "summary.filtered-local003.json"
+    assert tagged_summary.exists()
+    payload = tagged_summary.read_text(encoding="utf-8")
+    assert '"result_dir"' not in payload
