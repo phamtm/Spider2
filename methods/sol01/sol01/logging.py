@@ -28,6 +28,7 @@ def configure_logging(
         stream=output_stream,
         force=True,
     )
+    _quiet_noisy_loggers()
     structlog.configure(
         processors=[
             structlog.stdlib.filter_by_level,
@@ -82,3 +83,10 @@ def _resolve_colors(use_colors: bool | None, stream: TextIO) -> bool:
     if callable(isatty):
         return bool(isatty())
     return sys.stderr.isatty()
+
+
+def _quiet_noisy_loggers() -> None:
+    """Keep third-party HTTP chatter out of normal solver runs."""
+
+    for logger_name in ("httpx", "httpcore", "openai", "pydantic_ai", "logfire"):
+        std_logging.getLogger(logger_name).setLevel(std_logging.WARNING)

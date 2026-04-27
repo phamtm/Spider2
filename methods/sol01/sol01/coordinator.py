@@ -168,7 +168,8 @@ def run_task(
         "task start",
         instance_id=task.instance_id,
         db=task.db,
-        question=task.question,
+        question_preview=_question_preview(task.question),
+        question_length=len(task.question),
         run_root=str(run_paths.root),
     )
     schema = retrieve_schema(
@@ -180,6 +181,8 @@ def run_task(
     logger.info(
         "schema selected",
         instance_id=task.instance_id,
+        selected_count=len(schema.selected_tables),
+        expanded_count=len(schema.expanded_tables),
         selected_tables=schema.selected_tables,
         expanded_tables=schema.expanded_tables,
         confidence=schema.confidence,
@@ -245,6 +248,8 @@ def run_task(
             validation_ok=attempt["validation"]["ok"],
             execution_ok=attempt["execution_result"]["ok"],
             score=attempt["score"],
+            elapsed_seconds=attempt["elapsed_seconds"],
+            row_count=attempt["execution_result"]["row_count"],
         )
 
     best_attempt = _best_attempt(attempts)
@@ -282,6 +287,8 @@ def run_task(
             validation_ok=attempt["validation"]["ok"],
             execution_ok=attempt["execution_result"]["ok"],
             score=attempt["score"],
+            elapsed_seconds=attempt["elapsed_seconds"],
+            row_count=attempt["execution_result"]["row_count"],
         )
         best_attempt = _best_attempt(attempts)
 
@@ -342,6 +349,8 @@ def run_task(
                 validation_ok=attempt["validation"]["ok"],
                 execution_ok=attempt["execution_result"]["ok"],
                 score=attempt["score"],
+                elapsed_seconds=attempt["elapsed_seconds"],
+                row_count=attempt["execution_result"]["row_count"],
             )
             best_attempt = _best_attempt(attempts)
 
@@ -383,9 +392,13 @@ def run_task(
         write_trace(run_paths, instance_id=task.instance_id, trace=trace_payload)
         elapsed_seconds = round(perf_counter() - started_at, 3)
         logger.info(
-            "task success",
+            "task complete",
             instance_id=task.instance_id,
+            status="success",
             run_root=str(run_paths.root),
+            attempts=len(attempts),
+            best_stage=best_attempt["stage"],
+            best_score=best_attempt["score"],
             row_count=len(best_dataframe),
             columns=[str(column) for column in best_dataframe.columns],
             elapsed_seconds=elapsed_seconds,
@@ -411,11 +424,14 @@ def run_task(
     write_trace(run_paths, instance_id=task.instance_id, trace=trace_payload)
     elapsed_seconds = round(perf_counter() - started_at, 3)
     logger.warning(
-        "task failed",
+        "task complete",
         instance_id=task.instance_id,
+        status="failed",
         run_root=str(run_paths.root),
         attempts=len(attempts),
         best_stage=best_attempt["stage"] if best_attempt is not None else None,
+        best_score=best_attempt["score"] if best_attempt is not None else None,
+        row_count=best_attempt["execution_result"]["row_count"] if best_attempt is not None else 0,
         elapsed_seconds=elapsed_seconds,
     )
     return FinalAnswer(
@@ -456,6 +472,7 @@ def _evaluate_candidate(
 ) -> dict[str, Any]:
     """Validate and execute one candidate, then return a trace-ready attempt record."""
 
+    started_at = perf_counter()
     validation = validate_sql(candidate.sql, allowed_tables=schema.expanded_tables)
     if validation.ok:
         try:
@@ -511,6 +528,7 @@ def _evaluate_candidate(
     if execution.ok:
         attempt["result_profile"] = profile_dataframe(dataframe)
         attempt["_dataframe"] = dataframe
+    attempt["elapsed_seconds"] = round(perf_counter() - started_at, 3)
 
     return attempt
 
@@ -558,6 +576,15 @@ def _schema_context(schema: SchemaSelection) -> str:
         f"Expanded tables: {', '.join(schema.expanded_tables)}\n"
         f"Rationale: {schema.rationale}"
     )
+
+
+def _question_preview(question: str, *, max_length: int = 120) -> str:
+    """Shorten long questions so task logs stay readable."""
+
+    normalized = " ".join(question.split())
+    if len(normalized) <= max_length:
+        return normalized
+    return normalized[: max_length - 1].rstrip() + "…"
 
 
 def _docs_context(metric_definitions: list[MetricDefinition]) -> str:

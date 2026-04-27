@@ -97,7 +97,6 @@ def run(
         skip_failed=skip_failed,
     )
     typer.echo(f"Completed {len(results)} task(s).")
-    logger.info("run complete", task_count=len(results))
 
 
 @app.command("eval")
@@ -236,14 +235,6 @@ def handle_run(
     """Load local tasks, then pass them to the batch coordinator."""
 
     _require_local_only(local_only)
-    logger.info(
-        "loading tasks",
-        run_id=run_id,
-        instance_id=instance_id,
-        db=db,
-        question_contains=question_contains,
-        limit=limit,
-    )
     tasks = _load_filtered_tasks(
         instance_id=instance_id,
         db=db,
@@ -259,12 +250,11 @@ def handle_run(
         dotenv_path=DEFAULT_DOTENV_PATH,
     )
     effective_run_id = run_id or _default_run_id("run")
-    config_summary = _runtime_config_summary(config)
     logger.info(
-        "starting batch run",
+        "run start",
         run_id=effective_run_id,
         task_count=len(tasks),
-        **config_summary,
+        **_runtime_config_summary(config),
     )
     return run_tasks(
         tasks,
