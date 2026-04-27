@@ -141,3 +141,8 @@ spider2-lite/resource/databases/spider2-localdb
 credentials/
 **/credentials/
 
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
