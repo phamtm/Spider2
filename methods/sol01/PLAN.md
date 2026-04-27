@@ -1,7 +1,5 @@
 # sol01 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
-
 **Goal:** Build `methods/sol01`, a SQLite-only Spider2-Lite solver that generates SQL with Pydantic AI and DeepSeek via OpenRouter, executes read-only SQLite queries, writes CSV outputs, and evaluates the local subset.
 
 **Architecture:** A deterministic Python coordinator owns task loading, retrieval, validation, execution, retries, traces, resume behavior, and output writing. Pydantic AI is used only for bounded structured LLM calls: intent, schema selection, SQL generation, SQL repair, and result critique.
@@ -39,7 +37,7 @@
 - CSV normalization: minimal, `pandas.to_csv(index=False)`.
 - Resume: on by default.
 - Default concurrency: 2.
-- Smoke set: `local003`, `local004`, `local005`.
+- Smoke set: `local003`, `local004`, `local007`.
 
 ## Runtime Config
 
@@ -104,6 +102,7 @@ uv run sol01 index
 
 uv run sol01 run --local-only
 uv run sol01 run --instance-id local003
+uv run sol01 run --instance-id local003 --run-id smoke-local003
 uv run sol01 run --db E_commerce
 uv run sol01 run --question-contains "retention"
 uv run sol01 run --limit 10
@@ -118,6 +117,158 @@ uv run sol01 ask --db E_commerce "Which customers have the highest AOV?"
 ```
 
 `ask` writes to `outputs/ask/<timestamp>` by default. It should only write into a benchmark run folder when `--run-id` is explicitly provided.
+
+## Architecture Diagram
+
+```text
+                         +----------------------+
+                         | CLI                  |
+                         | sol01/cli.py, run.py |
+                         +----------+-----------+
+                                    |
+          +-------------------------+-------------------------+
+          |                         |                         |
+          v                         v                         v
++-------------------+     +-------------------+     +-------------------+
+| Index command     |     | Coordinator       |     | Eval / analysis   |
+| sol01/index.py    |     | sol01/coordinator |     | eval_runner.py    |
++---------+---------+     +---------+---------+     | analysis.py       |
+          |                         |               +---------+---------+
+          v                         |                         ^
++-------------------+               |                         |
+| Metadata cache    |               |                         |
+| .cache/index.json |               |                         |
++---------+---------+               |                         |
+          |                         |                         |
+          v                         v                         |
++-------------------+     +-------------------+               |
+| Schema retrieval  |---->| Task execution    |               |
+| sol01/retrieval.py|     | loop              |               |
++-------------------+     +---------+---------+               |
+                                    |                         |
+      +-----------------------------+------------------+      |
+      |                             |                  |      |
+      v                             v                  v      |
++------------+              +--------------+     +-----------+|
+| Task loader|              | Document     |     | LLM client||
+| tasks.py   |              | retrieval    |     | llm.py    ||
++------------+              | docs.py      |     +-----+-----+|
+                            +--------------+           ^      |
+                                                       |      |
+                                                +------+-----+|
+                                                | Prompt     ||
+                                                | files      ||
+                                                +------------+|
+                                    |
+                                    v
+                            +---------------+
+                            | SQL validation|
+                            | validation.py |
+                            +-------+-------+
+                                    |
+                                    v
+                            +---------------+
+                            | SQLite runner |
+                            | sqlite_runner |
+                            +-------+-------+
+                                    |
+                                    v
+                            +---------------+
+                            | Profiling     |
+                            | profiling.py  |
+                            +-------+-------+
+                                    |
+                                    v
+                            +---------------+
+                            | Output/resume |
+                            | output.py     |
+                            +-------+-------+
+                                    |
+                                    v
+                            +---------------+
+                            | Run files     |
+                            | outputs/...   |
+                            +-------+-------+
+                                    |
+                                    +-------------------------+
+
+Shared inputs:
+
+  config.py  -> CLI and coordinator
+  models.py  -> all module boundaries
+```
+
+## Component Responsibilities
+
+### CLI (`sol01/cli.py`, `run.py`)
+
+Owns user-facing commands and argument parsing. It should stay thin: resolve command options, load config, call the right module, and print concise results.
+
+- `index`: builds or refreshes the metadata index.
+- `run`: executes benchmark tasks through the coordinator.
+- `eval`: evaluates saved CSV predictions with the official evaluator wrapper.
+- `analyze`: summarizes traces and evaluation results.
+- `ask`: runs one ad hoc database question outside the benchmark flow unless `--run-id` is explicitly provided.
+
+### Config (`sol01/config.py`)
+
+Loads runtime settings from environment variables and CLI overrides. It should normalize OpenRouter and generic `LLM_*` aliases into one config object, enforce DeepSeek-only provider routing by default, and fail fast when required secrets are missing for live runs.
+
+### Typed Models (`sol01/models.py`)
+
+Defines the shared Pydantic objects passed between modules. These models are the contract for tasks, retrieved schemas, metric definitions, SQL candidates, validation reports, execution results, critic output, and final answers.
+
+### Task Loader (`sol01/tasks.py`)
+
+Reads `spider2-lite/spider2-lite.jsonl`, keeps only local SQLite tasks, and applies debug filters such as `--instance-id`, `--db`, `--question-contains`, and `--limit`. It must not read gold SQL, gold execution results, or evaluator metadata.
+
+### Metadata Index (`sol01/index.py`)
+
+Parses SQLite metadata from `DDL.csv` and per-table JSON files into `TableSchema` objects. It builds a cached index under `methods/sol01/.cache/index.json` so retrieval and prompts can use compact, structured schema context.
+
+### Document Retrieval (`sol01/docs.py`)
+
+Loads allowed markdown documents from `spider2-lite/resource/documents`. It chunks documents by heading, table, and paragraph blocks, force-loads task `external_knowledge` when present, and returns structured metric definitions instead of dumping full documents into prompts.
+
+### Schema Retrieval (`sol01/retrieval.py`)
+
+Ranks tables inside the task database using lexical overlap across table names, column names, descriptions, sample values, and the question. It then asks the LLM to select from compact candidates and expands selected tables with conservative join-neighbor rules.
+
+### Prompt Files (`prompts/*.md`)
+
+Stores versioned prompt text for intent extraction, schema selection, SQL generation, SQL repair, and result critique. Prompt SHA-256 hashes must be recorded in traces for reproducibility.
+
+### LLM Client (`sol01/llm.py`)
+
+Wraps Pydantic AI calls to OpenRouter. It owns prompt loading, prompt hashing, provider routing, structured response parsing, and fake-client seams for tests. Unit tests should not call the live API.
+
+### Coordinator (`sol01/coordinator.py`)
+
+Owns the per-task execution loop. It loads task context, retrieves schema and documents, calls the LLM for intent and SQL candidates, validates and executes candidates, chooses the best result, runs bounded repair, and records all attempts in the trace.
+
+### SQLite Validation (`sol01/validation.py`)
+
+Uses `sqlglot` with SQLite dialect to enforce read-only SQL before execution. It allows one `SELECT` or `WITH ... SELECT`, rejects mutation, DDL, `ATTACH`, `DETACH`, `PRAGMA`, extension loading, and chained statements, and checks referenced tables against local metadata.
+
+### SQLite Runner (`sol01/sqlite_runner.py`)
+
+Executes validated SQL against an in-memory backup of the target SQLite file. It writes CSV output with `pandas.to_csv(index=False)` and returns structured execution results.
+
+### Profiling (`sol01/profiling.py`)
+
+Creates cheap result profiles for candidate scoring and critique: row count, columns, sample rows, null counts, distinct counts, min/max, and top values where bounded and useful.
+
+### Output and Resume (`sol01/output.py`)
+
+Creates run directories, writes manifests, SQL files, CSV files, and traces, and decides whether a task should be skipped or rerun. Resume behavior is based on both a successful final trace and an existing CSV.
+
+### Eval Wrapper (`sol01/eval_runner.py`)
+
+Runs the official evaluator in `exec_result` mode against saved CSV predictions. It must use the active `sol01` Python interpreter, save stdout, parse correct and total counts when possible, and write `outputs/<run_id>/eval/summary.json`.
+
+### Analysis (`sol01/analysis.py`)
+
+Reads traces and evaluation summaries after a run. It groups failures by validation, execution, empty result, critic, missing CSV, retrieval miss, aggregation issue, date-filter issue, and database, then writes `failures.json` and `summary.md`.
 
 ## Data Sources
 
@@ -320,8 +471,10 @@ LLM critic:
 
 ```bash
 cd spider2-lite/evaluation_suite
-python evaluate.py --result_dir /abs/path/to/methods/sol01/outputs/<run_id>/csv --mode exec_result
+/abs/path/to/methods/sol01/.venv/bin/python evaluate.py --result_dir /abs/path/to/methods/sol01/outputs/<run_id>/csv --mode exec_result
 ```
+
+The wrapper should call the evaluator with the active `sol01` Python interpreter, not bare `python`, so evaluator dependencies come from the `methods/sol01` environment.
 
 Wrapper output:
 
@@ -390,15 +543,24 @@ methods/sol01/
     eval_runner.py
     analysis.py
   tests/
+    test_config.py
+    test_models.py
     test_tasks.py
     test_index.py
     test_docs.py
     test_validation.py
     test_sqlite_runner.py
     test_output.py
+    test_llm.py
+    test_coordinator.py
+    test_eval_runner.py
+    test_analysis.py
+    test_cli.py
 ```
 
 ## Tasks
+
+Each task should end with a targeted verification command before moving to the next task. Prefer narrow tests first, then run the full suite at the end. For LLM-dependent code, use fake clients in tests and reserve live OpenRouter calls for smoke runs.
 
 ### Task 1: Package Skeleton
 
@@ -419,12 +581,15 @@ methods/sol01/
 **Files:**
 - Create: `methods/sol01/sol01/config.py`
 - Create: `methods/sol01/sol01/models.py`
-- Test: `methods/sol01/tests/test_tasks.py`
+- Test: `methods/sol01/tests/test_config.py`
+- Test: `methods/sol01/tests/test_models.py`
 
 - [ ] Implement environment loading for OpenRouter and generic `LLM_*` aliases.
 - [ ] Enforce provider-only `deepseek` and fallback disabled by default.
 - [ ] Implement Pydantic models listed in this plan.
 - [ ] Test default config and env override behavior.
+- [ ] Test model construction and validation for representative typed objects.
+- [ ] Run `uv run pytest tests/test_config.py tests/test_models.py -q`.
 
 ### Task 3: Task Loading and Filtering
 
@@ -437,6 +602,7 @@ methods/sol01/
 - [ ] Support filters: `--instance-id`, `--db`, `--question-contains`, `--limit`.
 - [ ] Test that local count is 135.
 - [ ] Test `local003` can be selected by instance ID.
+- [ ] Run `uv run pytest tests/test_tasks.py -q`.
 
 ### Task 4: Metadata Index
 
@@ -449,6 +615,7 @@ methods/sol01/
 - [ ] Build `TableSchema` objects.
 - [ ] Cache index to `methods/sol01/.cache/index.json`.
 - [ ] Test index creation for `E_commerce`.
+- [ ] Run `uv run pytest tests/test_index.py -q`.
 
 ### Task 5: Document Retrieval
 
@@ -460,7 +627,9 @@ methods/sol01/
 - [ ] Chunk by headings, tables, and paragraph blocks.
 - [ ] Implement `get_metric_definition(metric_name, instance_id=None, db=None)`.
 - [ ] Force-load task `external_knowledge` when present.
-- [ ] Add tests for `retention rate`, `RFM`, `tip_rate`, and `ST_DWITHIN`.
+- [ ] Add tests for `retention rate`, `RFM`, and `tip_rate`.
+- [ ] Do not test `ST_DWITHIN` unless syntax-document retrieval is explicitly added; it is not part of the allowed SQLite-local document corpus.
+- [ ] Run `uv run pytest tests/test_docs.py -q`.
 
 ### Task 6: Schema Retrieval
 
@@ -472,6 +641,7 @@ methods/sol01/
 - [ ] Implement cap-limited join-neighbor expansion.
 - [ ] Return `SchemaSelection`.
 - [ ] Test selected tables stay within the task DB.
+- [ ] Run `uv run pytest tests/test_index.py -q`.
 
 ### Task 7: SQLite Validation
 
@@ -485,6 +655,7 @@ methods/sol01/
 - [ ] Check referenced table names.
 - [ ] Test valid CTE query passes.
 - [ ] Test `DROP TABLE`, `PRAGMA`, and `SELECT 1; SELECT 2` fail.
+- [ ] Run `uv run pytest tests/test_validation.py -q`.
 
 ### Task 8: SQLite Runner and Profiling
 
@@ -499,6 +670,7 @@ methods/sol01/
 - [ ] Implement cheap automatic profiles: row count, columns, up to 3 sample rows.
 - [ ] Implement bounded deeper profiles: null counts, distinct counts, min/max, top values.
 - [ ] Test execution writes a CSV for a simple `SELECT`.
+- [ ] Run `uv run pytest tests/test_sqlite_runner.py -q`.
 
 ### Task 9: Prompt Files and LLM Client
 
@@ -509,27 +681,19 @@ methods/sol01/
 - Create: `methods/sol01/prompts/sql_repair.md`
 - Create: `methods/sol01/prompts/result_critic.md`
 - Create: `methods/sol01/sol01/llm.py`
+- Test: `methods/sol01/tests/test_llm.py`
 
 - [ ] Store prompts as markdown files.
 - [ ] Compute SHA-256 prompt hashes.
 - [ ] Configure Pydantic AI with OpenRouter-compatible model config.
 - [ ] Include OpenRouter provider routing in each request.
 - [ ] Return structured Pydantic outputs.
+- [ ] Test prompt hash calculation from fixture prompt text.
+- [ ] Test OpenRouter provider routing payload uses `only=["deepseek"]` and `allow_fallbacks=False`.
+- [ ] Test structured output parsing with a fake LLM client; do not call the live API in unit tests.
+- [ ] Run `uv run pytest tests/test_llm.py -q`.
 
-### Task 10: Coordinator
-
-**Files:**
-- Create: `methods/sol01/sol01/coordinator.py`
-
-- [ ] Implement per-task execution loop.
-- [ ] Generate 3 initial SQL candidates.
-- [ ] Validate and execute candidates.
-- [ ] Repair best candidate on validation or execution error.
-- [ ] Run one critic-triggered semantic repair max.
-- [ ] Skip CSV on failure by default.
-- [ ] Record assumptions and all attempts in trace.
-
-### Task 11: Output and Resume
+### Task 10: Output and Resume
 
 **Files:**
 - Create: `methods/sol01/sol01/output.py`
@@ -540,12 +704,62 @@ methods/sol01/
 - [ ] Write SQL, CSV, and trace files.
 - [ ] Implement resume behavior.
 - [ ] Test successful task is skipped when CSV and success trace exist.
+- [ ] Test failed traces rerun by default and `--skip-failed` skips them.
+- [ ] Run `uv run pytest tests/test_output.py -q`.
 
-### Task 12: CLI
+### Task 11: Coordinator
+
+**Files:**
+- Create: `methods/sol01/sol01/coordinator.py`
+- Test: `methods/sol01/tests/test_coordinator.py`
+
+- [ ] Implement per-task execution loop.
+- [ ] Generate 3 initial SQL candidates.
+- [ ] Validate and execute candidates.
+- [ ] Repair best candidate on validation or execution error.
+- [ ] Run one critic-triggered semantic repair max.
+- [ ] Skip CSV on failure by default.
+- [ ] Record assumptions and all attempts in trace.
+- [ ] Test a success path with fake LLM outputs and a temp SQLite DB.
+- [ ] Test validation repair path with one invalid candidate followed by a repaired valid candidate.
+- [ ] Test failure writes a failed trace and no CSV.
+- [ ] Run `uv run pytest tests/test_coordinator.py -q`.
+
+### Task 12: Official Eval Wrapper
+
+**Files:**
+- Create: `methods/sol01/sol01/eval_runner.py`
+- Test: `methods/sol01/tests/test_eval_runner.py`
+
+- [ ] Call `spider2-lite/evaluation_suite/evaluate.py` in `exec_result` mode.
+- [ ] Use the current `sol01` Python interpreter path when spawning the evaluator.
+- [ ] Save official stdout.
+- [ ] Parse correct count and total count when possible.
+- [ ] Write wrapper `summary.json`.
+- [ ] Test subprocess command construction with a monkeypatched runner.
+- [ ] Test parsing sample official stdout into local subset and full benchmark summary fields.
+- [ ] Run `uv run pytest tests/test_eval_runner.py -q`.
+
+### Task 13: Analysis Command
+
+**Files:**
+- Create: `methods/sol01/sol01/analysis.py`
+- Test: `methods/sol01/tests/test_analysis.py`
+
+- [ ] Read traces.
+- [ ] Read eval summary.
+- [ ] Group failures by validation, execution, empty result, critic, and missing CSV.
+- [ ] Write `failures.json`.
+- [ ] Write concise `summary.md`.
+- [ ] Test analysis output from synthetic success, validation failure, execution failure, empty result, and missing CSV traces.
+- [ ] Run `uv run pytest tests/test_analysis.py -q`.
+
+### Task 14: CLI
 
 **Files:**
 - Create: `methods/sol01/sol01/cli.py`
 - Modify: `methods/sol01/run.py`
+- Test: `methods/sol01/tests/test_cli.py`
 
 - [ ] Implement `index`.
 - [ ] Implement `run`.
@@ -553,28 +767,11 @@ methods/sol01/
 - [ ] Implement `analyze`.
 - [ ] Implement `ask`.
 - [ ] Support debug filters on `run` and `eval`.
+- [ ] Support `--run-id` for `run`.
 - [ ] Default `run` to local-only.
-
-### Task 13: Official Eval Wrapper
-
-**Files:**
-- Create: `methods/sol01/sol01/eval_runner.py`
-
-- [ ] Call `spider2-lite/evaluation_suite/evaluate.py` in `exec_result` mode.
-- [ ] Save official stdout.
-- [ ] Parse correct count and total count when possible.
-- [ ] Write wrapper `summary.json`.
-
-### Task 14: Analysis Command
-
-**Files:**
-- Create: `methods/sol01/sol01/analysis.py`
-
-- [ ] Read traces.
-- [ ] Read eval summary.
-- [ ] Group failures by validation, execution, empty result, critic, and missing CSV.
-- [ ] Write `failures.json`.
-- [ ] Write concise `summary.md`.
+- [ ] Test CLI argument parsing and command dispatch with `typer.testing.CliRunner` and mocked handlers.
+- [ ] Test `run --instance-id local003 --run-id smoke-local003` dispatches expected filters.
+- [ ] Run `uv run pytest tests/test_cli.py -q`.
 
 ### Task 15: Smoke Run
 
@@ -584,7 +781,7 @@ methods/sol01/
 - [ ] Run `uv run sol01 index`.
 - [ ] Run `uv run sol01 run --instance-id local003 --run-id smoke-local003`.
 - [ ] Run `uv run sol01 run --instance-id local004 --run-id smoke-local004`.
-- [ ] Run `uv run sol01 run --instance-id local005 --run-id smoke-local005`.
+- [ ] Run `uv run sol01 run --instance-id local007 --run-id smoke-local007`.
 - [ ] Run `uv run sol01 eval --run-id smoke-local003`.
 - [ ] Inspect traces for prompt, schema retrieval, SQL, result profile, and provider routing.
 
@@ -617,4 +814,3 @@ When reporting results:
 - Report `correct / 135` for local subset.
 - Report `correct / 547` as full benchmark equivalent.
 - Do not call it a full Spider2-Lite leaderboard score until BigQuery and Snowflake are supported.
-
