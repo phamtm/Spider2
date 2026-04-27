@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from pydantic import BaseModel
+from pydantic_ai import PromptedOutput
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models.test import TestModel
 
 from sol01.config import RuntimeConfig
@@ -59,15 +61,17 @@ def test_llm_client_returns_structured_output_from_test_model():
         prompt_name="sample",
         output_type=Intent,
         model=TestModel(
-            custom_output_args={
-                "summary": "Find top customers by spend.",
-                "entities": ["customers"],
-                "metrics": ["total spend"],
-                "filters": [],
-                "time_constraints": [],
-                "output_expectation": "customer and total spend columns",
-                "assumptions": ["Use all orders."],
+            custom_output_text="""
+            {
+              "summary": "Find top customers by spend.",
+              "entities": ["customers"],
+              "metrics": ["total spend"],
+              "filters": [],
+              "time_constraints": [],
+              "output_expectation": "customer and total spend columns",
+              "assumptions": ["Use all orders."]
             }
+            """
         ),
     )
 
@@ -82,7 +86,7 @@ def test_llm_client_returns_simple_structured_output_from_test_model():
         "Say hi.",
         prompt_name="sample",
         output_type=SampleOutput,
-        model=TestModel(custom_output_args={"value": "hello"}),
+        model=TestModel(custom_output_text='{"value":"hello"}'),
     )
 
     assert output.model_dump() == {"value": "hello"}
@@ -110,3 +114,99 @@ def test_build_model_uses_openrouter_wrapper_for_string_override():
             }
         }
     }
+
+
+def test_llm_client_uses_prompted_output_for_structured_calls(monkeypatch):
+    client = LLMClient(RuntimeConfig(api_key="test-key"), prompts_dir=FIXTURE_PROMPTS_DIR)
+    captured: dict[str, object] = {}
+
+    class FakeResult:
+        output = SampleOutput(value="hello")
+
+    class FakeAgent:
+        def __init__(self, *, model, system_prompt, output_type):
+            captured["output_type"] = output_type
+
+        def run_sync(self, user_prompt):
+            return FakeResult()
+
+    monkeypatch.setattr("sol01.llm.Agent", FakeAgent)
+
+    output = client.run_structured(
+        "Say hi.",
+        prompt_name="sample",
+        output_type=SampleOutput,
+        model=TestModel(custom_output_args={"value": "hello"}),
+    )
+
+    assert output.model_dump() == {"value": "hello"}
+    assert isinstance(captured["output_type"], PromptedOutput)
+
+
+def test_llm_client_retries_transient_model_http_errors(monkeypatch):
+    client = LLMClient(RuntimeConfig(api_key="test-key"), prompts_dir=FIXTURE_PROMPTS_DIR)
+    calls = {"count": 0}
+
+    class FakeResult:
+        output = SampleOutput(value="hello")
+
+    class FakeAgent:
+        def __init__(self, *, model, system_prompt, output_type):
+            pass
+
+        def run_sync(self, user_prompt):
+            calls["count"] += 1
+            if calls["count"] < 3:
+                raise ModelHTTPError(
+                    status_code=429,
+                    model_name="deepseek/deepseek-v4-pro",
+                    body={"message": "rate limited"},
+                )
+            return FakeResult()
+
+    monkeypatch.setattr("sol01.llm.Agent", FakeAgent)
+    monkeypatch.setattr("sol01.llm.time.sleep", lambda seconds: None)
+
+    output = client.run_structured(
+        "Say hi.",
+        prompt_name="sample",
+        output_type=SampleOutput,
+        model=TestModel(custom_output_text='{"value":"hello"}'),
+    )
+
+    assert output.model_dump() == {"value": "hello"}
+    assert calls["count"] == 3
+
+
+def test_llm_client_does_not_retry_non_transient_model_http_errors(monkeypatch):
+    client = LLMClient(RuntimeConfig(api_key="test-key"), prompts_dir=FIXTURE_PROMPTS_DIR)
+    calls = {"count": 0}
+
+    class FakeAgent:
+        def __init__(self, *, model, system_prompt, output_type):
+            pass
+
+        def run_sync(self, user_prompt):
+            calls["count"] += 1
+            raise ModelHTTPError(
+                status_code=400,
+                model_name="deepseek/deepseek-v4-pro",
+                body={"message": "bad request"},
+            )
+
+    monkeypatch.setattr("sol01.llm.Agent", FakeAgent)
+    monkeypatch.setattr("sol01.llm.time.sleep", lambda seconds: None)
+
+    try:
+        client.run_structured(
+            "Say hi.",
+            prompt_name="sample",
+            output_type=SampleOutput,
+            model=TestModel(custom_output_text='{"value":"hello"}'),
+        )
+    except ModelHTTPError as exc:
+        assert exc.status_code == 400
+    else:
+        raise AssertionError("Expected ModelHTTPError")
+
+    assert calls["count"] == 1

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 
 from sol01.config import DEFAULT_BASE_URL, DEFAULT_MODEL, RuntimeConfig
@@ -69,3 +71,94 @@ def test_fallbacks_remain_disabled_by_default_even_with_truthy_env(monkeypatch):
 
     with pytest.raises(ValueError, match="fallback"):
         RuntimeConfig.from_env()
+
+
+def test_dotenv_file_loads_openrouter_settings_when_shell_is_empty(
+    monkeypatch,
+    tmp_path: Path,
+):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "\n".join(
+            [
+                "OPENROUTER_API_KEY=dotenv-key",
+                "OPENROUTER_BASE_URL=https://dotenv.example/v1",
+                "OPENROUTER_MODEL=deepseek/dotenv",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = RuntimeConfig.from_env(dotenv_path=dotenv_path)
+
+    assert config.api_key == "dotenv-key"
+    assert config.base_url == "https://dotenv.example/v1"
+    assert config.model == "deepseek/dotenv"
+
+
+def test_shell_env_still_wins_over_dotenv_file(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "shell-key")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://shell.example/v1")
+    monkeypatch.setenv("OPENROUTER_MODEL", "deepseek/shell")
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "\n".join(
+            [
+                "OPENROUTER_API_KEY=dotenv-key",
+                "OPENROUTER_BASE_URL=https://dotenv.example/v1",
+                "OPENROUTER_MODEL=deepseek/dotenv",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = RuntimeConfig.from_env(dotenv_path=dotenv_path)
+
+    assert config.api_key == "shell-key"
+    assert config.base_url == "https://shell.example/v1"
+    assert config.model == "deepseek/shell"
+
+
+def test_blank_shell_env_allows_dotenv_fallback(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "   ")
+    monkeypatch.setenv("OPENROUTER_BASE_URL", "")
+    monkeypatch.setenv("OPENROUTER_MODEL", " ")
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "\n".join(
+            [
+                "OPENROUTER_API_KEY=dotenv-key",
+                "OPENROUTER_BASE_URL=https://dotenv.example/v1",
+                "OPENROUTER_MODEL=deepseek/dotenv",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = RuntimeConfig.from_env(dotenv_path=dotenv_path)
+
+    assert config.api_key == "dotenv-key"
+    assert config.base_url == "https://dotenv.example/v1"
+    assert config.model == "deepseek/dotenv"
+
+
+def test_default_from_env_does_not_read_dotenv_implicitly(monkeypatch, tmp_path: Path):
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text("OPENROUTER_API_KEY=dotenv-key\n", encoding="utf-8")
+
+    config = RuntimeConfig.from_env(dotenv_path=None)
+
+    assert config.api_key is None
+    with pytest.raises(ValueError, match="API key"):
+        RuntimeConfig.from_env(require_api_key=True, dotenv_path=None)

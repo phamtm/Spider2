@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
-from pydantic_ai import Agent
+from pydantic_ai import Agent, PromptedOutput
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -17,6 +19,8 @@ from sol01.config import RuntimeConfig
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 OutputT = TypeVar("OutputT", bound=BaseModel)
+TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
+MAX_MODEL_ATTEMPTS = 3
 
 
 @dataclass(frozen=True)
@@ -60,9 +64,9 @@ class LLMClient:
         agent = Agent(
             model=_resolve_model(model, config=self.config),
             system_prompt=prompt.text,
-            output_type=output_type,
+            output_type=_structured_output(output_type),
         )
-        result = agent.run_sync(user_prompt)
+        result = _run_agent_sync(agent, user_prompt)
         output = result.output
         if not isinstance(output, output_type):
             raise TypeError(f"Expected {output_type.__name__}, got {type(output).__name__}")
@@ -81,9 +85,9 @@ class LLMClient:
         agent = Agent(
             model=_resolve_model(model, config=self.config),
             system_prompt=prompt.text,
-            output_type=output_type,
+            output_type=_structured_output(output_type),
         )
-        result = agent.run_sync(user_prompt)
+        result = _run_agent_sync(agent, user_prompt)
         output = result.output
         if not isinstance(output, output_type):
             raise TypeError(f"Expected {output_type.__name__}, got {type(output).__name__}")
@@ -131,3 +135,21 @@ def _resolve_model(model: Model | str | None, *, config: RuntimeConfig) -> Model
     if isinstance(model, str):
         return build_model(config, model_name=model)
     return model
+
+
+def _structured_output(output_type: type[OutputT]) -> PromptedOutput[OutputT]:
+    """Use prompted JSON output so DeepSeek does not need tool calling support."""
+
+    return PromptedOutput(output_type)
+
+
+def _run_agent_sync(agent: Agent[Any, Any], user_prompt: str) -> Any:
+    """Retry transient provider errors a few times before failing the call."""
+
+    for attempt in range(1, MAX_MODEL_ATTEMPTS + 1):
+        try:
+            return agent.run_sync(user_prompt)
+        except ModelHTTPError as exc:
+            if exc.status_code not in TRANSIENT_STATUS_CODES or attempt >= MAX_MODEL_ATTEMPTS:
+                raise
+            time.sleep(2 ** (attempt - 1))

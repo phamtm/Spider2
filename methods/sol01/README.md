@@ -13,6 +13,10 @@ uv lock
 uv run python -c "import sol01"
 ```
 
+For local development, copy [`.env.example`](./.env.example) to `.env`.
+The `sol01` CLI loads `methods/sol01/.env` automatically, but real shell
+variables still win.
+
 ## Quality
 
 ```bash

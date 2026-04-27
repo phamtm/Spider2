@@ -12,7 +12,7 @@ from typing import Annotated, Any
 import typer
 
 from sol01.analysis import analyze_run
-from sol01.config import RuntimeConfig
+from sol01.config import DEFAULT_DOTENV_PATH, RuntimeConfig
 from sol01.coordinator import run_task, run_tasks
 from sol01.eval_runner import run_official_eval
 from sol01.index import CACHE_PATH, build_index_cache
@@ -193,7 +193,10 @@ def handle_run(
     if not tasks:
         raise typer.Exit(code=1)
 
-    config = RuntimeConfig.from_env(require_api_key=True)
+    config = RuntimeConfig.from_env(
+        require_api_key=True,
+        dotenv_path=DEFAULT_DOTENV_PATH,
+    )
     return run_tasks(
         tasks,
         run_id=run_id or _default_run_id("run"),
@@ -254,7 +257,10 @@ def handle_analyze(*, run_id: str) -> dict[str, Any]:
 def handle_ask(*, db: str, question: str) -> FinalAnswer:
     """Wrap one ad hoc question in a synthetic task and keep the ask layout stable."""
 
-    config = RuntimeConfig.from_env(require_api_key=True)
+    config = RuntimeConfig.from_env(
+        require_api_key=True,
+        dotenv_path=DEFAULT_DOTENV_PATH,
+    )
     ask_paths = ensure_ask_paths(outputs_root=OUTPUTS_ROOT)
     run_paths = ensure_run_paths("_internal", outputs_root=ask_paths.root)
     task = Task(instance_id="ask", db=db, question=question)

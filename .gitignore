@@ -32,6 +32,7 @@ methods/spider-agent-snow/examples/*
 methods/sol01/outputs/
 methods/sol01/.cache/
 methods/sol01/.venv/
+methods/sol01/.env
 methods/sol01/.pytest_cache/
 methods/sol01/.coverage
 methods/sol01/htmlcov/

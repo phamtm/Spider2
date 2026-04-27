@@ -70,6 +70,47 @@ def test_run_command_dispatches_expected_filters(monkeypatch):
     }
 
 
+def test_handle_run_passes_default_dotenv_path(monkeypatch):
+    """The run handler should opt into the method-local dotenv file."""
+
+    called: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        cli,
+        "_load_filtered_tasks",
+        lambda **kwargs: [Task(instance_id="local003", db="db", question="q")],
+    )
+
+    def fake_from_env(cls, require_api_key=False, dotenv_path=None):
+        called["require_api_key"] = require_api_key
+        called["dotenv_path"] = dotenv_path
+        return object()
+
+    def fake_run_tasks(tasks, *, run_id, config, force, skip_failed):
+        called["task_ids"] = [task.instance_id for task in tasks]
+        called["run_id"] = run_id
+        return []
+
+    monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
+    monkeypatch.setattr(cli, "run_tasks", fake_run_tasks)
+
+    cli.handle_run(
+        run_id="smoke-local003",
+        instance_id="local003",
+        db=None,
+        question_contains=None,
+        limit=None,
+        local_only=True,
+        force=False,
+        skip_failed=False,
+    )
+
+    assert called["require_api_key"] is True
+    assert called["dotenv_path"] == cli.DEFAULT_DOTENV_PATH
+    assert called["task_ids"] == ["local003"]
+    assert called["run_id"] == "smoke-local003"
+
+
 def test_eval_command_dispatches_filters(monkeypatch):
     """The eval command should pass through its debug filters."""
 
@@ -262,12 +303,14 @@ def test_handle_ask_uses_ask_layout(monkeypatch, tmp_path: Path):
         trace_path=tmp_path / "ask" / "20260427T120000.000000Z" / "trace.json",
     )
     ask_paths.root.mkdir(parents=True, exist_ok=True)
+    called: dict[str, Any] = {}
 
-    monkeypatch.setattr(
-        cli.RuntimeConfig,
-        "from_env",
-        classmethod(lambda cls, require_api_key=False: object()),
-    )
+    def fake_from_env(cls, require_api_key=False, dotenv_path=None):
+        called["require_api_key"] = require_api_key
+        called["dotenv_path"] = dotenv_path
+        return object()
+
+    monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
     monkeypatch.setattr(cli, "ensure_ask_paths", lambda outputs_root: ask_paths)
 
     def fake_run_task(task: Task, *, run_paths, config, force: bool):
@@ -289,6 +332,8 @@ def test_handle_ask_uses_ask_layout(monkeypatch, tmp_path: Path):
 
     answer = cli.handle_ask(db="E_commerce", question="Which customers have the highest AOV?")
 
+    assert called["require_api_key"] is True
+    assert called["dotenv_path"] == cli.DEFAULT_DOTENV_PATH
     assert answer.status == "success"
     assert answer.csv_path == str(ask_paths.csv_path)
     assert answer.trace_path == str(ask_paths.trace_path)
@@ -307,12 +352,14 @@ def test_handle_ask_cleans_up_internal_dir_on_failure(monkeypatch, tmp_path: Pat
         trace_path=tmp_path / "ask" / "20260427T120000.000000Z" / "trace.json",
     )
     ask_paths.root.mkdir(parents=True, exist_ok=True)
+    called: dict[str, Any] = {}
 
-    monkeypatch.setattr(
-        cli.RuntimeConfig,
-        "from_env",
-        classmethod(lambda cls, require_api_key=False: object()),
-    )
+    def fake_from_env(cls, require_api_key=False, dotenv_path=None):
+        called["require_api_key"] = require_api_key
+        called["dotenv_path"] = dotenv_path
+        return object()
+
+    monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
     monkeypatch.setattr(cli, "ensure_ask_paths", lambda outputs_root: ask_paths)
 
     def failing_run_task(task: Task, *, run_paths, config, force: bool):
@@ -328,4 +375,6 @@ def test_handle_ask_cleans_up_internal_dir_on_failure(monkeypatch, tmp_path: Pat
     else:
         raise AssertionError("Expected RuntimeError")
 
+    assert called["require_api_key"] is True
+    assert called["dotenv_path"] == cli.DEFAULT_DOTENV_PATH
     assert not (ask_paths.root / "_internal").exists()

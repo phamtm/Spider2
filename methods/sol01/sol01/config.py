@@ -1,13 +1,17 @@
 """Runtime settings for the sol01 command line tools and LLM calls."""
 
 import os
+from pathlib import Path
 from typing import Any
 
+from dotenv import dotenv_values
 from pydantic import BaseModel, Field, model_validator
 
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "deepseek/deepseek-v4-pro"
 DEFAULT_PROVIDER_ONLY = "deepseek"
+METHOD_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DOTENV_PATH = METHOD_ROOT / ".env"
 
 
 class RuntimeConfig(BaseModel):
@@ -22,8 +26,15 @@ class RuntimeConfig(BaseModel):
     max_schema_tables: int = Field(default=12, ge=1)
 
     @classmethod
-    def from_env(cls, *, require_api_key: bool = False) -> "RuntimeConfig":
-        """Load OpenRouter settings, with generic LLM_* names as fallbacks."""
+    def from_env(
+        cls,
+        *,
+        require_api_key: bool = False,
+        dotenv_path: Path | None = None,
+    ) -> "RuntimeConfig":
+        """Load settings from the shell, with optional local .env support."""
+
+        _load_local_dotenv(dotenv_path)
 
         config = cls(
             api_key=_env_first("OPENROUTER_API_KEY", "LLM_API_KEY"),
@@ -66,6 +77,19 @@ def _env_first(*names: str) -> str | None:
         if value and value.strip():
             return value.strip()
     return None
+
+
+def _load_local_dotenv(dotenv_path: Path | None) -> None:
+    """Load one local .env file without overwriting real non-empty shell variables."""
+
+    if dotenv_path is None or not dotenv_path.exists():
+        return
+    for name, value in dotenv_values(dotenv_path).items():
+        if value is None:
+            continue
+        current = os.environ.get(name)
+        if current is None or not current.strip():
+            os.environ[name] = value
 
 
 def _env_bool(name: str, *, default: bool) -> bool:
