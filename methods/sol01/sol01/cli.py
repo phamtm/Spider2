@@ -16,6 +16,7 @@ from sol01.config import DEFAULT_DOTENV_PATH, RuntimeConfig
 from sol01.coordinator import run_task, run_tasks
 from sol01.eval_runner import run_official_eval
 from sol01.index import CACHE_PATH, build_index_cache
+from sol01.logging import configure_logging, get_logger
 from sol01.models import FinalAnswer, Task
 from sol01.output import OUTPUTS_ROOT, ensure_ask_paths, ensure_run_paths
 from sol01.tasks import load_tasks
@@ -24,14 +25,17 @@ app = typer.Typer(
     help="SQLite-local Spider2-Lite solver.",
     no_args_is_help=True,
 )
+logger = get_logger(__name__)
 
 
 @app.command()
 def index() -> None:
     """Build the local schema index cache."""
 
+    logger.info("index start")
     payload = handle_index()
     typer.echo(f"Indexed {len(payload)} databases into {CACHE_PATH}")
+    logger.info("index complete", database_count=len(payload), cache_path=str(CACHE_PATH))
 
 
 @app.command()
@@ -71,6 +75,17 @@ def run(
 ) -> None:
     """Run the solver over the selected local tasks."""
 
+    logger.info(
+        "run command",
+        run_id=run_id,
+        instance_id=instance_id,
+        db=db,
+        question_contains=question_contains,
+        limit=limit,
+        local_only=local_only,
+        force=force,
+        skip_failed=skip_failed,
+    )
     results = handle_run(
         run_id=run_id,
         instance_id=instance_id,
@@ -82,6 +97,7 @@ def run(
         skip_failed=skip_failed,
     )
     typer.echo(f"Completed {len(results)} task(s).")
+    logger.info("run complete", task_count=len(results))
 
 
 @app.command("eval")
@@ -109,6 +125,14 @@ def eval_command(
 ) -> None:
     """Run the official evaluator over one saved run."""
 
+    logger.info(
+        "eval command",
+        run_id=run_id,
+        instance_id=instance_id,
+        db=db,
+        question_contains=question_contains,
+        limit=limit,
+    )
     summary = handle_eval(
         run_id=run_id,
         instance_id=instance_id,
@@ -121,6 +145,13 @@ def eval_command(
         f"{summary['correct_local_tasks']}/{summary['attempted_local_tasks']} correct, "
         f"missing CSV {summary['missing_csv_count']}"
     )
+    logger.info(
+        "eval complete",
+        run_id=run_id,
+        correct_local_tasks=summary["correct_local_tasks"],
+        attempted_local_tasks=summary["attempted_local_tasks"],
+        missing_csv_count=summary["missing_csv_count"],
+    )
 
 
 @app.command()
@@ -132,11 +163,18 @@ def analyze(
 ) -> None:
     """Summarize one run's failures and result buckets."""
 
+    logger.info("analysis command", run_id=run_id)
     report = handle_analyze(run_id=run_id)
     typer.echo(
         "Analysis summary: "
         f"{report['trace_count']} traces, "
         f"{report['status_counts']['failed']} failed"
+    )
+    logger.info(
+        "analysis complete",
+        run_id=run_id,
+        trace_count=report["trace_count"],
+        failed_count=report["status_counts"]["failed"],
     )
 
 
@@ -153,15 +191,29 @@ def ask(
 ) -> None:
     """Run one ad hoc question against one local SQLite database."""
 
+    logger.info("ask command", db=db)
     answer = handle_ask(db=db, question=question)
     typer.echo(f"Ask status: {answer.status}")
     if answer.csv_path:
         typer.echo(f"CSV: {answer.csv_path}")
+    logger.info("ask complete", status=answer.status, csv_path=answer.csv_path)
 
 
 @app.callback()
-def main() -> None:
+def main(
+    log_level: Annotated[
+        str,
+        typer.Option(
+            "--log-level",
+            envvar="SOL01_LOG_LEVEL",
+            help="Logging level for structured console output.",
+        ),
+    ] = "INFO",
+) -> None:
     """Keep the root command focused on subcommands."""
+
+    configure_logging(log_level)
+    logger.info("logging configured", log_level=log_level)
 
 
 def handle_index() -> dict[str, Any]:
@@ -184,6 +236,14 @@ def handle_run(
     """Load local tasks, then pass them to the batch coordinator."""
 
     _require_local_only(local_only)
+    logger.info(
+        "loading tasks",
+        run_id=run_id,
+        instance_id=instance_id,
+        db=db,
+        question_contains=question_contains,
+        limit=limit,
+    )
     tasks = _load_filtered_tasks(
         instance_id=instance_id,
         db=db,
@@ -191,15 +251,24 @@ def handle_run(
         limit=limit,
     )
     if not tasks:
+        logger.warning("no tasks matched the filters")
         raise typer.Exit(code=1)
 
     config = RuntimeConfig.from_env(
         require_api_key=True,
         dotenv_path=DEFAULT_DOTENV_PATH,
     )
+    effective_run_id = run_id or _default_run_id("run")
+    config_summary = _runtime_config_summary(config)
+    logger.info(
+        "starting batch run",
+        run_id=effective_run_id,
+        task_count=len(tasks),
+        **config_summary,
+    )
     return run_tasks(
         tasks,
-        run_id=run_id or _default_run_id("run"),
+        run_id=effective_run_id,
         config=config,
         force=force,
         skip_failed=skip_failed,
@@ -217,6 +286,14 @@ def handle_eval(
     """Optionally narrow the manifest task IDs, then run official eval."""
 
     if any(value is not None for value in (instance_id, db, question_contains, limit)):
+        logger.info(
+            "running filtered eval",
+            run_id=run_id,
+            instance_id=instance_id,
+            db=db,
+            question_contains=question_contains,
+            limit=limit,
+        )
         task_ids = [
             task.instance_id
             for task in _load_filtered_tasks(
@@ -265,6 +342,13 @@ def handle_ask(*, db: str, question: str) -> FinalAnswer:
     run_paths = ensure_run_paths("_internal", outputs_root=ask_paths.root)
     task = Task(instance_id="ask", db=db, question=question)
     try:
+        logger.info(
+            "running ask task",
+            db=db,
+            ask_root=str(ask_paths.root),
+            csv_path=str(ask_paths.csv_path),
+            trace_path=str(ask_paths.trace_path),
+        )
         answer = run_task(
             task,
             run_paths=run_paths,
@@ -284,6 +368,7 @@ def handle_ask(*, db: str, question: str) -> FinalAnswer:
         )
     finally:
         rmtree(run_paths.root, ignore_errors=True)
+        logger.info("ask cleanup complete", ask_root=str(ask_paths.root))
 
 
 def _require_local_only(local_only: bool) -> None:
@@ -315,6 +400,16 @@ def _default_run_id(prefix: str) -> str:
 
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     return f"{prefix}-{stamp}"
+
+
+def _runtime_config_summary(config: Any) -> dict[str, Any]:
+    """Extract log-safe runtime config fields without assuming the full type."""
+
+    return {
+        "model": getattr(config, "model", None),
+        "base_url": getattr(config, "base_url", None),
+        "concurrency": getattr(config, "concurrency", None),
+    }
 
 
 def _filtered_eval_tag(

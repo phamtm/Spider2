@@ -8,6 +8,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from sol01.index import CACHE_PATH, build_index_cache
+from sol01.logging import get_logger
 from sol01.models import SchemaSelection, TableSchema
 
 TOKEN_RE = re.compile(r"[a-z0-9_]+")
@@ -44,6 +45,7 @@ STOPWORDS = {
     "who",
     "with",
 }
+logger = get_logger(__name__)
 
 
 def retrieve_schema(
@@ -69,6 +71,13 @@ def retrieve_schema(
         db_index,
         ranked_tables,
         max_expanded_tables=max_expanded_tables,
+    )
+    logger.info(
+        "schema retrieval complete",
+        db=db,
+        selected_tables=selected_tables,
+        expanded_tables=expanded_tables,
+        confidence=_confidence(ranked_tables, selected_tables),
     )
 
     return SchemaSelection(

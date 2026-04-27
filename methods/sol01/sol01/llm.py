@@ -16,11 +16,13 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from sol01.config import RuntimeConfig
+from sol01.logging import get_logger
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 OutputT = TypeVar("OutputT", bound=BaseModel)
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 MAX_MODEL_ATTEMPTS = 3
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -44,11 +46,13 @@ class LLMClient:
 
         prompt_path = _prompt_path(prompt_name, prompts_dir=self.prompts_dir)
         text = prompt_path.read_text(encoding="utf-8")
-        return PromptSpec(
+        prompt = PromptSpec(
             name=prompt_name,
             text=text,
             sha256=prompt_sha256(text),
         )
+        logger.debug("prompt loaded", prompt_name=prompt_name, prompt_hash=prompt.sha256)
+        return prompt
 
     def run_structured(
         self,
@@ -66,10 +70,18 @@ class LLMClient:
             system_prompt=prompt.text,
             output_type=_structured_output(output_type),
         )
-        result = _run_agent_sync(agent, user_prompt)
+        logger.debug(
+            "llm request start",
+            prompt_name=prompt_name,
+            output_type=output_type.__name__,
+        )
+        result = _run_agent_sync(agent, user_prompt, prompt_name=prompt_name)
         output = result.output
         if not isinstance(output, output_type):
             raise TypeError(f"Expected {output_type.__name__}, got {type(output).__name__}")
+        logger.debug(
+            "llm request complete", prompt_name=prompt_name, output_type=output_type.__name__
+        )
         return output
 
     def run_structured_with_prompt(
@@ -87,10 +99,20 @@ class LLMClient:
             system_prompt=prompt.text,
             output_type=_structured_output(output_type),
         )
-        result = _run_agent_sync(agent, user_prompt)
+        logger.debug(
+            "llm request start",
+            prompt_name=prompt.name,
+            output_type=output_type.__name__,
+        )
+        result = _run_agent_sync(agent, user_prompt, prompt_name=prompt.name)
         output = result.output
         if not isinstance(output, output_type):
             raise TypeError(f"Expected {output_type.__name__}, got {type(output).__name__}")
+        logger.debug(
+            "llm request complete",
+            prompt_name=prompt.name,
+            output_type=output_type.__name__,
+        )
         return output
 
 
@@ -143,13 +165,19 @@ def _structured_output(output_type: type[OutputT]) -> PromptedOutput[OutputT]:
     return PromptedOutput(output_type)
 
 
-def _run_agent_sync(agent: Agent[Any, Any], user_prompt: str) -> Any:
+def _run_agent_sync(agent: Agent[Any, Any], user_prompt: str, *, prompt_name: str) -> Any:
     """Retry transient provider errors a few times before failing the call."""
 
     for attempt in range(1, MAX_MODEL_ATTEMPTS + 1):
         try:
             return agent.run_sync(user_prompt)
         except ModelHTTPError as exc:
+            logger.warning(
+                "llm retry",
+                prompt_name=prompt_name,
+                attempt=attempt,
+                status_code=exc.status_code,
+            )
             if exc.status_code not in TRANSIENT_STATUS_CODES or attempt >= MAX_MODEL_ATTEMPTS:
                 raise
             time.sleep(2 ** (attempt - 1))

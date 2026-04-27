@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from sol01.logging import get_logger
 from sol01.output import RunPaths, ensure_run_paths
 from sol01.tasks import REPO_ROOT
 
@@ -20,6 +21,7 @@ FAILURE_CATEGORIES = (
     "aggregation_issue",
     "date_filter_issue",
 )
+logger = get_logger(__name__)
 
 
 def analyze_run(
@@ -30,6 +32,7 @@ def analyze_run(
     """Read one run's artifacts and write stable analysis outputs."""
 
     run_paths = ensure_run_paths(run_id, outputs_root=outputs_root)
+    logger.info("analysis start", run_id=run_id, outputs_root=str(outputs_root))
     traces = _load_traces(run_paths)
     eval_summary = _load_optional_json(run_paths.eval_dir / "summary.json")
     trace_index = {trace["instance_id"]: trace for trace in traces}
@@ -62,6 +65,13 @@ def analyze_run(
 
     summary_path = run_paths.analysis_dir / "summary.md"
     summary_path.write_text(_render_summary(report), encoding="utf-8")
+    logger.info(
+        "analysis complete",
+        run_id=run_id,
+        trace_count=len(traces),
+        summary_path=str(summary_path),
+        failures_path=str(failures_path),
+    )
     return report
 
 

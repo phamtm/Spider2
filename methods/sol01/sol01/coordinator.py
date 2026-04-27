@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Protocol
 
 from sol01.config import RuntimeConfig
 from sol01.docs import get_metric_definition
 from sol01.llm import LLMClient
+from sol01.logging import get_logger
 from sol01.models import (
     ConfidenceReport,
     ExecutionResult,
@@ -33,6 +35,8 @@ from sol01.profiling import profile_dataframe
 from sol01.retrieval import retrieve_schema
 from sol01.sqlite_runner import _dataframe_records, fetch_query_dataframe
 from sol01.validation import validate_sql
+
+logger = get_logger(__name__)
 
 
 class StructuredLLM(Protocol):
@@ -83,9 +87,19 @@ def run_tasks(
             },
         },
     )
+    logger.info(
+        "run start",
+        run_id=run_id,
+        task_count=len(tasks),
+        model=getattr(config, "model", None),
+        provider_routing=getattr(config, "provider_routing", None),
+        concurrency=getattr(config, "concurrency", None),
+        force=force,
+        skip_failed=skip_failed,
+    )
 
     client = llm_client or LLMClient(config)
-    return [
+    results = [
         run_task(
             task,
             run_paths=run_paths,
@@ -96,6 +110,14 @@ def run_tasks(
         )
         for task in tasks
     ]
+    logger.info(
+        "run complete",
+        run_id=run_id,
+        success_count=sum(1 for result in results if result.status == "success"),
+        failed_count=sum(1 for result in results if result.status == "failed"),
+        skipped_count=sum(1 for result in results if result.status == "skipped"),
+    )
+    return results
 
 
 def run_task(
@@ -113,6 +135,7 @@ def run_task(
 ) -> FinalAnswer:
     """Run one task from retrieval through final trace writing."""
 
+    started_at = perf_counter()
     client = llm_client or LLMClient(config)
     task_trace_path = trace_path_for(run_paths, instance_id=task.instance_id)
 
@@ -120,6 +143,14 @@ def run_task(
         run_paths, instance_id=task.instance_id, skip_failed=skip_failed
     ):
         existing_trace = json.loads(task_trace_path.read_text(encoding="utf-8"))
+        logger.info(
+            "task skipped",
+            instance_id=task.instance_id,
+            db=task.db,
+            run_root=str(run_paths.root),
+            trace_path=str(task_trace_path),
+            csv_path=existing_trace.get("csv_path"),
+        )
         return FinalAnswer(
             instance_id=task.instance_id,
             status="skipped",
@@ -133,11 +164,25 @@ def run_task(
     metric_definitions: list[MetricDefinition] = []
     critic_repairs_used = 0
 
+    logger.info(
+        "task start",
+        instance_id=task.instance_id,
+        db=task.db,
+        question=task.question,
+        run_root=str(run_paths.root),
+    )
     schema = retrieve_schema(
         task.question,
         task.db,
         max_tables=min(4, config.max_schema_tables),
         max_expanded_tables=config.max_schema_tables,
+    )
+    logger.info(
+        "schema selected",
+        instance_id=task.instance_id,
+        selected_tables=schema.selected_tables,
+        expanded_tables=schema.expanded_tables,
+        confidence=schema.confidence,
     )
     intent = _run_prompt(
         client,
@@ -145,6 +190,13 @@ def run_task(
         prompt_name="intent",
         output_type=Intent,
         user_prompt=_intent_user_prompt(task, schema),
+    )
+    logger.info(
+        "intent extracted",
+        instance_id=task.instance_id,
+        metrics=intent.metrics,
+        filters=intent.filters,
+        time_constraints=intent.time_constraints,
     )
 
     for metric_name in intent.metrics:
@@ -155,9 +207,22 @@ def run_task(
     schema_context = _schema_context(schema)
     docs_context = _docs_context(metric_definitions)
 
+    logger.info(
+        "generating candidates",
+        instance_id=task.instance_id,
+        initial_candidates=initial_candidates,
+        max_attempts=max_attempts,
+    )
     for candidate_index in range(initial_candidates):
         if len(attempts) >= max_attempts:
             break
+        stage = f"initial_{candidate_index + 1}"
+        logger.info(
+            "candidate request",
+            instance_id=task.instance_id,
+            stage=stage,
+            prompt_name="sql_generation",
+        )
         candidate = _run_prompt(
             client,
             prompt_hashes=prompt_hashes,
@@ -165,14 +230,21 @@ def run_task(
             output_type=SQLCandidate,
             user_prompt=_sql_generation_prompt(task, intent, schema_context, docs_context),
         )
-        attempts.append(
-            _evaluate_candidate(
-                task=task,
-                candidate=candidate,
-                schema=schema,
-                db_path=db_path,
-                stage=f"initial_{candidate_index + 1}",
-            )
+        attempt = _evaluate_candidate(
+            task=task,
+            candidate=candidate,
+            schema=schema,
+            db_path=db_path,
+            stage=stage,
+        )
+        attempts.append(attempt)
+        logger.info(
+            "candidate evaluated",
+            instance_id=task.instance_id,
+            stage=stage,
+            validation_ok=attempt["validation"]["ok"],
+            execution_ok=attempt["execution_result"]["ok"],
+            score=attempt["score"],
         )
 
     best_attempt = _best_attempt(attempts)
@@ -182,6 +254,12 @@ def run_task(
         and not best_attempt["execution_result"]["ok"]
         and len(attempts) < max_attempts
     ):
+        logger.info(
+            "repair requested",
+            instance_id=task.instance_id,
+            stage="repair",
+            best_stage=best_attempt["stage"],
+        )
         repaired_candidate = _run_prompt(
             client,
             prompt_hashes=prompt_hashes,
@@ -189,14 +267,21 @@ def run_task(
             output_type=SQLCandidate,
             user_prompt=_sql_repair_prompt(task, best_attempt),
         )
-        attempts.append(
-            _evaluate_candidate(
-                task=task,
-                candidate=repaired_candidate,
-                schema=schema,
-                db_path=db_path,
-                stage="repair",
-            )
+        attempt = _evaluate_candidate(
+            task=task,
+            candidate=repaired_candidate,
+            schema=schema,
+            db_path=db_path,
+            stage="repair",
+        )
+        attempts.append(attempt)
+        logger.info(
+            "candidate evaluated",
+            instance_id=task.instance_id,
+            stage="repair",
+            validation_ok=attempt["validation"]["ok"],
+            execution_ok=attempt["execution_result"]["ok"],
+            score=attempt["score"],
         )
         best_attempt = _best_attempt(attempts)
 
@@ -206,6 +291,12 @@ def run_task(
         and critic_repairs_used < semantic_repairs
         and len(attempts) < max_attempts
     ):
+        logger.info(
+            "critic requested",
+            instance_id=task.instance_id,
+            stage="critic",
+            best_stage=best_attempt["stage"],
+        )
         critic = _run_prompt(
             client,
             prompt_hashes=prompt_hashes,
@@ -214,8 +305,21 @@ def run_task(
             user_prompt=_critic_prompt(task, best_attempt, schema_context),
         )
         best_attempt["critic"] = critic.model_dump(mode="json")
+        logger.info(
+            "critic reviewed",
+            instance_id=task.instance_id,
+            should_repair=critic.should_repair,
+            confidence=critic.confidence,
+            issues=critic.issues,
+        )
         if critic.should_repair:
             critic_repairs_used += 1
+            logger.info(
+                "semantic repair requested",
+                instance_id=task.instance_id,
+                stage="critic_repair",
+                focus=critic.repair_focus,
+            )
             repaired_candidate = _run_prompt(
                 client,
                 prompt_hashes=prompt_hashes,
@@ -223,14 +327,21 @@ def run_task(
                 output_type=SQLCandidate,
                 user_prompt=_semantic_repair_prompt(task, best_attempt, critic),
             )
-            attempts.append(
-                _evaluate_candidate(
-                    task=task,
-                    candidate=repaired_candidate,
-                    schema=schema,
-                    db_path=db_path,
-                    stage="critic_repair",
-                )
+            attempt = _evaluate_candidate(
+                task=task,
+                candidate=repaired_candidate,
+                schema=schema,
+                db_path=db_path,
+                stage="critic_repair",
+            )
+            attempts.append(attempt)
+            logger.info(
+                "candidate evaluated",
+                instance_id=task.instance_id,
+                stage="critic_repair",
+                validation_ok=attempt["validation"]["ok"],
+                execution_ok=attempt["execution_result"]["ok"],
+                score=attempt["score"],
             )
             best_attempt = _best_attempt(attempts)
 
@@ -270,6 +381,17 @@ def run_task(
         )
         trace_payload["attempts"] = [_trace_attempt(attempt) for attempt in attempts]
         write_trace(run_paths, instance_id=task.instance_id, trace=trace_payload)
+        elapsed_seconds = round(perf_counter() - started_at, 3)
+        logger.info(
+            "task success",
+            instance_id=task.instance_id,
+            run_root=str(run_paths.root),
+            row_count=len(best_dataframe),
+            columns=[str(column) for column in best_dataframe.columns],
+            elapsed_seconds=elapsed_seconds,
+            sql_path=str(sql_path),
+            csv_path=str(csv_path),
+        )
         return FinalAnswer(
             instance_id=task.instance_id,
             status="success",
@@ -287,6 +409,15 @@ def run_task(
     )
     trace_payload["attempts"] = [_trace_attempt(attempt) for attempt in attempts]
     write_trace(run_paths, instance_id=task.instance_id, trace=trace_payload)
+    elapsed_seconds = round(perf_counter() - started_at, 3)
+    logger.warning(
+        "task failed",
+        instance_id=task.instance_id,
+        run_root=str(run_paths.root),
+        attempts=len(attempts),
+        best_stage=best_attempt["stage"] if best_attempt is not None else None,
+        elapsed_seconds=elapsed_seconds,
+    )
     return FinalAnswer(
         instance_id=task.instance_id,
         status="failed",
@@ -358,6 +489,14 @@ def _evaluate_candidate(
             error="Validation failed before execution.",
         )
 
+    logger.debug(
+        "candidate processed",
+        stage=stage,
+        validation_ok=validation.ok,
+        execution_ok=execution.ok,
+        row_count=execution.row_count,
+        error=execution.error,
+    )
     attempt: dict[str, Any] = {
         "stage": stage,
         "sql": candidate.sql,

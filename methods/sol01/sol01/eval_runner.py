@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from sol01.logging import get_logger
 from sol01.output import RunPaths, ensure_run_paths
 from sol01.tasks import REPO_ROOT, load_tasks
 
@@ -24,6 +25,7 @@ REAL_SCORE_RE = re.compile(
     r"Real score:\s*([0-9.]+),\s*Correct examples:\s*(\d+),\s*Total examples:\s*(\d+)"
 )
 Runner = Any
+logger = get_logger(__name__)
 
 
 def run_official_eval(
@@ -41,6 +43,13 @@ def run_official_eval(
     run_paths = ensure_run_paths(
         run_id,
         outputs_root=outputs_root or REPO_ROOT / "methods" / "sol01" / "outputs",
+    )
+    logger.info(
+        "evaluation start",
+        run_id=run_id,
+        result_dir=str(result_dir or run_paths.csv_dir),
+        expected_instance_count=len(expected_instance_ids) if expected_instance_ids else None,
+        artifact_tag=artifact_tag,
     )
     command = build_eval_command(
         run_paths,
@@ -73,6 +82,17 @@ def run_official_eval(
 
     summary_path = run_paths.eval_dir / f"summary{suffix}.json"
     summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    logger.info(
+        "evaluation complete",
+        run_id=run_id,
+        returncode=completed.returncode,
+        stdout_path=str(stdout_path),
+        stderr_path=str(stderr_path),
+        summary_path=str(summary_path),
+        missing_csv_count=summary["missing_csv_count"],
+        correct_local_tasks=summary["correct_local_tasks"],
+        attempted_local_tasks=summary["attempted_local_tasks"],
+    )
     if completed.returncode != 0:
         raise subprocess.CalledProcessError(
             returncode=completed.returncode,

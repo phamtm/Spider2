@@ -7,11 +7,13 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
+from sol01.logging import get_logger
 from sol01.models import ColumnSchema, TableSchema
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SQLITE_METADATA_ROOT = REPO_ROOT / "spider2-lite" / "resource" / "databases" / "sqlite"
 CACHE_PATH = (REPO_ROOT / "methods" / "sol01" / ".cache" / "index.json").resolve()
+logger = get_logger(__name__)
 
 
 def build_db_index(
@@ -20,6 +22,7 @@ def build_db_index(
     """Build table metadata for one SQLite database."""
 
     db_dir = metadata_root / db
+    logger.info("db index start", db=db, metadata_root=str(metadata_root))
     ddl_by_table = _read_ddl_map(db_dir / "DDL.csv")
     index: dict[str, TableSchema] = {}
 
@@ -33,6 +36,7 @@ def build_db_index(
             searchable_text=_build_searchable_text(table_name, metadata),
         )
 
+    logger.info("db index complete", db=db, table_count=len(index))
     return index
 
 
@@ -43,6 +47,7 @@ def build_index_cache(
 ) -> dict[str, dict[str, TableSchema]]:
     """Build and persist the full SQLite metadata cache used by later retrieval."""
 
+    logger.info("index cache start", metadata_root=str(metadata_root), cache_path=str(cache_path))
     payload = {
         db_dir.name: build_db_index(db_dir.name, metadata_root=metadata_root)
         for db_dir in sorted(path for path in metadata_root.iterdir() if path.is_dir())
@@ -61,6 +66,7 @@ def build_index_cache(
         + "\n",
         encoding="utf-8",
     )
+    logger.info("index cache complete", database_count=len(payload), cache_path=str(cache_path))
     return payload
 
 

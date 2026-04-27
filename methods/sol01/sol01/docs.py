@@ -8,12 +8,14 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from sol01.logging import get_logger
 from sol01.models import MetricDefinition, Task
 from sol01.tasks import REPO_ROOT, SPIDER2_LITE_PATH
 
 DOCUMENTS_ROOT = REPO_ROOT / "spider2-lite" / "resource" / "documents"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 NON_ALNUM_RE = re.compile(r"[^a-z0-9]+")
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -122,6 +124,13 @@ def get_metric_definition(
     )
     best_score, best_chunk = scored_chunks[0]
     section_text = _section_text(best_chunk)
+    logger.debug(
+        "metric definition selected",
+        metric_name=metric_name,
+        source_file=best_chunk.source_file,
+        heading=best_chunk.heading,
+        confidence=min(1.0, best_score / 20.0),
+    )
 
     return MetricDefinition(
         metric_name=metric_name,

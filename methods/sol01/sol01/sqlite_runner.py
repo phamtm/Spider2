@@ -7,10 +7,12 @@ from pathlib import Path
 
 import pandas as pd
 
+from sol01.logging import get_logger
 from sol01.models import ExecutionResult
 from sol01.tasks import REPO_ROOT
 
 SQLITE_DB_ROOT = REPO_ROOT / "spider2-lite" / "resource" / "databases" / "spider2-localdb"
+logger = get_logger(__name__)
 
 
 def resolve_sqlite_path(db: str, *, db_root: Path = SQLITE_DB_ROOT) -> Path:
@@ -18,6 +20,7 @@ def resolve_sqlite_path(db: str, *, db_root: Path = SQLITE_DB_ROOT) -> Path:
 
     exact_path = db_root / f"{db}.sqlite"
     if exact_path.exists():
+        logger.debug("sqlite path resolved", db=db, path=str(exact_path), matched="exact")
         return exact_path
 
     normalized_name = _normalize_db_name(db)
@@ -27,6 +30,7 @@ def resolve_sqlite_path(db: str, *, db_root: Path = SQLITE_DB_ROOT) -> Path:
         if not path.name.startswith("._") and _normalize_db_name(path.stem) == normalized_name
     ]
     if len(matches) == 1:
+        logger.debug("sqlite path resolved", db=db, path=str(matches[0]), matched="normalized")
         return matches[0]
     if not matches:
         raise FileNotFoundError(f"Could not find a SQLite file for database '{db}'.")
@@ -78,6 +82,12 @@ def execute_sql(
     try:
         dataframe = fetch_query_dataframe(sql, db=db, db_path=db_path)
     except Exception as exc:
+        logger.warning(
+            "sql execution failed",
+            db=db,
+            db_path=str(db_path) if db_path is not None else None,
+            error=str(exc),
+        )
         return ExecutionResult(
             ok=False,
             row_count=0,
@@ -91,6 +101,14 @@ def execute_sql(
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         dataframe.to_csv(csv_path, index=False)
 
+    logger.info(
+        "sql executed",
+        db=db,
+        db_path=str(db_path) if db_path is not None else None,
+        row_count=len(dataframe),
+        columns=[str(column) for column in dataframe.columns],
+        csv_path=str(csv_path) if csv_path is not None else None,
+    )
     return ExecutionResult(
         ok=True,
         row_count=len(dataframe),

@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from sol01.logging import get_logger
 from sol01.models import Task
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SPIDER2_LITE_PATH = REPO_ROOT / "spider2-lite" / "spider2-lite.jsonl"
+logger = get_logger(__name__)
 
 
 def load_tasks(
@@ -38,6 +40,15 @@ def load_tasks(
             raise ValueError("limit must be non-negative")
         tasks = tasks[:limit]
 
+    logger.info(
+        "tasks loaded",
+        dataset_path=str(dataset_path),
+        task_count=len(tasks),
+        instance_id=instance_id,
+        db=db,
+        question_contains=question_contains,
+        limit=limit,
+    )
     return tasks
 
 
