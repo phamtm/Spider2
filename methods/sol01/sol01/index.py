@@ -9,13 +9,14 @@ from pathlib import Path
 
 from sol01.models import ColumnSchema, TableSchema
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SQLITE_METADATA_ROOT = REPO_ROOT / "spider2-lite" / "resource" / "databases" / "sqlite"
 CACHE_PATH = (REPO_ROOT / "methods" / "sol01" / ".cache" / "index.json").resolve()
 
 
-def build_db_index(db: str, *, metadata_root: Path = SQLITE_METADATA_ROOT) -> dict[str, TableSchema]:
+def build_db_index(
+    db: str, *, metadata_root: Path = SQLITE_METADATA_ROOT
+) -> dict[str, TableSchema]:
     """Build table metadata for one SQLite database."""
 
     db_dir = metadata_root / db

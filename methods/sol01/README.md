@@ -13,6 +13,22 @@ uv lock
 uv run python -c "import sol01"
 ```
 
+## Quality
+
+```bash
+uv run --group dev ruff format .
+uv run --group dev ruff check .
+```
+
+With `just`:
+
+```bash
+just fmt
+just lint
+just test
+just check
+```
+
 ## Planned CLI
 
 ```bash

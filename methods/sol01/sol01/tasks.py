@@ -7,7 +7,6 @@ from pathlib import Path
 
 from sol01.models import Task
 
-
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SPIDER2_LITE_PATH = REPO_ROOT / "spider2-lite" / "spider2-lite.jsonl"
 

@@ -5,7 +5,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "deepseek/deepseek-v4-pro"
 DEFAULT_PROVIDER_ONLY = "deepseek"
@@ -28,11 +27,9 @@ class RuntimeConfig(BaseModel):
 
         config = cls(
             api_key=_env_first("OPENROUTER_API_KEY", "LLM_API_KEY"),
-            base_url=_env_first("OPENROUTER_BASE_URL", "LLM_BASE_URL")
-            or DEFAULT_BASE_URL,
+            base_url=_env_first("OPENROUTER_BASE_URL", "LLM_BASE_URL") or DEFAULT_BASE_URL,
             model=_env_first("OPENROUTER_MODEL", "LLM_MODEL") or DEFAULT_MODEL,
-            provider_only=_env_first("OPENROUTER_PROVIDER_ONLY")
-            or DEFAULT_PROVIDER_ONLY,
+            provider_only=_env_first("OPENROUTER_PROVIDER_ONLY") or DEFAULT_PROVIDER_ONLY,
             allow_fallbacks=_env_bool("OPENROUTER_ALLOW_FALLBACKS", default=False),
         )
         if require_api_key and not config.api_key:

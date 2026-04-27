@@ -20,9 +20,7 @@ def test_default_config_uses_deepseek_openrouter_policy(monkeypatch):
     assert config.model == DEFAULT_MODEL
     assert config.provider_only == "deepseek"
     assert config.allow_fallbacks is False
-    assert config.provider_routing == {
-        "provider": {"only": ["deepseek"], "allow_fallbacks": False}
-    }
+    assert config.provider_routing == {"provider": {"only": ["deepseek"], "allow_fallbacks": False}}
 
 
 def test_openrouter_env_overrides_generic_aliases(monkeypatch):
@@ -40,9 +38,7 @@ def test_openrouter_env_overrides_generic_aliases(monkeypatch):
     assert config.api_key == "openrouter-key"
     assert config.base_url == "https://openrouter.example/v1"
     assert config.model == "deepseek/custom"
-    assert config.provider_routing == {
-        "provider": {"only": ["deepseek"], "allow_fallbacks": False}
-    }
+    assert config.provider_routing == {"provider": {"only": ["deepseek"], "allow_fallbacks": False}}
 
 
 def test_generic_llm_aliases_work_when_openrouter_env_is_absent(monkeypatch):

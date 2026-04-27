@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 from sol01.index import (
     CACHE_PATH,
@@ -50,7 +49,7 @@ def test_build_db_index_ignores_malformed_metadata_rows(tmp_path):
     db_dir.mkdir(parents=True)
 
     (db_dir / "DDL.csv").write_text(
-        "table_name,DDL\nbroken,\"CREATE TABLE broken (id TEXT, name TEXT);\"\n",
+        'table_name,DDL\nbroken,"CREATE TABLE broken (id TEXT, name TEXT);"\n',
         encoding="utf-8",
     )
     (db_dir / "broken.json").write_text(

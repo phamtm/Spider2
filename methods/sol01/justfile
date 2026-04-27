@@ -1,0 +1,23 @@
+set dotenv-load := true
+
+# Show available development tasks.
+default:
+    @just --list
+
+# Format Python files with Ruff.
+fmt:
+    uv run --group dev ruff format .
+
+# Lint Python files with Ruff.
+lint:
+    uv run --group dev ruff check .
+
+# Run the current sol01 test suite.
+test:
+    uv run pytest tests -q
+
+# Run format, lint, and tests together.
+check:
+    just fmt
+    just lint
+    just test
