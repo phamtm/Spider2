@@ -68,6 +68,27 @@ class LLMClient:
             raise TypeError(f"Expected {output_type.__name__}, got {type(output).__name__}")
         return output
 
+    def run_structured_with_prompt(
+        self,
+        user_prompt: str,
+        *,
+        prompt: PromptSpec,
+        output_type: type[OutputT],
+        model: Model | str | None = None,
+    ) -> OutputT:
+        """Run one structured prompt using an already loaded prompt spec."""
+
+        agent = Agent(
+            model=_resolve_model(model, config=self.config),
+            system_prompt=prompt.text,
+            output_type=output_type,
+        )
+        result = agent.run_sync(user_prompt)
+        output = result.output
+        if not isinstance(output, output_type):
+            raise TypeError(f"Expected {output_type.__name__}, got {type(output).__name__}")
+        return output
+
 
 def prompt_sha256(text: str) -> str:
     """Hash prompt text so later traces can record exact prompt versions."""
