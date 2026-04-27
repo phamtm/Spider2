@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from sol01.models import MetricDefinition, Task
 from sol01.tasks import REPO_ROOT, SPIDER2_LITE_PATH
-
 
 DOCUMENTS_ROOT = REPO_ROOT / "spider2-lite" / "resource" / "documents"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")

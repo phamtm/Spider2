@@ -234,6 +234,8 @@ Loads allowed markdown documents from `spider2-lite/resource/documents`. It chun
 
 Ranks tables inside the task database using lexical overlap across table names, column names, descriptions, sample values, and the question. It then asks the LLM to select from compact candidates and expands selected tables with conservative join-neighbor rules.
 
+This is the v1 path. After the main solver is working end to end, add one follow-up experiment that skips lexical ranking and asks the LLM to choose tables directly from the DB schema summary. Keep that experiment separate so we can compare recall, prompt size, and SQL quality against the lexical-first path.
+
 ### Prompt Files (`prompts/*.md`)
 
 Stores versioned prompt text for intent extraction, schema selection, SQL generation, SQL repair, and result critique. Prompt SHA-256 hashes must be recorded in traces for reproducibility.
@@ -814,3 +816,26 @@ When reporting results:
 - Report `correct / 135` for local subset.
 - Report `correct / 547` as full benchmark equivalent.
 - Do not call it a full Spider2-Lite leaderboard score until BigQuery and Snowflake are supported.
+
+## Post-v1 Experiments
+
+These are follow-up tasks. Do not start them until the main v1 path above is complete and smoke runs are working.
+
+### Task 16: LLM-Only Table Selection Experiment
+
+**Depends on:** Task 15
+
+**Files:**
+- Modify: `methods/sol01/sol01/retrieval.py`
+- Modify: `methods/sol01/sol01/llm.py`
+- Modify: `methods/sol01/sol01/coordinator.py`
+- Create: `methods/sol01/tests/fixtures/retrieval_cases.json`
+- Test: `methods/sol01/tests/test_retrieval.py`
+
+- [ ] Add an alternate retrieval mode that skips lexical ranking and asks the LLM to choose relevant tables directly from one DB schema summary.
+- [ ] Keep the current lexical-first retrieval as the default path so we can compare both approaches.
+- [ ] Record which retrieval mode was used in traces.
+- [ ] Add a named fixture set in `tests/fixtures/retrieval_cases.json` with at least 5 vague local questions where lexical matching is weak.
+- [ ] Write a comparison artifact at `outputs/<run_id>/analysis/retrieval_compare.json` with per-case selected tables, prompt size, and final SQL outcome for both modes.
+- [ ] Compare lexical-first versus LLM-only selection on the fixture set and summarize misses and tradeoffs in `outputs/<run_id>/analysis/retrieval_compare.md`.
+- [ ] Run `uv run pytest tests/test_retrieval.py -q`.
