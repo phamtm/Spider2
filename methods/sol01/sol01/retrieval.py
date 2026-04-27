@@ -6,10 +6,16 @@ import json
 import re
 from collections import defaultdict
 from pathlib import Path
+from typing import Any, Protocol
 
 from sol01.index import CACHE_PATH, build_index_cache
 from sol01.logging import get_logger
-from sol01.models import SchemaSelection, TableSchema
+from sol01.models import (
+    RetrievalMode,
+    SchemaSelection,
+    TableSchema,
+    TableSelectionDecision,
+)
 
 TOKEN_RE = re.compile(r"[a-z0-9_]+")
 KEY_SUFFIXES = ("_id", "_code", "_code_prefix", "_name")
@@ -48,10 +54,27 @@ STOPWORDS = {
 logger = get_logger(__name__)
 
 
+class StructuredSelector(Protocol):
+    """Minimal LLM surface needed for the LLM-only table-selection experiment."""
+
+    def load_prompt(self, prompt_name: str) -> Any: ...
+
+    def run_structured_with_prompt(
+        self,
+        user_prompt: str,
+        *,
+        prompt: Any,
+        output_type: type[Any],
+        model: Any = None,
+    ) -> Any: ...
+
+
 def retrieve_schema(
     question: str,
     db: str,
     *,
+    retrieval_mode: RetrievalMode = "lexical",
+    llm_client: StructuredSelector | None = None,
     max_tables: int = 4,
     max_expanded_tables: int = 6,
     cache_path: Path = CACHE_PATH,
@@ -64,6 +87,16 @@ def retrieve_schema(
         raise ValueError("max_expanded_tables must be at least max_tables")
 
     db_index = load_db_index(db, cache_path=cache_path)
+    if retrieval_mode == "llm_only":
+        return _retrieve_schema_with_llm(
+            question,
+            db,
+            db_index,
+            llm_client=llm_client,
+            max_tables=max_tables,
+            max_expanded_tables=max_expanded_tables,
+        )
+
     ranked_tables = _rank_tables(question, db_index)
     selected_tables = _pick_selected_tables(ranked_tables, max_tables=max_tables)
     expanded_tables = _expand_neighbors(
@@ -82,10 +115,13 @@ def retrieve_schema(
 
     return SchemaSelection(
         db=db,
+        retrieval_mode="lexical",
         selected_tables=selected_tables,
         expanded_tables=expanded_tables,
         rationale=_build_rationale(question, ranked_tables, selected_tables, expanded_tables),
         confidence=_confidence(ranked_tables, selected_tables),
+        selection_prompt_chars=0,
+        candidate_table_count=len(db_index),
     )
 
 
@@ -97,6 +133,74 @@ def load_db_index(db: str, *, cache_path: Path = CACHE_PATH) -> dict[str, TableS
         return payload[db]
     except KeyError as exc:
         raise KeyError(f"Unknown database: {db}") from exc
+
+
+def _retrieve_schema_with_llm(
+    question: str,
+    db: str,
+    db_index: dict[str, TableSchema],
+    *,
+    llm_client: StructuredSelector | None,
+    max_tables: int,
+    max_expanded_tables: int,
+) -> SchemaSelection:
+    """Let the LLM pick tables directly from one DB summary without lexical pre-ranking."""
+
+    if llm_client is None:
+        raise ValueError("llm_client is required when retrieval_mode='llm_only'")
+
+    schema_summary = _db_schema_summary(db_index)
+    prompt = llm_client.load_prompt("schema_selection")
+    user_prompt = (
+        f"Question: {question}\n\n"
+        f"Database: {db}\n\n"
+        f"Choose at most {max_tables} tables from this schema summary.\n\n"
+        f"Schema summary:\n{schema_summary}"
+    )
+    decision = llm_client.run_structured_with_prompt(
+        user_prompt,
+        prompt=prompt,
+        output_type=TableSelectionDecision,
+    )
+    selected_tables = _sanitize_llm_tables(
+        decision.selected_tables,
+        db_index,
+        max_tables=max_tables,
+    )
+    confidence = decision.confidence if selected_tables else 0.0
+    expanded_tables = _expand_neighbors(
+        selected_tables,
+        db_index,
+        ranked_tables=[(table_name, 0.0, []) for table_name in sorted(db_index)],
+        max_expanded_tables=max_expanded_tables,
+    )
+    rationale = decision.rationale.strip()
+    if not selected_tables:
+        rationale = f"{rationale} No valid tables matched the schema summary.".strip()
+    elif selected_tables != decision.selected_tables[: len(selected_tables)]:
+        rationale = (
+            f"{rationale} Ignored unknown or duplicate table names returned by the model."
+        ).strip()
+
+    logger.info(
+        "schema retrieval complete",
+        db=db,
+        retrieval_mode="llm_only",
+        selected_tables=selected_tables,
+        expanded_tables=expanded_tables,
+        confidence=decision.confidence,
+        selection_prompt_chars=len(user_prompt),
+    )
+    return SchemaSelection(
+        db=db,
+        retrieval_mode="llm_only",
+        selected_tables=selected_tables,
+        expanded_tables=expanded_tables,
+        rationale=rationale,
+        confidence=confidence,
+        selection_prompt_chars=len(user_prompt),
+        candidate_table_count=len(db_index),
+    )
 
 
 def load_index_cache(
@@ -296,6 +400,51 @@ def _confidence(
     margin = max(best_score - next_score, 0.0)
     confidence = 0.45 + min(best_score, 12.0) / 30.0 + min(margin, 6.0) / 20.0
     return min(round(confidence, 3), 0.95)
+
+
+def _db_schema_summary(db_index: dict[str, TableSchema]) -> str:
+    """Render one compact all-table schema summary for the LLM-only selector."""
+
+    parts: list[str] = []
+    for table_name in sorted(db_index):
+        table = db_index[table_name]
+        columns = ", ".join(_column_summary(column) for column in table.columns)
+        parts.append(f"Table {table_name}: {columns}")
+    return "\n".join(parts)
+
+
+def _column_summary(column: Any) -> str:
+    """Keep one column summary short enough for selector prompts."""
+
+    summary = column.name
+    if column.type:
+        summary += f" [{column.type}]"
+    if column.description:
+        summary += f" - {column.description}"
+    elif column.sample_values:
+        preview = ", ".join(column.sample_values[:2])
+        summary += f" - sample values: {preview}"
+    return summary
+
+
+def _sanitize_llm_tables(
+    requested_tables: list[str],
+    db_index: dict[str, TableSchema],
+    *,
+    max_tables: int,
+) -> list[str]:
+    """Keep valid unique table names and surface an empty selection when none survive."""
+
+    valid_tables = set(db_index)
+    selected_tables: list[str] = []
+    for table_name in requested_tables:
+        normalized = table_name.strip()
+        if normalized not in valid_tables or normalized in selected_tables:
+            continue
+        selected_tables.append(normalized)
+        if len(selected_tables) == max_tables:
+            break
+    return selected_tables
 
 
 def _question_terms(question: str) -> set[str]:

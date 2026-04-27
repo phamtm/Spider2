@@ -7,6 +7,8 @@ from typing import Any
 from dotenv import dotenv_values
 from pydantic import BaseModel, Field, model_validator
 
+from sol01.models import RetrievalMode
+
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "deepseek/deepseek-v4-pro"
 DEFAULT_PROVIDER_ONLY = "deepseek"
@@ -24,6 +26,7 @@ class RuntimeConfig(BaseModel):
     allow_fallbacks: bool = False
     concurrency: int = Field(default=2, ge=1)
     max_schema_tables: int = Field(default=12, ge=1)
+    retrieval_mode: RetrievalMode = "llm_only"
 
     @classmethod
     def from_env(

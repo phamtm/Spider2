@@ -52,6 +52,25 @@ def test_successful_task_is_skipped_when_trace_and_csv_exist(tmp_path):
     assert should_skip_task(run_paths, instance_id="local003") is True
 
 
+def test_successful_task_reruns_when_retrieval_mode_changes(tmp_path):
+    run_paths = ensure_run_paths("resume-run", outputs_root=tmp_path)
+    write_trace(
+        run_paths,
+        instance_id="local003",
+        trace={"status": "success", "retrieval_mode": "lexical"},
+    )
+    csv_path_for(run_paths, instance_id="local003").write_text("answer\n1\n", encoding="utf-8")
+
+    assert (
+        should_skip_task(
+            run_paths,
+            instance_id="local003",
+            expected_retrieval_mode="llm_only",
+        )
+        is False
+    )
+
+
 def test_successful_task_reruns_when_csv_is_missing(tmp_path):
     run_paths = ensure_run_paths("resume-run", outputs_root=tmp_path)
     write_trace(run_paths, instance_id="local003", trace={"status": "success"})

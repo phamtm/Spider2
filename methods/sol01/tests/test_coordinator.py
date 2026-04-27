@@ -154,6 +154,7 @@ def test_run_task_success_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, 
 
     trace = json.loads((run_paths.traces_dir / "local003.json").read_text(encoding="utf-8"))
     assert trace["status"] == "success"
+    assert trace["retrieval_mode"] == "lexical"
     assert trace["prompt_hashes"]["intent"] == "hash-intent"
     assert len(trace["attempts"]) == 1
     assert trace["attempts"][0]["validation"]["ok"] is True

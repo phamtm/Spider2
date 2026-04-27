@@ -84,6 +84,7 @@ def run_tasks(
             "config": {
                 "concurrency": config.concurrency,
                 "max_schema_tables": config.max_schema_tables,
+                "retrieval_mode": config.retrieval_mode,
             },
         },
     )
@@ -140,7 +141,10 @@ def run_task(
     task_trace_path = trace_path_for(run_paths, instance_id=task.instance_id)
 
     if not force and should_skip_task(
-        run_paths, instance_id=task.instance_id, skip_failed=skip_failed
+        run_paths,
+        instance_id=task.instance_id,
+        skip_failed=skip_failed,
+        expected_retrieval_mode=config.retrieval_mode,
     ):
         existing_trace = json.loads(task_trace_path.read_text(encoding="utf-8"))
         logger.info(
@@ -175,6 +179,8 @@ def run_task(
     schema = retrieve_schema(
         task.question,
         task.db,
+        retrieval_mode=config.retrieval_mode,
+        llm_client=client,
         max_tables=min(4, config.max_schema_tables),
         max_expanded_tables=config.max_schema_tables,
     )
@@ -358,6 +364,7 @@ def run_task(
         "instance_id": task.instance_id,
         "db": task.db,
         "question": task.question,
+        "retrieval_mode": schema.retrieval_mode,
         "schema_selection": schema.model_dump(mode="json"),
         "intent": intent.model_dump(mode="json"),
         "metric_definitions": [metric.model_dump(mode="json") for metric in metric_definitions],

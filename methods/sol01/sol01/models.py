@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+RetrievalMode = Literal["lexical", "llm_only"]
+
 
 class Task(BaseModel):
     """A Spider2-Lite task that is safe to use during generation."""
@@ -49,8 +51,19 @@ class SchemaSelection(BaseModel):
     """The retrieved table set after ranking and optional expansion."""
 
     db: str
+    retrieval_mode: RetrievalMode = "lexical"
     selected_tables: list[str] = Field(default_factory=list)
     expanded_tables: list[str] = Field(default_factory=list)
+    rationale: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    selection_prompt_chars: int = Field(default=0, ge=0)
+    candidate_table_count: int = Field(default=0, ge=0)
+
+
+class TableSelectionDecision(BaseModel):
+    """The LLM's table shortlist when we skip lexical pre-ranking."""
+
+    selected_tables: list[str] = Field(default_factory=list)
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
 

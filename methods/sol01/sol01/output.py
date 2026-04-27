@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sol01.models import RetrievalMode
 from sol01.tasks import REPO_ROOT
 
 OUTPUTS_ROOT = REPO_ROOT / "methods" / "sol01" / "outputs"
@@ -121,6 +122,7 @@ def should_skip_task(
     *,
     instance_id: str,
     skip_failed: bool = False,
+    expected_retrieval_mode: RetrievalMode = "lexical",
 ) -> bool:
     """Decide whether resume mode should skip or rerun one task."""
 
@@ -131,6 +133,11 @@ def should_skip_task(
     trace = json.loads(trace_path.read_text(encoding="utf-8"))
     status = trace.get("status")
     csv_path = csv_path_for(run_paths, instance_id=instance_id)
+    actual_retrieval_mode = _trace_retrieval_mode(trace)
+
+    # Rerun if the caller changed retrieval strategy for this run directory.
+    if actual_retrieval_mode != expected_retrieval_mode:
+        return False
 
     if status == "success":
         return csv_path.exists()
@@ -139,6 +146,20 @@ def should_skip_task(
     if status == "failed":
         return skip_failed
     return False
+
+
+def _trace_retrieval_mode(trace: dict[str, Any]) -> RetrievalMode:
+    """Read the retrieval mode from newer traces and default old traces to lexical."""
+
+    mode = trace.get("retrieval_mode")
+    if mode in {"lexical", "llm_only"}:
+        return mode
+
+    schema = trace.get("schema_selection") or {}
+    schema_mode = schema.get("retrieval_mode")
+    if schema_mode in {"lexical", "llm_only"}:
+        return schema_mode
+    return "lexical"
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> Path:
