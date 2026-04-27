@@ -1,0 +1,166 @@
+"""Build a compact schema index from the Spider2-Lite SQLite metadata files."""
+
+from __future__ import annotations
+
+import csv
+import json
+from collections.abc import Mapping
+from pathlib import Path
+
+from sol01.models import ColumnSchema, TableSchema
+
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+SQLITE_METADATA_ROOT = REPO_ROOT / "spider2-lite" / "resource" / "databases" / "sqlite"
+CACHE_PATH = (REPO_ROOT / "methods" / "sol01" / ".cache" / "index.json").resolve()
+
+
+def build_db_index(db: str, *, metadata_root: Path = SQLITE_METADATA_ROOT) -> dict[str, TableSchema]:
+    """Build table metadata for one SQLite database."""
+
+    db_dir = metadata_root / db
+    ddl_by_table = _read_ddl_map(db_dir / "DDL.csv")
+    index: dict[str, TableSchema] = {}
+
+    for table_name, ddl in ddl_by_table.items():
+        metadata = _read_table_metadata(db_dir / f"{table_name}.json")
+        index[table_name] = TableSchema(
+            name=table_name,
+            ddl=ddl,
+            columns=_build_columns(metadata),
+            sample_rows=_metadata_rows(metadata),
+            searchable_text=_build_searchable_text(table_name, metadata),
+        )
+
+    return index
+
+
+def build_index_cache(
+    *,
+    metadata_root: Path = SQLITE_METADATA_ROOT,
+    cache_path: Path = CACHE_PATH,
+) -> dict[str, dict[str, TableSchema]]:
+    """Build and persist the full SQLite metadata cache used by later retrieval."""
+
+    payload = {
+        db_dir.name: build_db_index(db_dir.name, metadata_root=metadata_root)
+        for db_dir in sorted(path for path in metadata_root.iterdir() if path.is_dir())
+    }
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(
+        json.dumps(
+            {
+                db: {table: schema.model_dump(mode="json") for table, schema in tables.items()}
+                for db, tables in payload.items()
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return payload
+
+
+def _read_ddl_map(path: Path) -> dict[str, str]:
+    """Read the table DDL strings from the Spider2 metadata CSV."""
+
+    with path.open(encoding="utf-8", newline="") as handle:
+        return {row["table_name"]: row["DDL"] for row in csv.DictReader(handle)}
+
+
+def _read_table_metadata(path: Path) -> dict[str, object]:
+    """Read the per-table JSON metadata file."""
+
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _build_columns(metadata: dict[str, object]) -> list[ColumnSchema]:
+    """Pair column names, types, descriptions, and example values by position."""
+
+    column_names = _metadata_list(metadata, "column_names")
+    column_types = _metadata_list(metadata, "column_types")
+    descriptions = _metadata_list(metadata, "description")
+    sample_rows = _metadata_rows(metadata)
+    columns: list[ColumnSchema] = []
+
+    for index, name in enumerate(column_names):
+        columns.append(
+            ColumnSchema(
+                name=name,
+                type=_safe_list_get(column_types, index),
+                description=_safe_list_get(descriptions, index),
+                sample_values=_sample_values(sample_rows, name),
+            )
+        )
+
+    return columns
+
+
+def _build_searchable_text(table_name: str, metadata: dict[str, object]) -> str:
+    """Flatten useful names, descriptions, and examples into one search string."""
+
+    parts: list[str] = [table_name, str(metadata.get("table_fullname", ""))]
+    parts.extend(str(name) for name in _metadata_list(metadata, "column_names"))
+    parts.extend(str(value) for value in _metadata_list(metadata, "column_types"))
+    parts.extend(str(value) for value in _metadata_list(metadata, "description"))
+
+    for row in _metadata_rows(metadata):
+        if isinstance(row, dict):
+            parts.extend(str(value) for value in row.values())
+
+    return " ".join(part for part in parts if part).strip()
+
+
+def _sample_values(sample_rows: list[object], column_name: str) -> list[str]:
+    """Extract up to five stringified example values for one column."""
+
+    values: list[str] = []
+    for row in sample_rows:
+        if not isinstance(row, dict):
+            continue
+        value = row.get(column_name)
+        if value is None:
+            continue
+        values.append(str(value))
+        if len(values) == 5:
+            break
+    return values
+
+
+def _safe_list_get(values: list[object], index: int) -> str | None:
+    """Return a cleaned string value when the metadata list has that position."""
+
+    if index >= len(values):
+        return None
+
+    value = values[index]
+    if value is None:
+        return None
+
+    text = str(value).strip()
+    return text or None
+
+
+def _metadata_list(metadata: dict[str, object], key: str) -> list[object]:
+    """Return one metadata list field, or an empty list when the value is missing."""
+
+    value = metadata.get(key, [])
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return []
+
+
+def _metadata_rows(metadata: dict[str, object]) -> list[dict[str, object]]:
+    """Return sample rows as dictionaries, dropping malformed entries."""
+
+    rows: list[dict[str, object]] = []
+    for row in _metadata_list(metadata, "sample_rows"):
+        if isinstance(row, Mapping):
+            rows.append(dict(row))
+    return rows
