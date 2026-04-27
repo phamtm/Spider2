@@ -1,0 +1,13 @@
+[project]
+name = "spider2-workspace"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "sol01",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+sol01 = { path = "methods/sol01", editable = true }
