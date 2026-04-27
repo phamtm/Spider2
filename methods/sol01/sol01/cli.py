@@ -1,3 +1,5 @@
+"""Command line entrypoint for the sol01 solver."""
+
 import typer
 
 
@@ -9,4 +11,4 @@ app = typer.Typer(
 
 @app.callback()
 def main() -> None:
-    """SQLite-local Spider2-Lite solver."""
+    """Show root help until concrete subcommands are implemented."""

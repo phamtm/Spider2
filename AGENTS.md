@@ -35,6 +35,13 @@ cp -rf source dest          # NOT: cp -r source dest
 - `apt-get` - use `-y` flag
 - `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
 
+## Code Comments
+
+- Prefer concise comments for each module, major class, and major function.
+- Add comments for complicated flows, decisions, or constraints that are not obvious from the code.
+- Keep comments easy to understand and avoid jargon when plain language works.
+- Do not over-explain simple assignments or code that is already clear.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
 ## Beads Issue Tracker
 
