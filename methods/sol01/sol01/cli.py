@@ -18,6 +18,7 @@ from sol01.eval_runner import run_official_eval
 from sol01.index import CACHE_PATH, build_index_cache
 from sol01.logging import configure_logging, get_logger
 from sol01.models import FinalAnswer, RetrievalMode, Task
+from sol01.observability import configure_logfire
 from sol01.output import OUTPUTS_ROOT, ensure_ask_paths, ensure_run_paths
 from sol01.tasks import load_tasks
 
@@ -250,6 +251,7 @@ def main(
     """Keep the root command focused on subcommands."""
 
     configure_logging(log_level)
+    configure_logfire()
     logger.info("logging configured", log_level=log_level)
 
 
