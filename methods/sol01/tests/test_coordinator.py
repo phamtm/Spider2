@@ -29,6 +29,7 @@ class FakeLLMClient:
     """Minimal fake LLM that returns queued outputs by prompt name."""
 
     outputs: dict[str, list[Any]]
+    prompts: dict[str, list[str]] | None = None
 
     def load_prompt(self, prompt_name: str) -> PromptSpec:
         return PromptSpec(
@@ -43,6 +44,8 @@ class FakeLLMClient:
         output_type: type[Any],
         model: Any = None,
     ) -> Any:
+        if self.prompts is not None:
+            self.prompts.setdefault(prompt_name, []).append(user_prompt)
         queue = self.outputs.get(prompt_name, [])
         if not queue:
             raise AssertionError(f"No fake output queued for prompt {prompt_name}")
@@ -358,3 +361,135 @@ def test_run_task_catches_execution_errors_and_writes_failed_trace(
     trace = json.loads((run_paths.traces_dir / "local006.json").read_text(encoding="utf-8"))
     assert trace["status"] == "failed"
     assert "no such column" in trace["attempts"][0]["execution_result"]["error"].lower()
+
+
+def test_run_task_uses_only_external_knowledge_for_document_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, temp_db: Path
+):
+    task = Task(
+        instance_id="local003",
+        db="test_db",
+        question="Show customer totals.",
+        external_knowledge="RFM.md",
+    )
+    run_paths = ensure_run_paths("external-knowledge-run", outputs_root=tmp_path)
+    captured_prompts: dict[str, list[str]] = {}
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Find customer totals.",
+                    entities=["sales"],
+                    metrics=["frequency"],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="customer and total columns",
+                    assumptions=["Use all rows."],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql="SELECT customer, amount FROM sales ORDER BY amount DESC",
+                    explanation="Read customer amounts directly.",
+                    assumptions=["amount already stores totals"],
+                    confidence=0.8,
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(confidence=0.9, issues=[], should_repair=False, repair_focus=None)
+            ],
+        },
+        prompts=captured_prompts,
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="test_db",
+            selected_tables=["sales"],
+            expanded_tables=["sales"],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.load_document_text",
+        lambda file_name: f"WHOLE DOC FOR {file_name}",
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        db_path=temp_db,
+        initial_candidates=1,
+    )
+
+    assert answer.status == "success"
+    sql_prompt = captured_prompts["sql_generation"][0]
+    assert "Document context:\nWHOLE DOC FOR RFM.md" in sql_prompt
+
+
+def test_run_task_without_external_knowledge_uses_no_document_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, temp_db: Path
+):
+    task = Task(
+        instance_id="local999",
+        db="test_db",
+        question="Show customer totals.",
+        external_knowledge=None,
+    )
+    run_paths = ensure_run_paths("no-external-knowledge-run", outputs_root=tmp_path)
+    captured_prompts: dict[str, list[str]] = {}
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Find customer totals.",
+                    entities=["sales"],
+                    metrics=["frequency"],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="customer and total columns",
+                    assumptions=["Use all rows."],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql="SELECT customer, amount FROM sales ORDER BY amount DESC",
+                    explanation="Read customer amounts directly.",
+                    assumptions=["amount already stores totals"],
+                    confidence=0.8,
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(confidence=0.9, issues=[], should_repair=False, repair_focus=None)
+            ],
+        },
+        prompts=captured_prompts,
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="test_db",
+            selected_tables=["sales"],
+            expanded_tables=["sales"],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        db_path=temp_db,
+        initial_candidates=1,
+    )
+
+    assert answer.status == "success"
+    sql_prompt = captured_prompts["sql_generation"][0]
+    assert "Document context:\nNo task-linked document context." in sql_prompt

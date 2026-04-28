@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import sys
 
 import logfire
@@ -9,12 +10,13 @@ import logfire
 from sol01 import __version__
 
 _LOGFIRE_CONFIGURED = False
+_LOGFIRE_SHUTDOWN_REGISTERED = False
 
 
 def configure_logfire() -> bool:
     """Enable Logfire spans for Pydantic AI calls."""
 
-    global _LOGFIRE_CONFIGURED
+    global _LOGFIRE_CONFIGURED, _LOGFIRE_SHUTDOWN_REGISTERED
 
     if _LOGFIRE_CONFIGURED:
         return True
@@ -32,5 +34,8 @@ def configure_logfire() -> bool:
         service_version=__version__,
     )
     logfire.instrument_pydantic_ai(include_content=True, version=3)
+    if not _LOGFIRE_SHUTDOWN_REGISTERED:
+        atexit.register(logfire.shutdown)
+        _LOGFIRE_SHUTDOWN_REGISTERED = True
     _LOGFIRE_CONFIGURED = True
     return True

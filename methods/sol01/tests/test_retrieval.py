@@ -77,6 +77,7 @@ def test_retrieve_schema_defaults_to_llm_only_mode():
     assert selection.selection_prompt_chars > 0
     assert selection.candidate_table_count == 11
     assert selection.selected_tables == ["orders", "customers"]
+    assert selection.expanded_tables == selection.selected_tables
 
 
 def test_retrieve_schema_llm_only_uses_schema_selector_and_filters_unknown_tables():
@@ -99,6 +100,7 @@ def test_retrieve_schema_llm_only_uses_schema_selector_and_filters_unknown_table
 
     assert selection.retrieval_mode == "llm_only"
     assert selection.selected_tables == ["orders", "customers"]
+    assert selection.expanded_tables == selection.selected_tables
     assert selection.selection_prompt_chars > 0
     assert selection.candidate_table_count == 11
     assert llm.calls[0]["prompt_name"] == "schema_selection"

@@ -124,13 +124,13 @@ def test_retrieve_schema_ranks_customer_order_tables():
     assert selection.db == "E_commerce"
     assert "customers" in selection.selected_tables
     assert "orders" in selection.selected_tables
-    assert selection.expanded_tables[: len(selection.selected_tables)] == selection.selected_tables
+    assert selection.expanded_tables == selection.selected_tables
     assert selection.confidence >= 0.5
     assert "customers" in selection.rationale
     assert "orders" in selection.rationale
 
 
-def test_retrieve_schema_adds_join_neighbors_with_cap():
+def test_retrieve_schema_does_not_expand_tables():
     selection = retrieve_schema(
         "Show product categories and seller names for the highest priced order items.",
         "E_commerce",
@@ -140,10 +140,10 @@ def test_retrieve_schema_adds_join_neighbors_with_cap():
     )
 
     assert len(selection.selected_tables) == 2
-    assert len(selection.expanded_tables) <= 4
+    assert selection.expanded_tables == selection.selected_tables
     assert "order_items" in selection.selected_tables
-    assert "products" in selection.expanded_tables
-    assert "sellers" in selection.expanded_tables
+    assert "products" not in selection.expanded_tables
+    assert "sellers" not in selection.expanded_tables
 
 
 def test_retrieve_schema_stays_inside_the_requested_database():
@@ -256,4 +256,4 @@ def test_retrieve_schema_ignores_tables_that_only_match_sample_text(tmp_path):
     )
 
     assert selection.selected_tables == ["ratings"]
-    assert "erd" not in selection.expanded_tables
+    assert selection.expanded_tables == selection.selected_tables

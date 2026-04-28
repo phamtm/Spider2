@@ -8,7 +8,7 @@ from time import perf_counter
 from typing import Any, Protocol
 
 from sol01.config import RuntimeConfig
-from sol01.docs import get_metric_definition
+from sol01.docs import load_document_text
 from sol01.llm import LLMClient
 from sol01.logging import get_logger
 from sol01.models import (
@@ -16,7 +16,6 @@ from sol01.models import (
     ExecutionResult,
     FinalAnswer,
     Intent,
-    MetricDefinition,
     SchemaSelection,
     SQLCandidate,
     Task,
@@ -165,7 +164,6 @@ def run_task(
 
     prompt_hashes: dict[str, str] = {}
     attempts: list[dict[str, Any]] = []
-    metric_definitions: list[MetricDefinition] = []
     critic_repairs_used = 0
 
     logger.info(
@@ -208,13 +206,11 @@ def run_task(
         time_constraints=intent.time_constraints,
     )
 
-    for metric_name in intent.metrics:
-        metric_definitions.append(
-            get_metric_definition(metric_name, instance_id=task.instance_id, db=task.db)
-        )
-
     schema_context = _schema_context(schema)
-    docs_context = _docs_context(metric_definitions)
+    if task.external_knowledge:
+        docs_context = load_document_text(task.external_knowledge)
+    else:
+        docs_context = "No task-linked document context."
 
     logger.info(
         "generating candidates",
@@ -367,7 +363,6 @@ def run_task(
         "retrieval_mode": schema.retrieval_mode,
         "schema_selection": schema.model_dump(mode="json"),
         "intent": intent.model_dump(mode="json"),
-        "metric_definitions": [metric.model_dump(mode="json") for metric in metric_definitions],
         "prompt_hashes": prompt_hashes,
         "attempts": attempts,
     }
@@ -592,16 +587,6 @@ def _question_preview(question: str, *, max_length: int = 120) -> str:
     if len(normalized) <= max_length:
         return normalized
     return normalized[: max_length - 1].rstrip() + "…"
-
-
-def _docs_context(metric_definitions: list[MetricDefinition]) -> str:
-    """Render retrieved metric definitions for SQL prompts."""
-
-    if not metric_definitions:
-        return "No metric-specific document context."
-    return "\n\n".join(
-        f"{metric.metric_name}: {metric.definition}" for metric in metric_definitions
-    )
 
 
 def _intent_user_prompt(task: Task, schema: SchemaSelection) -> str:

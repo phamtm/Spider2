@@ -1,10 +1,9 @@
-"""Rank and expand the table set that should be shown for one task question."""
+"""Select the table set that should be shown for one task question."""
 
 from __future__ import annotations
 
 import json
 import re
-from collections import defaultdict
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -18,7 +17,6 @@ from sol01.models import (
 )
 
 TOKEN_RE = re.compile(r"[a-z0-9_]+")
-KEY_SUFFIXES = ("_id", "_code", "_code_prefix", "_name")
 MIN_SELECTION_SCORE = 1.5
 STOPWORDS = {
     "a",
@@ -94,17 +92,11 @@ def retrieve_schema(
             db_index,
             llm_client=llm_client,
             max_tables=max_tables,
-            max_expanded_tables=max_expanded_tables,
         )
 
     ranked_tables = _rank_tables(question, db_index)
     selected_tables = _pick_selected_tables(ranked_tables, max_tables=max_tables)
-    expanded_tables = _expand_neighbors(
-        selected_tables,
-        db_index,
-        ranked_tables,
-        max_expanded_tables=max_expanded_tables,
-    )
+    expanded_tables = list(selected_tables)
     logger.info(
         "schema retrieval complete",
         db=db,
@@ -118,7 +110,7 @@ def retrieve_schema(
         retrieval_mode="lexical",
         selected_tables=selected_tables,
         expanded_tables=expanded_tables,
-        rationale=_build_rationale(question, ranked_tables, selected_tables, expanded_tables),
+        rationale=_build_rationale(question, ranked_tables, selected_tables),
         confidence=_confidence(ranked_tables, selected_tables),
         selection_prompt_chars=0,
         candidate_table_count=len(db_index),
@@ -142,7 +134,6 @@ def _retrieve_schema_with_llm(
     *,
     llm_client: StructuredSelector | None,
     max_tables: int,
-    max_expanded_tables: int,
 ) -> SchemaSelection:
     """Let the LLM pick tables directly from one DB summary without lexical pre-ranking."""
 
@@ -168,12 +159,7 @@ def _retrieve_schema_with_llm(
         max_tables=max_tables,
     )
     confidence = decision.confidence if selected_tables else 0.0
-    expanded_tables = _expand_neighbors(
-        selected_tables,
-        db_index,
-        ranked_tables=[(table_name, 0.0, []) for table_name in sorted(db_index)],
-        max_expanded_tables=max_expanded_tables,
-    )
+    expanded_tables = list(selected_tables)
     rationale = decision.rationale.strip()
     if not selected_tables:
         rationale = f"{rationale} No valid tables matched the schema summary.".strip()
@@ -279,86 +265,12 @@ def _pick_selected_tables(
     return [ranked_tables[0][0]]
 
 
-def _expand_neighbors(
-    selected_tables: list[str],
-    db_index: dict[str, TableSchema],
-    ranked_tables: list[tuple[str, float, list[str]]],
-    *,
-    max_expanded_tables: int,
-) -> list[str]:
-    """Add a small number of likely join neighbors based on shared key columns."""
-
-    neighbor_scores = _neighbor_scores(db_index)
-    ranking_position = {table_name: index for index, (table_name, _, _) in enumerate(ranked_tables)}
-    lexical_scores = {table_name: score for table_name, score, _ in ranked_tables}
-    match_counts = {table_name: len(matches) for table_name, _, matches in ranked_tables}
-    expanded_tables = list(selected_tables)
-    candidate_scores: dict[str, float] = defaultdict(float)
-    candidate_links: dict[str, int] = defaultdict(int)
-    for selected in selected_tables:
-        for neighbor, score in neighbor_scores.get(selected, {}).items():
-            if neighbor in expanded_tables:
-                continue
-            candidate_scores[neighbor] += score
-            candidate_links[neighbor] += 1
-
-    candidates = [
-        (
-            score,
-            candidate_links[neighbor],
-            lexical_scores.get(neighbor, 0.0),
-            match_counts.get(neighbor, 0),
-            ranking_position.get(neighbor, 10_000),
-            neighbor,
-        )
-        for neighbor, score in candidate_scores.items()
-    ]
-    for _, _, _, _, _, neighbor in sorted(
-        candidates,
-        key=lambda item: (-item[0], -item[1], -item[2], -item[3], item[4], item[5]),
-    ):
-        if neighbor in expanded_tables:
-            continue
-        expanded_tables.append(neighbor)
-        if len(expanded_tables) == max_expanded_tables:
-            break
-
-    return expanded_tables
-
-
-def _neighbor_scores(db_index: dict[str, TableSchema]) -> dict[str, dict[str, float]]:
-    """Find conservative table links from exact shared key-like column names."""
-
-    column_map: dict[str, list[str]] = defaultdict(list)
-    for table_name, table in db_index.items():
-        for column in table.columns:
-            normalized = _normalize_column_name(column.name)
-            if _is_join_like_column(normalized):
-                column_map[normalized].append(table_name)
-
-    neighbor_scores: dict[str, dict[str, float]] = defaultdict(dict)
-    for column_name, tables in column_map.items():
-        if len(tables) < 2:
-            continue
-
-        # Shared keys that connect many tables are less specific, so we dampen them.
-        weight = _join_weight(column_name) / (len(tables) - 1)
-        for left in tables:
-            for right in tables:
-                if left == right:
-                    continue
-                neighbor_scores[left][right] = neighbor_scores[left].get(right, 0.0) + weight
-
-    return neighbor_scores
-
-
 def _build_rationale(
     question: str,
     ranked_tables: list[tuple[str, float, list[str]]],
     selected_tables: list[str],
-    expanded_tables: list[str],
 ) -> str:
-    """Explain why the selected tables won and whether extra neighbors were added."""
+    """Explain why the selected tables won."""
 
     top_hits: list[str] = []
     for table_name, _score, matches in ranked_tables:
@@ -374,9 +286,6 @@ def _build_rationale(
         + ", ".join(top_hits)
         + "."
     )
-    if expanded_tables != selected_tables:
-        added = [table for table in expanded_tables if table not in selected_tables]
-        rationale += f" Added join neighbors with shared key columns: {', '.join(added)}."
     return rationale
 
 
@@ -498,12 +407,6 @@ def _normalize_phrase_text(text: str) -> str:
     return " ".join(parts)
 
 
-def _normalize_column_name(name: str) -> str:
-    """Normalize a column name before using it for neighbor matching."""
-
-    return "_".join(TOKEN_RE.findall(name.lower()))
-
-
 def _sample_text(table: TableSchema) -> str:
     """Collect example values without mixing them into stronger schema signals."""
 
@@ -523,19 +426,3 @@ def _singularize(token: str) -> str:
     if token.endswith("s") and not token.endswith("ss") and len(token) > 3:
         return token[:-1]
     return token
-
-
-def _is_join_like_column(column_name: str) -> bool:
-    """Keep neighbor expansion tight by only using key-like shared columns."""
-
-    return column_name.endswith(KEY_SUFFIXES)
-
-
-def _join_weight(column_name: str) -> float:
-    """Weight stronger shared keys higher than softer shared names."""
-
-    if column_name.endswith("_id"):
-        return 3.0
-    if column_name.endswith("_code") or column_name.endswith("_code_prefix"):
-        return 2.0
-    return 1.0
