@@ -73,7 +73,7 @@ def retrieve_schema(
     question: str,
     db: str,
     *,
-    retrieval_mode: RetrievalMode = "lexical",
+    retrieval_mode: RetrievalMode = "llm_only",
     llm_client: StructuredSelector | None = None,
     max_tables: int = 4,
     max_expanded_tables: int = 6,

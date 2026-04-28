@@ -57,16 +57,26 @@ def test_retrieval_fixture_contains_expected_vague_cases():
     }
 
 
-def test_retrieve_schema_defaults_to_lexical_mode():
+def test_retrieve_schema_defaults_to_llm_only_mode():
+    llm = FakeSelectorLLM(
+        TableSelectionDecision(
+            selected_tables=["orders", "customers"],
+            rationale="Orders and customers are the core business entities here.",
+            confidence=0.82,
+        )
+    )
+
     selection = retrieve_schema(
         "Which customers placed the highest value orders?",
         "E_commerce",
+        llm_client=llm,
     )
 
     assert isinstance(selection, SchemaSelection)
-    assert selection.retrieval_mode == "lexical"
-    assert selection.selection_prompt_chars == 0
+    assert selection.retrieval_mode == "llm_only"
+    assert selection.selection_prompt_chars > 0
     assert selection.candidate_table_count == 11
+    assert selection.selected_tables == ["orders", "customers"]
 
 
 def test_retrieve_schema_llm_only_uses_schema_selector_and_filters_unknown_tables():

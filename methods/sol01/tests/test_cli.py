@@ -87,7 +87,7 @@ def test_run_command_dispatches_expected_filters(monkeypatch):
         "local_only": True,
         "force": False,
         "skip_failed": False,
-        "retrieval_mode": "lexical",
+        "retrieval_mode": "llm_only",
     }
     assert "Eval summary: 1/1 correct, missing CSV 0" in result.output
     assert "- local003: PASS | task success | Question text" in result.output

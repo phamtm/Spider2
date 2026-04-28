@@ -70,7 +70,7 @@ def test_retrieval_and_metric_models_validate_confidence_range():
     )
 
     assert selection.confidence == 0.8
-    assert selection.retrieval_mode == "lexical"
+    assert selection.retrieval_mode == "llm_only"
     assert selection.selection_prompt_chars == 0
     assert metric.source_file is None
 

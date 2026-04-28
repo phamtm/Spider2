@@ -122,7 +122,7 @@ def should_skip_task(
     *,
     instance_id: str,
     skip_failed: bool = False,
-    expected_retrieval_mode: RetrievalMode = "lexical",
+    expected_retrieval_mode: RetrievalMode = "llm_only",
 ) -> bool:
     """Decide whether resume mode should skip or rerun one task."""
 
@@ -149,7 +149,7 @@ def should_skip_task(
 
 
 def _trace_retrieval_mode(trace: dict[str, Any]) -> RetrievalMode:
-    """Read the retrieval mode from newer traces and default old traces to lexical."""
+    """Read the retrieval mode from newer traces and default old traces to llm_only."""
 
     mode = trace.get("retrieval_mode")
     if mode in {"lexical", "llm_only"}:
@@ -159,7 +159,7 @@ def _trace_retrieval_mode(trace: dict[str, Any]) -> RetrievalMode:
     schema_mode = schema.get("retrieval_mode")
     if schema_mode in {"lexical", "llm_only"}:
         return schema_mode
-    return "lexical"
+    return "llm_only"
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> Path:

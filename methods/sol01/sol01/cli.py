@@ -75,7 +75,7 @@ def run(
     retrieval_mode: Annotated[
         RetrievalMode,
         typer.Option(help="How to choose tables before SQL generation."),
-    ] = "lexical",
+    ] = "llm_only",
 ) -> None:
     """Run the solver over the selected local tasks."""
 

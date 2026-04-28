@@ -118,6 +118,7 @@ def test_retrieve_schema_ranks_customer_order_tables():
     selection = retrieve_schema(
         "Which customers placed the highest value orders?",
         "E_commerce",
+        retrieval_mode="lexical",
     )
 
     assert selection.db == "E_commerce"
@@ -133,6 +134,7 @@ def test_retrieve_schema_adds_join_neighbors_with_cap():
     selection = retrieve_schema(
         "Show product categories and seller names for the highest priced order items.",
         "E_commerce",
+        retrieval_mode="lexical",
         max_tables=2,
         max_expanded_tables=4,
     )
@@ -149,6 +151,7 @@ def test_retrieve_schema_stays_inside_the_requested_database():
     selection = retrieve_schema(
         "Which zip code areas have the most customers and sellers?",
         "E_commerce",
+        retrieval_mode="lexical",
     )
 
     assert selection.selected_tables
@@ -201,6 +204,7 @@ def test_retrieve_schema_does_not_expand_tables_just_because_they_share_id(tmp_p
         "List team names.",
         "id_only_db",
         cache_path=cache_path,
+        retrieval_mode="lexical",
         max_tables=1,
         max_expanded_tables=3,
     )
@@ -247,6 +251,7 @@ def test_retrieve_schema_ignores_tables_that_only_match_sample_text(tmp_path):
         "Show average rating by user.",
         "sample_noise_db",
         cache_path=cache_path,
+        retrieval_mode="lexical",
         max_tables=2,
     )
 

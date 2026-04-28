@@ -51,7 +51,7 @@ class SchemaSelection(BaseModel):
     """The retrieved table set after ranking and optional expansion."""
 
     db: str
-    retrieval_mode: RetrievalMode = "lexical"
+    retrieval_mode: RetrievalMode = "llm_only"
     selected_tables: list[str] = Field(default_factory=list)
     expanded_tables: list[str] = Field(default_factory=list)
     rationale: str
