@@ -82,7 +82,6 @@ def run_tasks(
             "provider_routing": config.provider_routing,
             "config": {
                 "concurrency": config.concurrency,
-                "max_schema_tables": config.max_schema_tables,
                 "retrieval_mode": config.retrieval_mode,
             },
         },
@@ -179,8 +178,6 @@ def run_task(
         task.db,
         retrieval_mode=config.retrieval_mode,
         llm_client=client,
-        max_tables=min(4, config.max_schema_tables),
-        max_expanded_tables=config.max_schema_tables,
     )
     logger.info(
         "schema selected",

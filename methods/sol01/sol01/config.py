@@ -25,7 +25,6 @@ class RuntimeConfig(BaseModel):
     provider_only: str = DEFAULT_PROVIDER_ONLY
     allow_fallbacks: bool = False
     concurrency: int = Field(default=2, ge=1)
-    max_schema_tables: int = Field(default=12, ge=1)
     retrieval_mode: RetrievalMode = "llm_only"
 
     @classmethod

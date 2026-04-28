@@ -95,7 +95,6 @@ def test_retrieve_schema_llm_only_uses_schema_selector_and_filters_unknown_table
         retrieval_mode="llm_only",
         llm_client=llm,
         max_tables=3,
-        max_expanded_tables=4,
     )
 
     assert selection.retrieval_mode == "llm_only"

@@ -136,7 +136,6 @@ def test_retrieve_schema_does_not_expand_tables():
         "E_commerce",
         retrieval_mode="lexical",
         max_tables=2,
-        max_expanded_tables=4,
     )
 
     assert len(selection.selected_tables) == 2
@@ -206,7 +205,6 @@ def test_retrieve_schema_does_not_expand_tables_just_because_they_share_id(tmp_p
         cache_path=cache_path,
         retrieval_mode="lexical",
         max_tables=1,
-        max_expanded_tables=3,
     )
 
     assert selection.selected_tables == ["teams"]

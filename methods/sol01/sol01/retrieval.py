@@ -74,15 +74,12 @@ def retrieve_schema(
     retrieval_mode: RetrievalMode = "llm_only",
     llm_client: StructuredSelector | None = None,
     max_tables: int = 4,
-    max_expanded_tables: int = 6,
     cache_path: Path = CACHE_PATH,
 ) -> SchemaSelection:
     """Return the best-fit table set for a question within one database."""
 
     if max_tables < 1:
         raise ValueError("max_tables must be at least 1")
-    if max_expanded_tables < max_tables:
-        raise ValueError("max_expanded_tables must be at least max_tables")
 
     db_index = load_db_index(db, cache_path=cache_path)
     if retrieval_mode == "llm_only":
