@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import subprocess
@@ -44,17 +45,18 @@ def run_official_eval(
         run_id,
         outputs_root=outputs_root or REPO_ROOT / "methods" / "sol01" / "outputs",
     )
+    scored_result_dir = result_dir or run_paths.csv_dir
     logger.info(
         "evaluation start",
         run_id=run_id,
-        result_dir=str(result_dir or run_paths.csv_dir),
+        result_dir=str(scored_result_dir),
         expected_instance_count=len(expected_instance_ids) if expected_instance_ids else None,
         artifact_tag=artifact_tag,
     )
     command = build_eval_command(
         run_paths,
         python_executable=python_executable,
-        result_dir=result_dir,
+        result_dir=scored_result_dir,
     )
     completed = (runner or _run_subprocess)(command, cwd=EVALUATION_SUITE_DIR)
 
@@ -70,14 +72,25 @@ def run_official_eval(
     summary["stdout_path"] = str(stdout_path)
     summary["stderr_path"] = str(stderr_path)
     if artifact_tag is None:
-        summary["result_dir"] = str(result_dir or run_paths.csv_dir)
+        summary["result_dir"] = str(scored_result_dir)
     expected_ids = (
         set(expected_instance_ids)
         if expected_instance_ids is not None
         else _expected_instance_ids(run_paths)
     )
-    summary["missing_csv_count"] = _missing_csv_count(run_paths, expected_ids=expected_ids)
-    summary["missing_instance_ids"] = _missing_instance_ids(run_paths, expected_ids=expected_ids)
+    summary["per_instance"] = _per_instance_summary(
+        expected_ids=expected_ids,
+        instance_scores=summary.get("instance_scores", {}),
+        result_dir=scored_result_dir,
+    )
+    summary["missing_csv_count"] = _missing_csv_count(
+        scored_result_dir,
+        expected_ids=expected_ids,
+    )
+    summary["missing_instance_ids"] = _missing_instance_ids(
+        scored_result_dir,
+        expected_ids=expected_ids,
+    )
     summary["returncode"] = completed.returncode
 
     summary_path = run_paths.eval_dir / f"summary{suffix}.json"
@@ -136,6 +149,7 @@ def parse_eval_stdout(stdout: str) -> dict[str, Any]:
         "local_subset_score": 0.0,
         "full_benchmark_total": FULL_BENCHMARK_TOTAL,
         "full_benchmark_equivalent_score": 0.0,
+        "instance_scores": _parse_instance_scores(stdout),
     }
 
     if final_match:
@@ -153,17 +167,60 @@ def parse_eval_stdout(stdout: str) -> dict[str, Any]:
     return summary
 
 
-def _missing_instance_ids(run_paths: RunPaths, *, expected_ids: set[str]) -> list[str]:
+def _parse_instance_scores(stdout: str) -> dict[str, int]:
+    """Read the evaluator's per-instance score map from stdout when present."""
+
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if not (stripped.startswith("{") and stripped.endswith("}")):
+            continue
+        try:
+            payload = ast.literal_eval(stripped)
+        except (SyntaxError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        if not all(isinstance(key, str) for key in payload):
+            continue
+        if not all(isinstance(value, int) for value in payload.values()):
+            continue
+        return dict(sorted(payload.items()))
+    return {}
+
+
+def _per_instance_summary(
+    *,
+    expected_ids: set[str],
+    instance_scores: dict[str, int],
+    result_dir: Path,
+) -> list[dict[str, Any]]:
+    """Build stable per-task eval records for CLI output and saved summaries."""
+
+    rows: list[dict[str, Any]] = []
+    for instance_id in sorted(expected_ids):
+        score = instance_scores.get(instance_id)
+        rows.append(
+            {
+                "instance_id": instance_id,
+                "score": score,
+                "passed": score == 1,
+                "csv_present": (result_dir / f"{instance_id}.csv").exists(),
+            }
+        )
+    return rows
+
+
+def _missing_instance_ids(result_dir: Path, *, expected_ids: set[str]) -> list[str]:
     """List local task IDs that do not have a CSV in the run output."""
 
-    present_ids = {path.stem for path in run_paths.csv_dir.glob("*.csv")}
+    present_ids = {path.stem for path in result_dir.glob("*.csv")}
     return sorted(expected_ids - present_ids)
 
 
-def _missing_csv_count(run_paths: RunPaths, *, expected_ids: set[str]) -> int:
+def _missing_csv_count(result_dir: Path, *, expected_ids: set[str]) -> int:
     """Count how many local tasks still do not have a CSV output."""
 
-    return len(_missing_instance_ids(run_paths, expected_ids=expected_ids))
+    return len(_missing_instance_ids(result_dir, expected_ids=expected_ids))
 
 
 def _expected_instance_ids(run_paths: RunPaths) -> set[str]:

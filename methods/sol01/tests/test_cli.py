@@ -49,7 +49,26 @@ def test_run_command_dispatches_expected_filters(monkeypatch):
 
     def fake_handle_run(**kwargs: Any) -> list[Any]:
         called.update(kwargs)
-        return [object()]
+        return {
+            "tasks": [Task(instance_id="local003", db="db", question="Question text")],
+            "results": [
+                FinalAnswer(
+                    instance_id="local003",
+                    status="success",
+                    sql="SELECT 1",
+                    csv_path="out.csv",
+                    trace_path="trace.json",
+                )
+            ],
+            "eval_summary": {
+                "correct_local_tasks": 1,
+                "attempted_local_tasks": 1,
+                "missing_csv_count": 0,
+                "per_instance": [
+                    {"instance_id": "local003", "passed": True, "score": 1, "csv_present": True}
+                ],
+            },
+        }
 
     monkeypatch.setattr(cli, "handle_run", fake_handle_run)
 
@@ -70,6 +89,8 @@ def test_run_command_dispatches_expected_filters(monkeypatch):
         "skip_failed": False,
         "retrieval_mode": "lexical",
     }
+    assert "Eval summary: 1/1 correct, missing CSV 0" in result.output
+    assert "- local003: PASS | task success | Question text" in result.output
 
 
 def test_handle_run_passes_default_dotenv_path(monkeypatch):
@@ -92,12 +113,40 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
         called["task_ids"] = [task.instance_id for task in tasks]
         called["run_id"] = run_id
         called["retrieval_mode"] = config.retrieval_mode
-        return []
+        return [
+            FinalAnswer(
+                instance_id="local003",
+                status="success",
+                sql="SELECT 1",
+                csv_path="out.csv",
+                trace_path="trace.json",
+            )
+        ]
 
     monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
     monkeypatch.setattr(cli, "run_tasks", fake_run_tasks)
+    monkeypatch.setattr(
+        cli,
+        "_stage_filtered_eval_results",
+        lambda run_id, *, task_ids, destination: destination,
+    )
 
-    cli.handle_run(
+    def fake_run_official_eval(run_id, *, expected_instance_ids=None, result_dir=None, **kwargs):
+        called["eval_run_id"] = run_id
+        called["expected_instance_ids"] = expected_instance_ids
+        called["result_dir"] = result_dir
+        return {
+            "correct_local_tasks": 1,
+            "attempted_local_tasks": 1,
+            "missing_csv_count": 0,
+            "per_instance": [
+                {"instance_id": "local003", "passed": True, "score": 1, "csv_present": True}
+            ],
+        }
+
+    monkeypatch.setattr(cli, "run_official_eval", fake_run_official_eval)
+
+    result = cli.handle_run(
         run_id="smoke-local003",
         instance_id="local003",
         db=None,
@@ -114,6 +163,83 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
     assert called["task_ids"] == ["local003"]
     assert called["run_id"] == "smoke-local003"
     assert called["retrieval_mode"] == "llm_only"
+    assert called["eval_run_id"] == "smoke-local003"
+    assert called["expected_instance_ids"] == ["local003"]
+    assert called["result_dir"] is not None
+    assert result["eval_summary"]["correct_local_tasks"] == 1
+
+
+def test_handle_run_only_stages_csv_backed_results_for_eval(monkeypatch, tmp_path: Path):
+    """Post-run eval should only stage tasks that actually produced CSV files."""
+
+    called: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        cli,
+        "_load_filtered_tasks",
+        lambda **kwargs: [
+            Task(instance_id="local003", db="db", question="q1"),
+            Task(instance_id="local004", db="db", question="q2"),
+        ],
+    )
+    monkeypatch.setattr(
+        cli.RuntimeConfig,
+        "from_env",
+        classmethod(
+            lambda cls, require_api_key=False, dotenv_path=None: RuntimeConfig(api_key="k")
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_tasks",
+        lambda *args, **kwargs: [
+            FinalAnswer(
+                instance_id="local003",
+                status="success",
+                sql="SELECT 1",
+                csv_path=str(tmp_path / "local003.csv"),
+                trace_path="trace-1.json",
+            ),
+            FinalAnswer(
+                instance_id="local004",
+                status="failed",
+                sql="SELECT 2",
+                csv_path=None,
+                trace_path="trace-2.json",
+            ),
+        ],
+    )
+
+    def fake_stage(run_id, *, task_ids, destination):
+        called["staged_task_ids"] = task_ids
+        return destination
+
+    def fake_eval(run_id, *, expected_instance_ids=None, result_dir=None, **kwargs):
+        called["expected_instance_ids"] = expected_instance_ids
+        return {
+            "correct_local_tasks": 1,
+            "attempted_local_tasks": 1,
+            "missing_csv_count": 1,
+            "per_instance": [],
+        }
+
+    monkeypatch.setattr(cli, "_stage_filtered_eval_results", fake_stage)
+    monkeypatch.setattr(cli, "run_official_eval", fake_eval)
+
+    cli.handle_run(
+        run_id="smoke-local003",
+        instance_id=None,
+        db=None,
+        question_contains=None,
+        limit=None,
+        local_only=True,
+        force=False,
+        skip_failed=False,
+        retrieval_mode="lexical",
+    )
+
+    assert called["staged_task_ids"] == ["local003"]
+    assert called["expected_instance_ids"] == ["local003", "local004"]
 
 
 def test_eval_command_dispatches_filters(monkeypatch):

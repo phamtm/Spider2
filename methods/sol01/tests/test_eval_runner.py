@@ -49,6 +49,7 @@ def test_run_official_eval_writes_stdout_and_summary(tmp_path: Path):
             args=command,
             returncode=0,
             stdout=(
+                "{'local003': 1, 'local004': 0}\n"
                 "Final score: 0.5, Correct examples: 2, Total examples: 4\n"
                 "Real score: 0.003656307129798903, Correct examples: 2, Total examples: 547\n"
             ),
@@ -64,6 +65,12 @@ def test_run_official_eval_writes_stdout_and_summary(tmp_path: Path):
     assert summary["run_id"] == "smoke-local003"
     assert summary["correct_local_tasks"] == 2
     assert summary["attempted_local_tasks"] == 4
+    assert summary["instance_scores"] == {"local003": 1, "local004": 0}
+    assert summary["per_instance"] == [
+        {"csv_present": True, "instance_id": "local003", "passed": True, "score": 1},
+        {"csv_present": False, "instance_id": "local004", "passed": False, "score": 0},
+        {"csv_present": False, "instance_id": "local007", "passed": False, "score": None},
+    ]
     assert summary["missing_csv_count"] == 2
     assert summary["missing_instance_ids"] == ["local004", "local007"]
     assert (run_paths.eval_dir / "official_stdout.txt").exists()
@@ -87,6 +94,7 @@ def test_parse_eval_stdout_returns_local_and_full_scores():
         "local_subset_score": 2 / 135,
         "full_benchmark_total": 547,
         "full_benchmark_equivalent_score": 0.003656307129798903,
+        "instance_scores": {"local003": 1, "local004": 0},
     }
 
 
@@ -144,3 +152,34 @@ def test_run_official_eval_with_artifact_tag_keeps_shared_summary_name_free(tmp_
     assert tagged_summary.exists()
     payload = tagged_summary.read_text(encoding="utf-8")
     assert '"result_dir"' not in payload
+
+
+def test_run_official_eval_uses_the_scored_result_dir_for_bookkeeping(tmp_path: Path):
+    ensure_run_paths("filtered-run", outputs_root=tmp_path)
+    scored_dir = tmp_path / "scored"
+    scored_dir.mkdir(parents=True, exist_ok=True)
+    (scored_dir / "local003.csv").write_text("answer\n1\n", encoding="utf-8")
+
+    def fake_runner(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout=("{'local003': 1}\nFinal score: 1.0, Correct examples: 1, Total examples: 1\n"),
+            stderr="",
+        )
+
+    summary = run_official_eval(
+        "filtered-run",
+        outputs_root=tmp_path,
+        expected_instance_ids=["local003", "local004"],
+        result_dir=scored_dir,
+        runner=fake_runner,
+    )
+
+    assert summary["result_dir"] == str(scored_dir)
+    assert summary["missing_csv_count"] == 1
+    assert summary["missing_instance_ids"] == ["local004"]
+    assert summary["per_instance"] == [
+        {"csv_present": True, "instance_id": "local003", "passed": True, "score": 1},
+        {"csv_present": False, "instance_id": "local004", "passed": False, "score": None},
+    ]

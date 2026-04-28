@@ -102,7 +102,19 @@ def run(
         skip_failed=skip_failed,
         retrieval_mode=retrieval_mode,
     )
-    typer.echo(f"Completed {len(results)} task(s).")
+    typer.echo(f"Completed {len(results['results'])} task(s).")
+    typer.echo(
+        "Eval summary: "
+        f"{results['eval_summary']['correct_local_tasks']}/"
+        f"{results['eval_summary']['attempted_local_tasks']} correct, "
+        f"missing CSV {results['eval_summary']['missing_csv_count']}"
+    )
+    for line in _run_eval_lines(
+        tasks=results["tasks"],
+        answers=results["results"],
+        eval_summary=results["eval_summary"],
+    ):
+        typer.echo(line)
 
 
 @app.command("eval")
@@ -258,7 +270,7 @@ def handle_run(
     force: bool,
     skip_failed: bool,
     retrieval_mode: RetrievalMode,
-) -> list[Any]:
+) -> dict[str, Any]:
     """Load local tasks, then pass them to the batch coordinator."""
 
     _require_local_only(local_only)
@@ -283,13 +295,30 @@ def handle_run(
         task_count=len(tasks),
         **_runtime_config_summary(config),
     )
-    return run_tasks(
+    results = run_tasks(
         tasks,
         run_id=effective_run_id,
         config=config,
         force=force,
         skip_failed=skip_failed,
     )
+    scored_task_ids = [answer.instance_id for answer in results if answer.csv_path]
+    with TemporaryDirectory(prefix="sol01-run-eval-") as temp_dir:
+        staged_dir = _stage_filtered_eval_results(
+            effective_run_id,
+            task_ids=scored_task_ids,
+            destination=Path(temp_dir),
+        )
+        eval_summary = run_official_eval(
+            effective_run_id,
+            expected_instance_ids=[task.instance_id for task in tasks],
+            result_dir=staged_dir,
+        )
+    return {
+        "tasks": tasks,
+        "results": results,
+        "eval_summary": eval_summary,
+    }
 
 
 def handle_compare_retrieval(*, run_id: str) -> dict[str, Any]:
@@ -469,6 +498,31 @@ def _filtered_eval_tag(
     return "-".join(parts)
 
 
+def _run_eval_lines(
+    *,
+    tasks: list[Task],
+    answers: list[FinalAnswer],
+    eval_summary: dict[str, Any],
+) -> list[str]:
+    """Render one concise per-task eval line for the run command output."""
+
+    answer_by_id = {answer.instance_id: answer for answer in answers}
+    eval_by_id = {
+        row["instance_id"]: row
+        for row in eval_summary.get("per_instance", [])
+        if row.get("instance_id")
+    }
+    lines: list[str] = []
+    for task in tasks:
+        answer = answer_by_id.get(task.instance_id)
+        eval_row = eval_by_id.get(task.instance_id, {})
+        eval_label = "PASS" if eval_row.get("passed") else "FAIL"
+        task_status = answer.status if answer is not None else "missing"
+        question = _question_preview(task.question, max_length=90)
+        lines.append(f"- {task.instance_id}: {eval_label} | task {task_status} | {question}")
+    return lines
+
+
 def _move_if_exists(source: Any, destination: Any) -> None:
     """Move one artifact into the ask layout when the source file exists."""
 
@@ -482,6 +536,15 @@ def _slug(value: str) -> str:
     """Turn a short filter value into a filesystem-friendly label."""
 
     return "".join(char if char.isalnum() else "-" for char in value).strip("-") or "value"
+
+
+def _question_preview(question: str, *, max_length: int = 90) -> str:
+    """Shorten long questions so CLI summaries stay readable."""
+
+    normalized = " ".join(question.split())
+    if len(normalized) <= max_length:
+        return normalized
+    return normalized[: max_length - 1].rstrip() + "…"
 
 
 def _stage_filtered_eval_results(
