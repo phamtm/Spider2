@@ -1,0 +1,566 @@
+"""Local Streamlit dashboard for Spider progress.
+
+Run from the repo root:
+    uv run streamlit run tools/progress_ui.py
+
+Optional CLI defaults:
+    uv run streamlit run tools/progress_ui.py -- --source methods/sol01/outputs/registry/latest.json
+"""
+
+from __future__ import annotations
+
+import argparse
+import html
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+
+
+ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DATASET = ROOT / "spider2-snow" / "spider2-snow.jsonl"
+DEFAULT_SOURCE = ROOT / "methods" / "sol01" / "outputs" / "registry" / "latest.json"
+
+STATUS_ORDER = ("correct", "incorrect", "answered", "unanswered")
+STATUS_LABELS = {
+    "correct": "Correct",
+    "incorrect": "Incorrect",
+    "answered": "Answered",
+    "unanswered": "Unanswered",
+}
+STATUS_COLORS = {
+    "correct": "#0a63b7",
+    "incorrect": "#ff2d55",
+    "answered": "#f5a524",
+    "unanswered": "#1f2937",
+}
+
+
+@dataclass(frozen=True)
+class Record:
+    instance_id: str
+    status: str
+    score: float | None
+    timestamp: datetime | None
+    run_id: str | None
+    db: str | None
+    note: str | None
+    source_path: str | None
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--dataset", default=str(DEFAULT_DATASET))
+    parser.add_argument("--source", default=str(DEFAULT_SOURCE))
+    args, _ = parser.parse_known_args()
+    return args
+
+
+def resolve_path(value: str) -> Path:
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = ROOT / path
+    return path
+
+
+def read_json(path: Path) -> Any:
+    with path.open("r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows = []
+    with path.open("r", encoding="utf-8") as file:
+        for line in file:
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+    return rows
+
+
+def read_dataset(path: Path) -> pd.DataFrame:
+    if not path.exists():
+        return pd.DataFrame(columns=["instance_id", "instruction", "db_id"])
+    rows = read_jsonl(path)
+    frame = pd.DataFrame(rows)
+    if "instance_id" not in frame.columns:
+        return pd.DataFrame(columns=["instance_id", "instruction", "db_id"])
+    for column in ("instruction", "db_id"):
+        if column not in frame.columns:
+            frame[column] = ""
+    return frame[["instance_id", "instruction", "db_id"]].drop_duplicates("instance_id")
+
+
+def parse_timestamp(value: Any) -> datetime | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value, tz=timezone.utc)
+
+    text = str(value).strip()
+    formats = (
+        "%Y%m%dT%H%M%S.%fZ",
+        "%Y%m%dT%H%M%SZ",
+        "%Y-%m-%dT%H:%M:%S.%f%z",
+        "%Y-%m-%dT%H:%M:%S%z",
+    )
+    for fmt in formats:
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            pass
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def as_float(value: Any) -> float | None:
+    if value in (None, "", "null"):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def find_instance_id(item: dict[str, Any], fallback: str | None = None) -> str | None:
+    for key in ("instance_id", "id", "question_id", "task_id", "output"):
+        value = item.get(key)
+        if value:
+            return str(value).removesuffix(".csv").removesuffix(".sql")
+    return fallback
+
+
+def classify(item: dict[str, Any]) -> tuple[str, float | None]:
+    score = as_float(item.get("score"))
+    passed = item.get("passed")
+    status = str(item.get("status") or item.get("eval_status") or "").lower()
+
+    if score is not None:
+        return ("correct" if score >= 1 else "incorrect"), score
+    if passed is True:
+        return "correct", 1.0
+    if passed is False:
+        return "incorrect", 0.0
+    if status in {"pass", "passed", "correct", "success"} and item.get("eval_status") != "failed":
+        return "correct", 1.0
+    if status in {"fail", "failed", "incorrect", "eval_failed", "error"}:
+        return "incorrect", 0.0
+    if status in {"solver_failed", "not_answered", "missing"} and not (item.get("csv_path") or item.get("sql_path")):
+        return "unanswered", None
+    if item.get("eval_error") or item.get("failure_reason"):
+        return "incorrect", 0.0
+    if item.get("csv_path") or item.get("sql_path") or item.get("csv_present"):
+        return "answered", None
+    return "answered", None
+
+
+def normalize_item(item: dict[str, Any], source_path: Path, fallback_id: str | None = None) -> Record | None:
+    instance_id = find_instance_id(item, fallback=fallback_id)
+    if not instance_id:
+        return None
+
+    status, score = classify(item)
+    timestamp = parse_timestamp(item.get("timestamp") or item.get("generated_at"))
+    note = item.get("failure_reason") or item.get("eval_error") or item.get("solver_status")
+    return Record(
+        instance_id=instance_id,
+        status=status,
+        score=score,
+        timestamp=timestamp,
+        run_id=item.get("run_id"),
+        db=item.get("db") or item.get("db_id"),
+        note=str(note) if note else None,
+        source_path=str(source_path),
+    )
+
+
+def records_from_json(path: Path) -> list[Record]:
+    data = read_json(path)
+    rows: list[dict[str, Any]]
+    if isinstance(data, list):
+        rows = [row for row in data if isinstance(row, dict)]
+    elif isinstance(data, dict):
+        if isinstance(data.get("task_results"), list):
+            rows = data["task_results"]
+        elif isinstance(data.get("per_instance"), list):
+            rows = data["per_instance"]
+        elif isinstance(data.get("instance_scores"), dict):
+            rows = [
+                {"instance_id": instance_id, "score": score, "generated_at": data.get("generated_at")}
+                for instance_id, score in data["instance_scores"].items()
+            ]
+        else:
+            rows = [data]
+    else:
+        rows = []
+    return [record for row in rows if (record := normalize_item(row, path))]
+
+
+def records_from_csv(path: Path) -> list[Record]:
+    frame = pd.read_csv(path)
+    if frame.empty:
+        return []
+
+    if len(frame.columns) == 1 and frame.columns[0] == "output":
+        frame["score"] = 1
+
+    records = []
+    for item in frame.to_dict("records"):
+        records.append(normalize_item(item, path))
+    return [record for record in records if record]
+
+
+def records_from_file(path: Path) -> list[Record]:
+    if path.suffix == ".jsonl":
+        return [record for row in read_jsonl(path) if (record := normalize_item(row, path))]
+    if path.suffix == ".json":
+        return records_from_json(path)
+    if path.suffix == ".csv":
+        return records_from_csv(path)
+    if path.suffix in {".sql"}:
+        return [
+            Record(
+                instance_id=path.stem,
+                status="answered",
+                score=None,
+                timestamp=datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc),
+                run_id=None,
+                db=None,
+                note="SQL present, not evaluated",
+                source_path=str(path),
+            )
+        ]
+    return []
+
+
+def discover_result_files(path: Path) -> list[Path]:
+    preferred = [
+        path / "registry" / "latest.json",
+        path / "registry" / "task_results.jsonl",
+        path / "eval" / "summary.json",
+        path / "eval" / "per_instance.jsonl",
+        path / "summary.json",
+        path / "per_instance.jsonl",
+    ]
+    found = [candidate for candidate in preferred if candidate.exists()]
+    if found:
+        return found
+
+    patterns = ("**/eval/summary.json", "**/eval/per_instance.jsonl", "*.json", "*.jsonl", "*.csv", "*.sql")
+    files: list[Path] = []
+    for pattern in patterns:
+        files.extend(path.glob(pattern))
+    return sorted(set(files))
+
+
+def load_records(source: Path) -> list[Record]:
+    if not source.exists():
+        return []
+    if source.is_dir():
+        records: list[Record] = []
+        for file_path in discover_result_files(source):
+            records.extend(records_from_file(file_path))
+        return records
+    return records_from_file(source)
+
+
+def latest_records(records: list[Record]) -> dict[str, Record]:
+    latest: dict[str, Record] = {}
+    for index, record in enumerate(records):
+        current = latest.get(record.instance_id)
+        current_time = current.timestamp if current else None
+        record_time = record.timestamp or datetime.fromtimestamp(index, tz=timezone.utc)
+        if current is None or current_time is None or record_time >= current_time:
+            latest[record.instance_id] = record
+    return latest
+
+
+def build_status_frame(dataset: pd.DataFrame, records: list[Record]) -> pd.DataFrame:
+    latest = latest_records(records)
+    ids = list(dataset["instance_id"]) if not dataset.empty else sorted(latest)
+    rows = []
+    metadata = dataset.set_index("instance_id").to_dict("index") if not dataset.empty else {}
+
+    for instance_id in ids:
+        record = latest.get(instance_id)
+        info = metadata.get(instance_id, {})
+        rows.append(
+            {
+                "instance_id": instance_id,
+                "status": record.status if record else "unanswered",
+                "score": record.score if record else None,
+                "timestamp": record.timestamp if record else None,
+                "run_id": record.run_id if record else None,
+                "db": record.db or info.get("db_id") if record else info.get("db_id"),
+                "instruction": info.get("instruction", ""),
+                "note": record.note if record else None,
+                "source_path": record.source_path if record else None,
+            }
+        )
+
+    extras = [instance_id for instance_id in latest if instance_id not in set(ids)]
+    for instance_id in sorted(extras):
+        record = latest[instance_id]
+        rows.append(
+            {
+                "instance_id": instance_id,
+                "status": record.status,
+                "score": record.score,
+                "timestamp": record.timestamp,
+                "run_id": record.run_id,
+                "db": record.db,
+                "instruction": "",
+                "note": record.note,
+                "source_path": record.source_path,
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def make_progress_frame(records: list[Record], total_questions: int) -> pd.DataFrame:
+    if not records:
+        return pd.DataFrame(columns=["x", "answered_pct", "correct_pct", "answered", "correct", "incorrect"])
+
+    sorted_records = sorted(
+        enumerate(records),
+        key=lambda pair: pair[1].timestamp or datetime.fromtimestamp(pair[0], tz=timezone.utc),
+    )
+    state: dict[str, str] = {}
+    rows = []
+    for index, (_, record) in enumerate(sorted_records, start=1):
+        state[record.instance_id] = record.status
+        denominator = max(total_questions, len(state), 1)
+        answered = sum(status != "unanswered" for status in state.values())
+        correct = sum(status == "correct" for status in state.values())
+        incorrect = sum(status == "incorrect" for status in state.values())
+        rows.append(
+            {
+                "x": record.timestamp or index,
+                "answered_pct": answered / denominator * 100,
+                "correct_pct": correct / denominator * 100,
+                "answered": answered,
+                "correct": correct,
+                "incorrect": incorrect,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def render_chart(progress: pd.DataFrame) -> None:
+    if progress.empty:
+        st.info("No progress records found yet.")
+        return
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=progress["x"],
+            y=progress["answered_pct"],
+            name="Answered",
+            mode="lines+markers",
+            line={"color": "#0a63b7", "width": 3, "shape": "hv"},
+            fill="tozeroy",
+            fillcolor="rgba(10, 99, 183, 0.18)",
+            hovertemplate="Answered: %{customdata[0]}<br>%{y:.1f}%<extra></extra>",
+            customdata=progress[["answered"]],
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=progress["x"],
+            y=progress["correct_pct"],
+            name="Correct",
+            mode="lines+markers",
+            line={"color": "#ff2d55", "width": 3, "shape": "hv"},
+            fill="tozeroy",
+            fillcolor="rgba(255, 45, 85, 0.28)",
+            hovertemplate="Correct: %{customdata[0]}<br>%{y:.1f}%<extra></extra>",
+            customdata=progress[["correct"]],
+        )
+    )
+    fig.update_layout(
+        height=320,
+        margin={"l": 8, "r": 8, "t": 8, "b": 8},
+        paper_bgcolor="#080808",
+        plot_bgcolor="#080808",
+        font={"color": "#d7d7d7"},
+        hovermode="x unified",
+        legend={"orientation": "h", "y": 1.05, "x": 0},
+        yaxis={
+            "range": [0, 100],
+            "ticksuffix": "%",
+            "gridcolor": "rgba(255,255,255,0.08)",
+            "zeroline": False,
+        },
+        xaxis={"gridcolor": "rgba(255,255,255,0.04)", "zeroline": False},
+    )
+    st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
+
+
+def render_grid(frame: pd.DataFrame) -> None:
+    tiles = []
+    for row in frame.to_dict("records"):
+        status = row["status"]
+        title = f"{row['instance_id']} | {STATUS_LABELS[status]}"
+        if row.get("db"):
+            title += f" | {row['db']}"
+        if row.get("note"):
+            title += f" | {row['note']}"
+        if row.get("instruction"):
+            title += f" | {row['instruction']}"
+        tiles.append(
+            '<div class="tile" '
+            f'title="{html.escape(title)}" '
+            f'style="background:{STATUS_COLORS[status]}"></div>'
+        )
+
+    st.markdown(
+        f"""
+        <style>
+        .status-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(10px, 1fr));
+            gap: 3px;
+            width: 100%;
+            align-items: center;
+        }}
+        .tile {{
+            aspect-ratio: 1 / 1;
+            border: 1px solid rgba(0, 0, 0, 0.65);
+            min-width: 10px;
+        }}
+        .tile:hover {{
+            transform: scale(1.8);
+            outline: 1px solid rgba(255, 255, 255, 0.75);
+            z-index: 2;
+        }}
+        </style>
+        <div class="status-grid">{''.join(tiles)}</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def apply_page_style() -> None:
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background: #080808;
+            color: #f3f4f6;
+        }
+        [data-testid="stHeader"] {
+            background: rgba(8, 8, 8, 0.85);
+        }
+        [data-testid="stMetricValue"] {
+            color: #f8fafc;
+        }
+        [data-testid="stSidebar"] {
+            background: #101010;
+        }
+        div[data-testid="stDataFrame"] {
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def main() -> None:
+    args = parse_args()
+    st.set_page_config(page_title="Spider Progress", layout="wide")
+    apply_page_style()
+
+    source_default = args.source if resolve_path(args.source).exists() else ""
+    with st.sidebar:
+        st.title("Progress UI")
+        dataset_path = resolve_path(
+            st.text_input("Dataset JSONL", value=args.dataset, help="Used for the full question list.")
+        )
+        source_path = resolve_path(
+            st.text_input(
+                "Results source",
+                value=source_default,
+                help="File or directory: latest.json, task_results.jsonl, summary.json, per_instance.jsonl, CSV, SQL dir.",
+            )
+        )
+        search = st.text_input("Search", value="")
+        selected = st.multiselect(
+            "Status",
+            options=list(STATUS_ORDER),
+            default=list(STATUS_ORDER),
+            format_func=lambda value: STATUS_LABELS[value],
+        )
+        st.caption("Run: `uv run streamlit run tools/progress_ui.py`")
+
+    dataset = read_dataset(dataset_path)
+    records = load_records(source_path)
+    frame = build_status_frame(dataset, records)
+
+    if search:
+        needle = search.lower()
+        frame = frame[
+            frame.apply(
+                lambda row: any(needle in str(row.get(column, "")).lower() for column in ("instance_id", "db", "instruction", "note")),
+                axis=1,
+            )
+        ]
+    if selected:
+        frame = frame[frame["status"].isin(selected)]
+
+    totals = frame["status"].value_counts().to_dict()
+    total = len(frame)
+    answered = total - totals.get("unanswered", 0)
+    correct = totals.get("correct", 0)
+    incorrect = totals.get("incorrect", 0)
+    answered_score = answered / total * 100 if total else 0
+    correct_score = correct / answered * 100 if answered else 0
+
+    st.title(f"{answered} of {total} questions answered, {correct} correct ({correct_score:.1f}%)")
+    st.caption(f"Dataset: `{dataset_path}`  |  Results: `{source_path}`")
+
+    cols = st.columns(5)
+    cols[0].metric("Questions", f"{total:,}")
+    cols[1].metric("Answered", f"{answered:,}", f"{answered_score:.1f}%")
+    cols[2].metric("Correct", f"{correct:,}")
+    cols[3].metric("Incorrect", f"{incorrect:,}")
+    cols[4].metric("Unanswered", f"{totals.get('unanswered', 0):,}")
+
+    render_chart(make_progress_frame(records, len(dataset)))
+
+    st.subheader("Questions")
+    render_grid(frame)
+
+    with st.expander("Rows"):
+        display = frame.copy()
+        display["timestamp"] = display["timestamp"].astype(str)
+        st.dataframe(
+            display[
+                [
+                    "instance_id",
+                    "status",
+                    "score",
+                    "db",
+                    "timestamp",
+                    "run_id",
+                    "note",
+                    "instruction",
+                    "source_path",
+                ]
+            ],
+            width="stretch",
+            hide_index=True,
+        )
+
+
+if __name__ == "__main__":
+    main()
