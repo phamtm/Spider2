@@ -8,17 +8,18 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from sol01.logging import get_logger
 from sol01.output import RunPaths, ensure_run_paths
+from sol01.snowflake_runner import DEFAULT_CREDENTIAL_PATH
 from sol01.tasks import REPO_ROOT, load_tasks
 
 EVALUATION_SUITE_DIR = REPO_ROOT / "spider2-snow" / "evaluation_suite"
 EVALUATE_SCRIPT = EVALUATION_SUITE_DIR / "evaluate.py"
 GOLD_DIR = EVALUATION_SUITE_DIR / "gold"
-LOCAL_SUBSET_TOTAL = 135
-FULL_BENCHMARK_TOTAL = 547
+BENCHMARK_TOTAL = 547
 FINAL_SCORE_RE = re.compile(
     r"Final score:\s*([0-9.]+),\s*Correct examples:\s*(\d+),\s*Total examples:\s*(\d+)"
 )
@@ -37,6 +38,7 @@ def run_official_eval(
     expected_instance_ids: list[str] | None = None,
     artifact_tag: str | None = None,
     result_dir: Path | None = None,
+    credential_path: Path | None = None,
     runner: Runner | None = None,
 ) -> dict[str, Any]:
     """Run the official evaluator in exec_result mode and write a summary file."""
@@ -58,7 +60,13 @@ def run_official_eval(
         python_executable=python_executable,
         result_dir=scored_result_dir,
     )
-    completed = (runner or _run_subprocess)(command, cwd=EVALUATION_SUITE_DIR)
+    with TemporaryDirectory(prefix="sol01-snow-eval-") as temp_dir:
+        eval_workspace = Path(temp_dir)
+        _write_eval_credential(
+            eval_workspace / "snowflake_credential.json",
+            credential_path=credential_path,
+        )
+        completed = (runner or _run_subprocess)(command, cwd=eval_workspace)
 
     suffix = f".{artifact_tag}" if artifact_tag else ""
     stdout_path = run_paths.eval_dir / f"official_stdout{suffix}.txt"
@@ -103,8 +111,8 @@ def run_official_eval(
         stderr_path=str(stderr_path),
         summary_path=str(summary_path),
         missing_csv_count=summary["missing_csv_count"],
-        correct_local_tasks=summary["correct_local_tasks"],
-        attempted_local_tasks=summary["attempted_local_tasks"],
+        correct_tasks=summary["correct_tasks"],
+        attempted_tasks=summary["attempted_tasks"],
     )
     if completed.returncode != 0:
         raise subprocess.CalledProcessError(
@@ -137,32 +145,29 @@ def build_eval_command(
 
 
 def parse_eval_stdout(stdout: str) -> dict[str, Any]:
-    """Parse the evaluator stdout into stable local summary fields."""
+    """Parse the evaluator stdout into stable benchmark summary fields."""
 
     final_match = FINAL_SCORE_RE.search(stdout)
     real_match = REAL_SCORE_RE.search(stdout)
 
     summary: dict[str, Any] = {
-        "attempted_local_tasks": 0,
-        "correct_local_tasks": 0,
-        "local_subset_total": LOCAL_SUBSET_TOTAL,
-        "local_subset_score": 0.0,
-        "full_benchmark_total": FULL_BENCHMARK_TOTAL,
-        "full_benchmark_equivalent_score": 0.0,
+        "attempted_tasks": 0,
+        "correct_tasks": 0,
+        "attempted_score": 0.0,
+        "benchmark_total": BENCHMARK_TOTAL,
+        "benchmark_score": 0.0,
         "instance_scores": _parse_instance_scores(stdout),
     }
 
     if final_match:
-        summary["attempted_local_tasks"] = int(final_match.group(3))
-        summary["correct_local_tasks"] = int(final_match.group(2))
-        summary["local_subset_score"] = int(final_match.group(2)) / LOCAL_SUBSET_TOTAL
+        summary["attempted_tasks"] = int(final_match.group(3))
+        summary["correct_tasks"] = int(final_match.group(2))
+        summary["attempted_score"] = float(final_match.group(1))
 
     if real_match:
-        summary["full_benchmark_equivalent_score"] = float(real_match.group(1))
+        summary["benchmark_score"] = float(real_match.group(1))
     elif final_match:
-        summary["full_benchmark_equivalent_score"] = (
-            int(final_match.group(2)) / FULL_BENCHMARK_TOTAL
-        )
+        summary["benchmark_score"] = int(final_match.group(2)) / BENCHMARK_TOTAL
 
     return summary
 
@@ -211,20 +216,20 @@ def _per_instance_summary(
 
 
 def _missing_instance_ids(result_dir: Path, *, expected_ids: set[str]) -> list[str]:
-    """List local task IDs that do not have a CSV in the run output."""
+    """List task IDs that do not have a CSV in the run output."""
 
     present_ids = {path.stem for path in result_dir.glob("*.csv")}
     return sorted(expected_ids - present_ids)
 
 
 def _missing_csv_count(result_dir: Path, *, expected_ids: set[str]) -> int:
-    """Count how many local tasks still do not have a CSV output."""
+    """Count how many tasks still do not have a CSV output."""
 
     return len(_missing_instance_ids(result_dir, expected_ids=expected_ids))
 
 
 def _expected_instance_ids(run_paths: RunPaths) -> set[str]:
-    """Use manifest task IDs when present, otherwise fall back to all local tasks."""
+    """Use manifest task IDs when present, otherwise fall back to all tasks."""
 
     if run_paths.manifest_path.exists():
         manifest = json.loads(run_paths.manifest_path.read_text(encoding="utf-8"))
@@ -232,6 +237,36 @@ def _expected_instance_ids(run_paths: RunPaths) -> set[str]:
         if isinstance(task_ids, list) and all(isinstance(item, str) for item in task_ids):
             return set(task_ids)
     return {task.instance_id for task in load_tasks()}
+
+
+def _write_eval_credential(destination: Path, *, credential_path: Path | None) -> None:
+    """Render the evaluator's local credential file without mutating vendored files."""
+
+    payload = _eval_credential_payload(credential_path)
+    destination.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _eval_credential_payload(credential_path: Path | None) -> dict[str, Any]:
+    """Return connector-compatible Snowflake credentials for the official evaluator."""
+
+    source_path = credential_path or DEFAULT_CREDENTIAL_PATH
+    if source_path.exists():
+        raw_payload = json.loads(source_path.read_text(encoding="utf-8"))
+    else:
+        raw_payload = {}
+
+    username = raw_payload.get("user") or raw_payload.get("username") or "<your_username>"
+    payload: dict[str, Any] = {
+        "user": username,
+        "password": raw_payload.get("password") or "<your_generated_token>",
+        "account": raw_payload.get("account") or "RSRSBDK-YDB67606",
+        "role": raw_payload.get("role") or "PARTICIPANT",
+        "warehouse": raw_payload.get("warehouse") or "COMPUTE_WH_PARTICIPANT",
+    }
+    session_parameters = raw_payload.get("session_parameters")
+    if isinstance(session_parameters, dict):
+        payload["session_parameters"] = session_parameters
+    return payload
 
 
 def _run_subprocess(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:

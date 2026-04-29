@@ -61,6 +61,8 @@ bd close <id>         # Complete work
 - Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+- This repo uses the shared local Dolt server on `127.0.0.1:3307` with database `sp`.
+- Use normal `bd` commands against that shared server; do not start a second Dolt server or rely on `bd dolt pull` / `bd dolt push` for this workspace.
 
 ## Session Completion
 

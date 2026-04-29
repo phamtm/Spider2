@@ -420,8 +420,8 @@ def _render_summary(report: dict[str, Any]) -> str:
     if eval_summary:
         lines.append(
             "- Eval: "
-            f"{eval_summary.get('correct_local_tasks', 0)}/"
-            f"{eval_summary.get('attempted_local_tasks', 0)} correct, "
+            f"{eval_summary.get('correct_tasks', 0)}/"
+            f"{eval_summary.get('attempted_tasks', 0)} correct, "
             f"missing CSV {eval_summary.get('missing_csv_count', 0)}"
         )
 

@@ -100,8 +100,8 @@ def run(
     typer.echo(f"Completed {len(results['results'])} task(s).")
     typer.echo(
         "Eval summary: "
-        f"{results['eval_summary']['correct_local_tasks']}/"
-        f"{results['eval_summary']['attempted_local_tasks']} correct, "
+        f"{results['eval_summary']['correct_tasks']}/"
+        f"{results['eval_summary']['attempted_tasks']} correct, "
         f"missing CSV {results['eval_summary']['missing_csv_count']}"
     )
     for line in _run_eval_lines(
@@ -154,14 +154,14 @@ def eval_command(
     )
     typer.echo(
         "Eval summary: "
-        f"{summary['correct_local_tasks']}/{summary['attempted_local_tasks']} correct, "
+        f"{summary['correct_tasks']}/{summary['attempted_tasks']} correct, "
         f"missing CSV {summary['missing_csv_count']}"
     )
     logger.info(
         "eval complete",
         run_id=run_id,
-        correct_local_tasks=summary["correct_local_tasks"],
-        attempted_local_tasks=summary["attempted_local_tasks"],
+        correct_tasks=summary["correct_tasks"],
+        attempted_tasks=summary["attempted_tasks"],
         missing_csv_count=summary["missing_csv_count"],
     )
 

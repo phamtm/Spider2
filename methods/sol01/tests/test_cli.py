@@ -61,8 +61,8 @@ def test_run_command_dispatches_expected_filters(monkeypatch):
                 )
             ],
             "eval_summary": {
-                "correct_local_tasks": 1,
-                "attempted_local_tasks": 1,
+                "correct_tasks": 1,
+                "attempted_tasks": 1,
                 "missing_csv_count": 0,
                 "per_instance": [
                     {"instance_id": "local003", "passed": True, "score": 1, "csv_present": True}
@@ -135,8 +135,8 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
         called["expected_instance_ids"] = expected_instance_ids
         called["result_dir"] = result_dir
         return {
-            "correct_local_tasks": 1,
-            "attempted_local_tasks": 1,
+            "correct_tasks": 1,
+            "attempted_tasks": 1,
             "missing_csv_count": 0,
             "per_instance": [
                 {"instance_id": "local003", "passed": True, "score": 1, "csv_present": True}
@@ -164,7 +164,7 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
     assert called["eval_run_id"] == "smoke-local003"
     assert called["expected_instance_ids"] == ["local003"]
     assert called["result_dir"] is not None
-    assert result["eval_summary"]["correct_local_tasks"] == 1
+    assert result["eval_summary"]["correct_tasks"] == 1
 
 
 def test_handle_run_only_stages_csv_backed_results_for_eval(monkeypatch, tmp_path: Path):
@@ -215,8 +215,8 @@ def test_handle_run_only_stages_csv_backed_results_for_eval(monkeypatch, tmp_pat
     def fake_eval(run_id, *, expected_instance_ids=None, result_dir=None, **kwargs):
         called["expected_instance_ids"] = expected_instance_ids
         return {
-            "correct_local_tasks": 1,
-            "attempted_local_tasks": 1,
+            "correct_tasks": 1,
+            "attempted_tasks": 1,
             "missing_csv_count": 1,
             "per_instance": [],
         }
@@ -247,8 +247,8 @@ def test_eval_command_dispatches_filters(monkeypatch):
     def fake_handle_eval(**kwargs: Any) -> dict[str, Any]:
         called.update(kwargs)
         return {
-            "correct_local_tasks": 1,
-            "attempted_local_tasks": 1,
+            "correct_tasks": 1,
+            "attempted_tasks": 1,
             "missing_csv_count": 0,
         }
 
@@ -300,8 +300,8 @@ def test_handle_eval_passes_filtered_ids_without_rewriting_manifest(monkeypatch,
         called["artifact_tag"] = artifact_tag
         called["result_dir_files"] = sorted(path.name for path in result_dir.iterdir())
         return {
-            "correct_local_tasks": 1,
-            "attempted_local_tasks": 1,
+            "correct_tasks": 1,
+            "attempted_tasks": 1,
             "missing_csv_count": 0,
         }
 
@@ -315,7 +315,7 @@ def test_handle_eval_passes_filtered_ids_without_rewriting_manifest(monkeypatch,
         limit=None,
     )
 
-    assert summary["correct_local_tasks"] == 1
+    assert summary["correct_tasks"] == 1
     assert called == {
         "run_id": "smoke-local003",
         "expected_instance_ids": ["local003"],

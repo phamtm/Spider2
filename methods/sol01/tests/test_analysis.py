@@ -17,8 +17,8 @@ def test_analyze_run_groups_failures_and_writes_reports(tmp_path: Path):
     (run_paths.eval_dir / "summary.json").write_text(
         json.dumps(
             {
-                "attempted_local_tasks": 6,
-                "correct_local_tasks": 2,
+                "attempted_tasks": 6,
+                "correct_tasks": 2,
                 "missing_csv_count": 1,
                 "missing_instance_ids": ["local005"],
             }
