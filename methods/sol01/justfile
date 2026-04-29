@@ -16,8 +16,16 @@ lint:
 test:
     uv run pytest tests -q
 
+# Run persisted solver mode for one or more Spider2-snow selectors.
+run *patterns:
+    uv run python -m sol01.run_mode {{patterns}}
+
+# Run persisted solver mode over the full Spider2-snow task set.
+all:
+    uv run python -m sol01.run_mode --all
+
 # Run one Spider2-snow gold SQL question and score the CSV output.
-run question:
+smoke question:
     uv run python -m sol01.snow_smoke "{{question}}"
 
 # Run format, lint, and tests together.

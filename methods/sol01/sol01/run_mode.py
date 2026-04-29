@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Sequence
@@ -188,6 +190,30 @@ def run_persisted_mode(
         raise
 
 
+def main(argv: Sequence[str] | None = None) -> int:
+    """CLI entrypoint for persisted run mode."""
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "patterns",
+        nargs="*",
+        help="Task selectors such as sf_bq320, sf_bq3*, or sf_bq3* sf_bq4*.",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Run the full Spider2-snow task set.",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        run_persisted_mode(args.patterns or None, all_mode=args.all)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
 def _update_registry(
     *,
     run_id: str,
@@ -305,3 +331,7 @@ def _slug(value: str) -> str:
     """Turn a selector into a compact filesystem-friendly label."""
 
     return "".join(char if char.isalnum() else "-" for char in value).strip("-") or "value"
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

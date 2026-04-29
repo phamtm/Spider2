@@ -47,7 +47,7 @@ just test
 just check
 ```
 
-## Planned CLI
+## Command Line
 
 ```bash
 uv run sol01 index
@@ -56,5 +56,20 @@ uv run sol01 eval --run-id <run_id>
 uv run sol01 analyze --run-id <run_id>
 uv run sol01 ask --db E_COMMERCE "Which customers have the highest AOV?"
 ```
+
+Persisted run mode uses `just`:
+
+```bash
+just run sf_bq320
+just run 'sf_bq3*' 'sf_bq4*'
+just all
+just smoke sf_bq320
+```
+
+Use quotes around patterns so the shell does not expand them first.
+Run outputs live under `methods/sol01/outputs/<run_id>/`.
+The durable logs are in `logs/`, scored CSVs in `eval/scored_csv/`,
+per-instance eval rows in `eval/per_instance.jsonl`, and the local registry in
+`methods/sol01/outputs/registry/`.
 
 The implementation plan is tracked in `PLAN.md`.

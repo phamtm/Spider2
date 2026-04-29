@@ -31,7 +31,7 @@ class EvaluatorRunner(Protocol):
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entrypoint for `just run <question>`."""
+    """CLI entrypoint for `just smoke <question>`."""
 
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("question", help="Spider2-snow instance ID, for example sf_bq320.")
