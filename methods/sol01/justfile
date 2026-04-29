@@ -16,6 +16,10 @@ lint:
 test:
     uv run pytest tests -q
 
+# Run one Spider2-snow gold SQL question and score the CSV output.
+run question:
+    uv run python -m sol01.snow_smoke "{{question}}"
+
 # Run format, lint, and tests together.
 check:
     just fmt
