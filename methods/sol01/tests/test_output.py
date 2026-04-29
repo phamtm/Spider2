@@ -9,7 +9,12 @@ from sol01.output import (
     ensure_ask_paths,
     ensure_run_paths,
     llm_call_log_path_for,
+    per_instance_eval_path_for,
+    run_log_path_for,
+    scored_csv_dir_for,
     should_skip_task,
+    stderr_log_path_for,
+    stdout_log_path_for,
     write_manifest,
     write_sql,
     write_trace,
@@ -38,10 +43,19 @@ def test_ensure_run_paths_and_manifest_creation(tmp_path):
     assert run_paths.csv_dir.exists()
     assert run_paths.traces_dir.exists()
     assert run_paths.llm_calls_dir.exists()
+    assert run_paths.logs_dir.exists()
     assert run_paths.eval_dir.exists()
+    assert run_paths.eval_scored_csv_dir.exists()
     assert run_paths.analysis_dir.exists()
     assert llm_call_log_path_for(run_paths, instance_id="local003") == (
         tmp_path / "smoke-local003" / "llm_calls" / "local003.jsonl"
+    )
+    assert stdout_log_path_for(run_paths) == tmp_path / "smoke-local003" / "logs" / "stdout.txt"
+    assert stderr_log_path_for(run_paths) == tmp_path / "smoke-local003" / "logs" / "stderr.txt"
+    assert run_log_path_for(run_paths) == tmp_path / "smoke-local003" / "logs" / "run.jsonl"
+    assert scored_csv_dir_for(run_paths) == tmp_path / "smoke-local003" / "eval" / "scored_csv"
+    assert per_instance_eval_path_for(run_paths) == (
+        tmp_path / "smoke-local003" / "eval" / "per_instance.jsonl"
     )
     assert manifest_path.exists()
     assert json.loads(manifest_path.read_text(encoding="utf-8"))["task_ids"] == ["local003"]

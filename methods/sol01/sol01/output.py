@@ -23,7 +23,9 @@ class RunPaths:
     csv_dir: Path
     traces_dir: Path
     llm_calls_dir: Path
+    logs_dir: Path
     eval_dir: Path
+    eval_scored_csv_dir: Path
     analysis_dir: Path
 
 
@@ -45,10 +47,21 @@ def ensure_run_paths(run_id: str, *, outputs_root: Path = OUTPUTS_ROOT) -> RunPa
     csv_dir = root / "csv"
     traces_dir = root / "traces"
     llm_calls_dir = root / "llm_calls"
+    logs_dir = root / "logs"
     eval_dir = root / "eval"
+    eval_scored_csv_dir = eval_dir / "scored_csv"
     analysis_dir = root / "analysis"
 
-    for path in (sql_dir, csv_dir, traces_dir, llm_calls_dir, eval_dir, analysis_dir):
+    for path in (
+        sql_dir,
+        csv_dir,
+        traces_dir,
+        llm_calls_dir,
+        logs_dir,
+        eval_dir,
+        eval_scored_csv_dir,
+        analysis_dir,
+    ):
         path.mkdir(parents=True, exist_ok=True)
 
     return RunPaths(
@@ -58,7 +71,9 @@ def ensure_run_paths(run_id: str, *, outputs_root: Path = OUTPUTS_ROOT) -> RunPa
         csv_dir=csv_dir,
         traces_dir=traces_dir,
         llm_calls_dir=llm_calls_dir,
+        logs_dir=logs_dir,
         eval_dir=eval_dir,
+        eval_scored_csv_dir=eval_scored_csv_dir,
         analysis_dir=analysis_dir,
     )
 
@@ -123,6 +138,36 @@ def llm_call_log_path_for(run_paths: RunPaths, *, instance_id: str) -> Path:
     """Return the raw LLM call JSONL path for one task."""
 
     return run_paths.llm_calls_dir / f"{instance_id}.jsonl"
+
+
+def stdout_log_path_for(run_paths: RunPaths) -> Path:
+    """Return the captured stdout path for one run."""
+
+    return run_paths.logs_dir / "stdout.txt"
+
+
+def stderr_log_path_for(run_paths: RunPaths) -> Path:
+    """Return the captured stderr path for one run."""
+
+    return run_paths.logs_dir / "stderr.txt"
+
+
+def run_log_path_for(run_paths: RunPaths) -> Path:
+    """Return the append-only run log path for one run."""
+
+    return run_paths.logs_dir / "run.jsonl"
+
+
+def scored_csv_dir_for(run_paths: RunPaths) -> Path:
+    """Return the durable scored CSV directory for one run."""
+
+    return run_paths.eval_scored_csv_dir
+
+
+def per_instance_eval_path_for(run_paths: RunPaths) -> Path:
+    """Return the per-instance eval record path for one run."""
+
+    return run_paths.eval_dir / "per_instance.jsonl"
 
 
 def should_skip_task(
