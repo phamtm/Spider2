@@ -22,6 +22,7 @@ class RunPaths:
     sql_dir: Path
     csv_dir: Path
     traces_dir: Path
+    llm_calls_dir: Path
     eval_dir: Path
     analysis_dir: Path
 
@@ -43,10 +44,11 @@ def ensure_run_paths(run_id: str, *, outputs_root: Path = OUTPUTS_ROOT) -> RunPa
     sql_dir = root / "sql"
     csv_dir = root / "csv"
     traces_dir = root / "traces"
+    llm_calls_dir = root / "llm_calls"
     eval_dir = root / "eval"
     analysis_dir = root / "analysis"
 
-    for path in (sql_dir, csv_dir, traces_dir, eval_dir, analysis_dir):
+    for path in (sql_dir, csv_dir, traces_dir, llm_calls_dir, eval_dir, analysis_dir):
         path.mkdir(parents=True, exist_ok=True)
 
     return RunPaths(
@@ -55,6 +57,7 @@ def ensure_run_paths(run_id: str, *, outputs_root: Path = OUTPUTS_ROOT) -> RunPa
         sql_dir=sql_dir,
         csv_dir=csv_dir,
         traces_dir=traces_dir,
+        llm_calls_dir=llm_calls_dir,
         eval_dir=eval_dir,
         analysis_dir=analysis_dir,
     )
@@ -114,6 +117,12 @@ def trace_path_for(run_paths: RunPaths, *, instance_id: str) -> Path:
     """Return the expected trace path for one task."""
 
     return run_paths.traces_dir / f"{instance_id}.json"
+
+
+def llm_call_log_path_for(run_paths: RunPaths, *, instance_id: str) -> Path:
+    """Return the raw LLM call JSONL path for one task."""
+
+    return run_paths.llm_calls_dir / f"{instance_id}.jsonl"
 
 
 def should_skip_task(

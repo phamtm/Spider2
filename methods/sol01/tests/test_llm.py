@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -11,6 +12,7 @@ from pydantic_ai.models.test import TestModel
 
 from sol01.config import RuntimeConfig
 from sol01.llm import LLMClient, build_model, build_model_settings, prompt_sha256
+from sol01.llm_logging import LLMCallLogger
 from sol01.models import Intent
 
 FIXTURE_PROMPTS_DIR = Path(__file__).parent / "fixtures" / "prompts"
@@ -143,6 +145,55 @@ def test_llm_client_uses_prompted_output_for_structured_calls(monkeypatch):
     assert isinstance(captured["output_type"], PromptedOutput)
 
 
+def test_llm_client_logs_successful_structured_call(monkeypatch, tmp_path):
+    log_path = tmp_path / "calls.jsonl"
+    client = LLMClient(
+        RuntimeConfig(api_key="test-key"),
+        prompts_dir=FIXTURE_PROMPTS_DIR,
+        call_logger=LLMCallLogger(log_path),
+    )
+
+    class FakeResult:
+        output = SampleOutput(value="hello")
+
+    class FakeAgent:
+        def __init__(self, *, model, system_prompt, output_type):
+            pass
+
+        def run_sync(self, user_prompt):
+            return FakeResult()
+
+    monkeypatch.setattr("sol01.llm.Agent", FakeAgent)
+
+    output = client.run_structured(
+        "Say hi.",
+        prompt_name="sample",
+        output_type=SampleOutput,
+    )
+
+    assert output.model_dump() == {"value": "hello"}
+    records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+    assert len(records) == 1
+    record = records[0]
+    assert record["schema_version"] == 1
+    assert record["call_id"] == "0001-sample"
+    assert record["status"] == "success"
+    assert record["prompt_name"] == "sample"
+    assert record["prompt_sha256"] == prompt_sha256(
+        (FIXTURE_PROMPTS_DIR / "sample.md").read_text(encoding="utf-8")
+    )
+    assert record["output_type"] == "SampleOutput"
+    assert record["model"] == "deepseek/deepseek-v4-pro"
+    assert record["base_url"] == "https://openrouter.ai/api/v1"
+    assert record["request"]["system_prompt"].startswith("# Sample Prompt")
+    assert record["request"]["user_prompt"] == "Say hi."
+    assert record["request"]["output_schema"] == "SampleOutput"
+    assert record["response"]["validated_output"] == {"value": "hello"}
+    assert record["attempts"][0]["status"] == "success"
+    assert record["error"] is None
+    assert "test-key" not in log_path.read_text(encoding="utf-8")
+
+
 def test_llm_client_retries_transient_model_http_errors(monkeypatch):
     client = LLMClient(RuntimeConfig(api_key="test-key"), prompts_dir=FIXTURE_PROMPTS_DIR)
     calls = {"count": 0}
@@ -178,6 +229,53 @@ def test_llm_client_retries_transient_model_http_errors(monkeypatch):
     assert calls["count"] == 3
 
 
+def test_llm_client_logs_retry_attempts(monkeypatch, tmp_path):
+    log_path = tmp_path / "calls.jsonl"
+    client = LLMClient(
+        RuntimeConfig(api_key="test-key"),
+        prompts_dir=FIXTURE_PROMPTS_DIR,
+        call_logger=LLMCallLogger(log_path),
+    )
+    calls = {"count": 0}
+
+    class FakeResult:
+        output = SampleOutput(value="hello")
+
+    class FakeAgent:
+        def __init__(self, *, model, system_prompt, output_type):
+            pass
+
+        def run_sync(self, user_prompt):
+            calls["count"] += 1
+            if calls["count"] < 3:
+                raise ModelHTTPError(
+                    status_code=429,
+                    model_name="deepseek/deepseek-v4-pro",
+                    body={"message": "rate limited"},
+                )
+            return FakeResult()
+
+    monkeypatch.setattr("sol01.llm.Agent", FakeAgent)
+    monkeypatch.setattr("sol01.llm.time.sleep", lambda seconds: None)
+
+    output = client.run_structured(
+        "Say hi.",
+        prompt_name="sample",
+        output_type=SampleOutput,
+    )
+
+    assert output.model_dump() == {"value": "hello"}
+    record = json.loads(log_path.read_text(encoding="utf-8"))
+    assert record["status"] == "success"
+    assert [attempt["status"] for attempt in record["attempts"]] == [
+        "error",
+        "error",
+        "success",
+    ]
+    assert record["attempts"][0]["error"]["status_code"] == 429
+    assert record["error"] is None
+
+
 def test_llm_client_does_not_retry_non_transient_model_http_errors(monkeypatch):
     client = LLMClient(RuntimeConfig(api_key="test-key"), prompts_dir=FIXTURE_PROMPTS_DIR)
     calls = {"count": 0}
@@ -210,3 +308,47 @@ def test_llm_client_does_not_retry_non_transient_model_http_errors(monkeypatch):
         raise AssertionError("Expected ModelHTTPError")
 
     assert calls["count"] == 1
+
+
+def test_llm_client_logs_non_transient_model_http_error(monkeypatch, tmp_path):
+    log_path = tmp_path / "calls.jsonl"
+    client = LLMClient(
+        RuntimeConfig(api_key="test-key"),
+        prompts_dir=FIXTURE_PROMPTS_DIR,
+        call_logger=LLMCallLogger(log_path),
+    )
+
+    class FakeAgent:
+        def __init__(self, *, model, system_prompt, output_type):
+            pass
+
+        def run_sync(self, user_prompt):
+            raise ModelHTTPError(
+                status_code=400,
+                model_name="deepseek/deepseek-v4-pro",
+                body={"message": "bad request"},
+            )
+
+    monkeypatch.setattr("sol01.llm.Agent", FakeAgent)
+    monkeypatch.setattr("sol01.llm.time.sleep", lambda seconds: None)
+
+    try:
+        client.run_structured(
+            "Say hi.",
+            prompt_name="sample",
+            output_type=SampleOutput,
+        )
+    except ModelHTTPError as exc:
+        assert exc.status_code == 400
+    else:
+        raise AssertionError("Expected ModelHTTPError")
+
+    log_text = log_path.read_text(encoding="utf-8")
+    record = json.loads(log_text)
+    assert record["status"] == "error"
+    assert record["response"] is None
+    assert record["error"]["type"] == "ModelHTTPError"
+    assert record["error"]["status_code"] == 400
+    assert record["error"]["body"] == {"message": "bad request"}
+    assert record["attempts"][0]["error"]["status_code"] == 400
+    assert "test-key" not in log_text

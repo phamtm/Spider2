@@ -157,6 +157,69 @@ def test_run_task_success_path(
     assert trace["attempts"][0]["execution_result"]["ok"] is True
 
 
+def test_run_task_live_client_wires_llm_call_log_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
+):
+    task = Task(instance_id="sf_local003", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("logged-run", outputs_root=tmp_path)
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Find customer totals.",
+                    entities=["sales"],
+                    metrics=[],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="customer and total columns",
+                    assumptions=["Use all rows."],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE} ORDER BY amount DESC",
+                    explanation="Read customer amounts directly.",
+                    assumptions=["amount already stores totals"],
+                    confidence=0.8,
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(confidence=0.9, issues=[], should_repair=False, repair_focus=None)
+            ],
+        }
+    )
+    created: dict[str, Path] = {}
+
+    def fake_llm_client(config: RuntimeConfig, *, call_logger):
+        created["path"] = call_logger.path
+        return llm
+
+    monkeypatch.setattr("sol01.coordinator.LLMClient", fake_llm_client)
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="test_db",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        initial_candidates=1,
+    )
+
+    log_path = run_paths.llm_calls_dir / "sf_local003.jsonl"
+    assert answer.status == "success"
+    assert created["path"] == log_path
+    trace = json.loads((run_paths.traces_dir / "sf_local003.json").read_text(encoding="utf-8"))
+    assert trace["llm_call_log_path"] == str(log_path)
+
+
 def test_run_task_repairs_validation_failure(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
 ):

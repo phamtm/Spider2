@@ -8,6 +8,7 @@ from sol01.output import (
     csv_path_for,
     ensure_ask_paths,
     ensure_run_paths,
+    llm_call_log_path_for,
     should_skip_task,
     write_manifest,
     write_sql,
@@ -36,8 +37,12 @@ def test_ensure_run_paths_and_manifest_creation(tmp_path):
     assert run_paths.sql_dir.exists()
     assert run_paths.csv_dir.exists()
     assert run_paths.traces_dir.exists()
+    assert run_paths.llm_calls_dir.exists()
     assert run_paths.eval_dir.exists()
     assert run_paths.analysis_dir.exists()
+    assert llm_call_log_path_for(run_paths, instance_id="local003") == (
+        tmp_path / "smoke-local003" / "llm_calls" / "local003.jsonl"
+    )
     assert manifest_path.exists()
     assert json.loads(manifest_path.read_text(encoding="utf-8"))["task_ids"] == ["local003"]
     assert sql_path.read_text(encoding="utf-8") == "SELECT 1\n"

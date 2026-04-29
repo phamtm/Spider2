@@ -9,6 +9,7 @@ from typing import Any, Protocol
 from sol01.config import RuntimeConfig
 from sol01.docs import load_document_text
 from sol01.llm import LLMClient
+from sol01.llm_logging import LLMCallLogger
 from sol01.logging import get_logger
 from sol01.models import (
     ConfidenceReport,
@@ -23,6 +24,7 @@ from sol01.output import (
     RunPaths,
     csv_path_for,
     ensure_run_paths,
+    llm_call_log_path_for,
     should_skip_task,
     trace_path_for,
     write_manifest,
@@ -95,13 +97,12 @@ def run_tasks(
         skip_failed=skip_failed,
     )
 
-    client = llm_client or LLMClient(config)
     results = [
         run_task(
             task,
             run_paths=run_paths,
             config=config,
-            llm_client=client,
+            llm_client=llm_client,
             force=force,
             skip_failed=skip_failed,
         )
@@ -132,7 +133,12 @@ def run_task(
     """Run one task from retrieval through final trace writing."""
 
     started_at = perf_counter()
-    client = llm_client or LLMClient(config)
+    live_logging_enabled = llm_client is None
+    task_llm_log_path = llm_call_log_path_for(run_paths, instance_id=task.instance_id)
+    client = llm_client or LLMClient(
+        config,
+        call_logger=LLMCallLogger(task_llm_log_path),
+    )
     task_trace_path = trace_path_for(run_paths, instance_id=task.instance_id)
 
     if not force and should_skip_task(
@@ -355,6 +361,8 @@ def run_task(
         "prompt_hashes": prompt_hashes,
         "attempts": attempts,
     }
+    if live_logging_enabled:
+        trace_payload["llm_call_log_path"] = str(task_llm_log_path)
 
     if best_attempt is not None and best_attempt["execution_result"]["ok"]:
         sql_path = write_sql(run_paths, instance_id=task.instance_id, sql=best_attempt["sql"])
