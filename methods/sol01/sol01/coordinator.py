@@ -97,17 +97,25 @@ def run_tasks(
         skip_failed=skip_failed,
     )
 
-    results = [
-        run_task(
-            task,
-            run_paths=run_paths,
-            config=config,
-            llm_client=llm_client,
-            force=force,
-            skip_failed=skip_failed,
-        )
-        for task in tasks
-    ]
+    results: list[FinalAnswer] = []
+    for task in tasks:
+        try:
+            result = run_task(
+                task,
+                run_paths=run_paths,
+                config=config,
+                llm_client=llm_client,
+                force=force,
+                skip_failed=skip_failed,
+            )
+        except Exception as exc:
+            result = _record_batch_task_failure(
+                task=task,
+                run_paths=run_paths,
+                live_logging_enabled=llm_client is None,
+                error=exc,
+            )
+        results.append(result)
     logger.info(
         "run complete",
         run_id=run_id,
@@ -116,6 +124,51 @@ def run_tasks(
         skipped_count=sum(1 for result in results if result.status == "skipped"),
     )
     return results
+
+
+def _record_batch_task_failure(
+    *,
+    task: Task,
+    run_paths: RunPaths,
+    live_logging_enabled: bool,
+    error: Exception,
+) -> FinalAnswer:
+    """Write a failed trace for an unexpected batch-level task crash."""
+
+    task_trace_path = trace_path_for(run_paths, instance_id=task.instance_id)
+    task_llm_log_path = llm_call_log_path_for(run_paths, instance_id=task.instance_id)
+    trace_payload: dict[str, Any] = {
+        "instance_id": task.instance_id,
+        "db": task.db,
+        "question": task.question,
+        "status": "failed",
+        "prompt_hashes": {},
+        "attempts": [],
+        "final_sql": None,
+        "csv_path": None,
+        "error": {
+            "type": error.__class__.__name__,
+            "message": str(error) or error.__class__.__name__,
+        },
+    }
+    if live_logging_enabled:
+        trace_payload["llm_call_log_path"] = str(task_llm_log_path)
+    write_trace(run_paths, instance_id=task.instance_id, trace=trace_payload)
+    logger.exception(
+        "task crashed",
+        instance_id=task.instance_id,
+        db=task.db,
+        error_type=error.__class__.__name__,
+        error_message=str(error) or error.__class__.__name__,
+        trace_path=str(task_trace_path),
+    )
+    return FinalAnswer(
+        instance_id=task.instance_id,
+        status="failed",
+        sql=None,
+        csv_path=None,
+        trace_path=str(task_trace_path),
+    )
 
 
 def run_task(

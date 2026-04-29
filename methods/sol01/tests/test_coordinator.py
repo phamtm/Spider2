@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 
 from sol01.config import RuntimeConfig
-from sol01.coordinator import run_task
+from sol01.coordinator import run_task, run_tasks
 from sol01.llm import PromptSpec
 from sol01.models import (
     ConfidenceReport,
@@ -218,6 +218,62 @@ def test_run_task_live_client_wires_llm_call_log_path(
     assert created["path"] == log_path
     trace = json.loads((run_paths.traces_dir / "sf_local003.json").read_text(encoding="utf-8"))
     assert trace["llm_call_log_path"] == str(log_path)
+
+
+def test_run_tasks_keeps_going_after_unexpected_task_exception(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    tasks = [
+        Task(instance_id="sf_local001", db="TEST_DB", question="First task."),
+        Task(instance_id="sf_local002", db="TEST_DB", question="Second task."),
+        Task(instance_id="sf_local003", db="TEST_DB", question="Third task."),
+    ]
+    run_paths = ensure_run_paths("batch-crash-run", outputs_root=tmp_path)
+    called: list[str] = []
+
+    def fake_run_task(
+        task: Task,
+        *,
+        run_paths,
+        config,
+        llm_client=None,
+        force=False,
+        skip_failed=False,
+        initial_candidates=3,
+        max_attempts=4,
+        semantic_repairs=1,
+    ):
+        called.append(task.instance_id)
+        if task.instance_id == "sf_local002":
+            raise RuntimeError("unexpected task failure")
+        return FinalAnswer(
+            instance_id=task.instance_id,
+            status="success",
+            sql=f"SELECT '{task.instance_id}'",
+            csv_path=f"/tmp/{task.instance_id}.csv",
+            trace_path=str(run_paths.traces_dir / f"{task.instance_id}.json"),
+        )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.ensure_run_paths", lambda *args, **kwargs: run_paths
+    )
+    monkeypatch.setattr("sol01.coordinator.run_task", fake_run_task)
+
+    results = run_tasks(
+        tasks,
+        run_id="batch-crash-run",
+        config=RuntimeConfig(api_key="test-key"),
+    )
+
+    assert called == ["sf_local001", "sf_local002", "sf_local003"]
+    assert [result.status for result in results] == ["success", "failed", "success"]
+
+    trace = json.loads((run_paths.traces_dir / "sf_local002.json").read_text(encoding="utf-8"))
+    assert trace["status"] == "failed"
+    assert trace["error"]["type"] == "RuntimeError"
+    assert trace["error"]["message"] == "unexpected task failure"
+    assert trace["attempts"] == []
+    assert trace["csv_path"] is None
 
 
 def test_run_task_repairs_validation_failure(
