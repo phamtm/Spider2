@@ -50,10 +50,14 @@ def test_just_run_requires_at_least_one_pattern():
     assert "takes at least 1" in _combined_output(completed)
 
 
-def test_just_smoke_remains_separate_from_persisted_run_mode():
-    completed = _run_just("smoke", "sf_bq320")
+def test_just_gold_remains_separate_from_persisted_run_mode():
+    completed = _run_just("gold", "sf_bq320")
 
     assert completed.returncode == 0
     output = _combined_output(completed)
-    assert "python -m sol01.snow_smoke" in output
+    assert "python -m sol01.gold_run" in output
     assert "python -m sol01.run_mode" not in output
+
+
+def test_justfile_no_longer_exposes_smoke_recipe():
+    assert "smoke instance_id:" not in JUSTFILE.read_text(encoding="utf-8")

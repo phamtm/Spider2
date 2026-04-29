@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-from time import perf_counter
 from pathlib import Path
+from time import perf_counter
 from typing import Any, Protocol
 
 from sol01.config import RuntimeConfig
 from sol01.docs import load_document_text
+from sol01.index import CACHE_PATH
 from sol01.llm import LLMClient
 from sol01.llm_logging import LLMCallLogger
 from sol01.logging import get_logger
@@ -19,6 +20,7 @@ from sol01.models import (
     Intent,
     SchemaSelection,
     SQLCandidate,
+    TableSchema,
     Task,
 )
 from sol01.output import (
@@ -34,7 +36,7 @@ from sol01.output import (
     write_trace,
 )
 from sol01.profiling import profile_dataframe
-from sol01.retrieval import retrieve_schema
+from sol01.retrieval import load_db_index, retrieve_schema
 from sol01.snowflake_runner import _dataframe_records, fetch_query_dataframe
 from sol01.validation import validate_sql
 
@@ -260,7 +262,8 @@ def run_task(
         time_constraints=intent.time_constraints,
     )
 
-    schema_context = _schema_context(schema)
+    table_schemas = _table_schemas_for_selection(schema)
+    sql_reference_context = _sql_reference_context(schema, table_schemas)
     if task.external_knowledge:
         docs_context = load_document_text(task.external_knowledge)
     else:
@@ -287,12 +290,18 @@ def run_task(
             prompt_hashes=prompt_hashes,
             prompt_name="sql_generation",
             output_type=SQLCandidate,
-            user_prompt=_sql_generation_prompt(task, intent, schema_context, docs_context),
+            user_prompt=_sql_generation_prompt(
+                task,
+                intent,
+                sql_reference_context,
+                docs_context,
+            ),
         )
         attempt = _evaluate_candidate(
             task=task,
             candidate=candidate,
             schema=schema,
+            table_schemas=table_schemas,
             stage=stage,
         )
         attempts.append(attempt)
@@ -325,12 +334,13 @@ def run_task(
             prompt_hashes=prompt_hashes,
             prompt_name="sql_repair",
             output_type=SQLCandidate,
-            user_prompt=_sql_repair_prompt(task, best_attempt),
+            user_prompt=_sql_repair_prompt(task, best_attempt, sql_reference_context, docs_context),
         )
         attempt = _evaluate_candidate(
             task=task,
             candidate=repaired_candidate,
             schema=schema,
+            table_schemas=table_schemas,
             stage="repair",
         )
         attempts.append(attempt)
@@ -363,7 +373,7 @@ def run_task(
             prompt_hashes=prompt_hashes,
             prompt_name="result_critic",
             output_type=ConfidenceReport,
-            user_prompt=_critic_prompt(task, best_attempt, schema_context),
+            user_prompt=_critic_prompt(task, best_attempt, sql_reference_context),
         )
         best_attempt["critic"] = critic.model_dump(mode="json")
         logger.info(
@@ -386,12 +396,19 @@ def run_task(
                 prompt_hashes=prompt_hashes,
                 prompt_name="sql_repair",
                 output_type=SQLCandidate,
-                user_prompt=_semantic_repair_prompt(task, best_attempt, critic),
+                user_prompt=_semantic_repair_prompt(
+                    task,
+                    best_attempt,
+                    critic,
+                    sql_reference_context,
+                    docs_context,
+                ),
             )
             attempt = _evaluate_candidate(
                 task=task,
                 candidate=repaired_candidate,
                 schema=schema,
+                table_schemas=table_schemas,
                 stage="critic_repair",
             )
             attempts.append(attempt)
@@ -522,12 +539,17 @@ def _evaluate_candidate(
     task: Task,
     candidate: SQLCandidate,
     schema: SchemaSelection,
+    table_schemas: dict[str, TableSchema] | None = None,
     stage: str,
 ) -> dict[str, Any]:
     """Validate and execute one candidate, then return a trace-ready attempt record."""
 
     started_at = perf_counter()
-    validation = validate_sql(candidate.sql, allowed_tables=schema.expanded_tables)
+    validation = validate_sql(
+        candidate.sql,
+        allowed_tables=schema.expanded_tables,
+        table_schemas=table_schemas,
+    )
     if validation.ok:
         try:
             dataframe = fetch_query_dataframe(candidate.sql, db=task.db)
@@ -632,6 +654,80 @@ def _schema_context(schema: SchemaSelection) -> str:
     )
 
 
+def _table_schemas_for_selection(
+    schema: SchemaSelection,
+    *,
+    cache_path: Path = CACHE_PATH,
+) -> dict[str, TableSchema]:
+    """Return indexed schemas for the selected tables, falling back safely in tests."""
+
+    try:
+        db_index = load_db_index(schema.db, cache_path=cache_path)
+    except (FileNotFoundError, NotADirectoryError):
+        logger.warning("schema index unavailable", db=schema.db, cache_path=str(cache_path))
+        return {}
+
+    selected: dict[str, TableSchema] = {}
+    for table_name in schema.expanded_tables:
+        table = db_index.get(table_name)
+        if table is not None:
+            selected[table_name] = table
+    return selected
+
+
+def _sql_reference_context(
+    schema: SchemaSelection,
+    table_schemas: dict[str, TableSchema],
+) -> str:
+    """Render deterministic selected-table context for cache-friendly SQL prompts."""
+
+    lines = [
+        "SQL reference context:",
+        f"Database: {schema.db}",
+        "Selected tables:",
+    ]
+    for table_name in sorted(schema.expanded_tables):
+        lines.append(f"- {table_name}")
+
+    if not table_schemas:
+        return "\n".join(lines)
+
+    lines.append("")
+    lines.append("Selected table details:")
+    for table_name in sorted(table_schemas):
+        table = table_schemas[table_name]
+        lines.append(f"Table: {table.full_name or table_name}")
+        if table.ddl.strip():
+            lines.append("DDL:")
+            lines.append("```sql")
+            lines.append(table.ddl.strip())
+            lines.append("```")
+        if table.columns:
+            lines.append("Columns:")
+            for column in table.columns:
+                lines.append(f"- {_column_context_line(column)}")
+        if table.sample_rows:
+            lines.append("Sample rows:")
+            for row in table.sample_rows[:3]:
+                lines.append(json.dumps(row, sort_keys=True))
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def _column_context_line(column: Any) -> str:
+    """Render one compact column line with exact name, type, docs, and samples."""
+
+    line = column.name
+    if column.type:
+        line += f" [{column.type}]"
+    if column.description:
+        line += f" - {column.description}"
+    if column.sample_values:
+        preview = ", ".join(column.sample_values[:3])
+        line += f" - sample values: {preview}"
+    return line
+
+
 def _question_preview(question: str, *, max_length: int = 120) -> str:
     """Shorten long questions so task logs stay readable."""
 
@@ -650,23 +746,31 @@ def _intent_user_prompt(task: Task, schema: SchemaSelection) -> str:
 def _sql_generation_prompt(
     task: Task,
     intent: Intent,
-    schema_context: str,
+    sql_reference_context: str,
     docs_context: str,
 ) -> str:
     """Build the SQL-generation prompt body."""
 
     return (
+        f"{sql_reference_context}\n\n"
+        f"Document context:\n{docs_context}\n\n"
         f"Question: {task.question}\n\n"
         f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
-        f"Schema context:\n{schema_context}\n\n"
-        f"Document context:\n{docs_context}"
+        "Write the SQL using only the reference context above."
     )
 
 
-def _sql_repair_prompt(task: Task, attempt: dict[str, Any]) -> str:
+def _sql_repair_prompt(
+    task: Task,
+    attempt: dict[str, Any],
+    sql_reference_context: str,
+    docs_context: str,
+) -> str:
     """Build a repair prompt using validation or execution feedback."""
 
     return (
+        f"{sql_reference_context}\n\n"
+        f"Document context:\n{docs_context}\n\n"
         f"Question: {task.question}\n\n"
         f"Failed SQL:\n{attempt['sql']}\n\n"
         f"Validation:\n{json.dumps(attempt['validation'], indent=2, sort_keys=True)}\n\n"
@@ -674,12 +778,12 @@ def _sql_repair_prompt(task: Task, attempt: dict[str, Any]) -> str:
     )
 
 
-def _critic_prompt(task: Task, attempt: dict[str, Any], schema_context: str) -> str:
+def _critic_prompt(task: Task, attempt: dict[str, Any], sql_reference_context: str) -> str:
     """Build the critic prompt using the current best SQL and result profile."""
 
     return (
+        f"{sql_reference_context}\n\n"
         f"Question: {task.question}\n\n"
-        f"Schema context:\n{schema_context}\n\n"
         f"SQL:\n{attempt['sql']}\n\n"
         "Result profile:\n"
         f"{json.dumps(attempt.get('result_profile', {}), indent=2, sort_keys=True)}"
@@ -690,10 +794,14 @@ def _semantic_repair_prompt(
     task: Task,
     attempt: dict[str, Any],
     critic: ConfidenceReport,
+    sql_reference_context: str,
+    docs_context: str,
 ) -> str:
     """Build the repair prompt for one critic-triggered retry."""
 
     return (
+        f"{sql_reference_context}\n\n"
+        f"Document context:\n{docs_context}\n\n"
         f"Question: {task.question}\n\n"
         f"Current SQL:\n{attempt['sql']}\n\n"
         f"Critic issues:\n{json.dumps(critic.model_dump(mode='json'), indent=2, sort_keys=True)}"

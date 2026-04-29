@@ -13,7 +13,7 @@ from typer.testing import CliRunner
 from sol01 import cli
 from sol01.config import RuntimeConfig
 from sol01.models import FinalAnswer, Task
-from sol01.output import AskPaths, ensure_run_paths
+from sol01.output import AskPaths, ensure_run_paths, eval_input_csv_dir_for
 
 runner = CliRunner()
 
@@ -90,6 +90,7 @@ def test_run_command_dispatches_expected_filters(monkeypatch):
         "skip_failed": False,
     }
     assert "Eval summary: 1/1 correct, missing CSV 0" in result.output
+    assert "Exec time:" in result.output
     assert "- local003: PASS | task success | Question text" in result.output
 
 
@@ -307,20 +308,26 @@ def test_handle_eval_passes_filtered_ids_without_rewriting_manifest(monkeypatch,
     )
 
     assert summary["correct_tasks"] == 1
+    assert called["result_dir_files"] == ["local003.csv"]
+    artifact_tag = cli._filtered_eval_tag(
+        instance_id="local003",
+        db=None,
+        question_contains=None,
+        limit=None,
+    )
     assert called == {
         "run_id": "smoke-local003",
         "expected_instance_ids": ["local003"],
-        "artifact_tag": cli._filtered_eval_tag(
-            instance_id="local003",
-            db=None,
-            question_contains=None,
-            limit=None,
-        ),
+        "artifact_tag": artifact_tag,
         "result_dir_files": ["local003.csv"],
     }
     assert (
         run_paths.manifest_path.read_text(encoding="utf-8")
         == '{"task_ids": ["local003", "local004"]}\n'
+    )
+    assert (
+        eval_input_csv_dir_for(run_paths, eval_id=artifact_tag)
+        == run_paths.eval_dir / "runs" / artifact_tag / "input_csv"
     )
 
 

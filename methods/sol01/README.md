@@ -57,24 +57,27 @@ uv run sol01 analyze --run-id <run_id>
 uv run sol01 ask --db E_COMMERCE "Which customers have the highest AOV?"
 ```
 
-Persisted run mode uses `just`:
+Persisted solver mode uses `just run <selector>`:
 
 ```bash
 just run sf_bq320
 just run 'sf_bq3*' 'sf_bq4*'
 just all
-just smoke sf_bq320
+just gold sf_bq320
 ```
 
 Use quotes around patterns so the shell does not expand them first.
 Bare `*` is rejected by the helper on purpose.
-`just smoke` is only for exact instance IDs and runs the gold SQL smoke path.
+`just gold` is only for exact instance IDs and runs the persisted gold SQL path.
+There is no smoke workflow.
+Gold runs reuse the same outputs root, but they do not populate
+`eval/scored_csv/` because the gold CSV is already the scored input.
 
 ## Output Layout
 
 `methods/sol01/outputs/` is gitignored.
 
-Each persisted run writes to `methods/sol01/outputs/<run_id>/`:
+Each persisted solver run writes to `methods/sol01/outputs/<run_id>/`:
 
 - `logs/stdout.txt`
 - `logs/stderr.txt`
@@ -85,6 +88,22 @@ Each persisted run writes to `methods/sol01/outputs/<run_id>/`:
 - `eval/scored_csv/`
 - `eval/summary.json`
 - `eval/per_instance.jsonl`
+- `eval/runs/default/command.json`
+- `eval/runs/default/stdout.txt`
+- `eval/runs/default/stderr.txt`
+- `eval/runs/default/summary.json`
+- `eval/runs/default/per_instance.jsonl`
+- `eval/runs/default/input_csv/`
+- `eval/runs/default/input_csv.csv`
+- `eval/runs/default/workspace/temp/`
+- `eval/runs/default/workspace/spider2-snow/evaluation_suite/log.txt`
+- `eval/runs/<filtered-tag>/` for filtered official eval invocations, with the same layout
+
+The top-level `eval/summary.json` and `eval/per_instance.jsonl` files are
+current summaries for the latest official eval state. The `eval/runs/*/`
+folders are the audit trail.
+The evaluator workspace is refreshed on each invocation, including
+`eval/runs/<eval_id>/workspace/temp/`.
 
 The local registry lives in `methods/sol01/outputs/registry/` with:
 
@@ -107,7 +126,10 @@ Pass/fail comes from the official evaluator:
 1. Read `logs/run.jsonl` for the run sequence.
 2. Check `logs/stdout.txt` and `logs/stderr.txt`.
 3. Inspect `sql/`, `csv/`, and `traces/` for the task-level artifacts.
-4. Open `eval/summary.json` and `eval/per_instance.jsonl`.
-5. Check `methods/sol01/outputs/registry/latest.json`.
+4. Open `eval/runs/default/command.json`, `stdout.txt`, `stderr.txt`,
+   `summary.json`, `per_instance.jsonl`, `input_csv/`, `input_csv.csv`,
+   `workspace/temp/`, and `workspace/spider2-snow/evaluation_suite/log.txt`.
+5. Open `eval/summary.json` and `eval/per_instance.jsonl`.
+6. Check `methods/sol01/outputs/registry/latest.json`.
 
 The implementation plan is tracked in `PLAN.md`.

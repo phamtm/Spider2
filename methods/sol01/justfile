@@ -25,8 +25,8 @@ all:
     uv run python -m sol01.run_mode --all
 
 # Run one Spider2-snow gold SQL instance ID and score the CSV output.
-smoke instance_id:
-    uv run python -m sol01.snow_smoke "{{instance_id}}"
+gold instance_id:
+    uv run python -m sol01.gold_run "{{instance_id}}"
 
 # Run format, lint, and tests together.
 check:

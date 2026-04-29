@@ -1,5 +1,6 @@
 """Tests for the read-only SQL validator."""
 
+from sol01.models import ColumnSchema, TableSchema
 from sol01.validation import validate_sql
 
 ALLOWED_TABLES = {"customers", "orders", "order_items"}
@@ -8,6 +9,21 @@ SNOW_ALLOWED_TABLES = {
     "E_COMMERCE.E_COMMERCE.ORDERS",
     "E_COMMERCE.E_COMMERCE.ORDER_ITEMS",
 }
+DICOM_PIVOT = "IDC.IDC_V17.DICOM_PIVOT"
+DICOM_PIVOT_SCHEMA = TableSchema(
+    name="DICOM_PIVOT",
+    database_name="IDC",
+    schema_name="IDC_V17",
+    full_name=DICOM_PIVOT,
+    ddl='create or replace TABLE DICOM_PIVOT ("StudyInstanceUID" VARCHAR, '
+    '"SegmentedPropertyTypeCodeSequence" VARCHAR, "collection_id" VARCHAR);',
+    columns=[
+        ColumnSchema(name="StudyInstanceUID", type="TEXT"),
+        ColumnSchema(name="SegmentedPropertyTypeCodeSequence", type="TEXT"),
+        ColumnSchema(name="collection_id", type="TEXT"),
+    ],
+    searchable_text="DICOM_PIVOT StudyInstanceUID SegmentedPropertyTypeCodeSequence collection_id",
+)
 
 
 def test_validate_sql_allows_valid_cte_query():
@@ -171,3 +187,56 @@ def test_validate_sql_rejects_chained_statements():
 
     assert report.ok is False
     assert report.errors == ["SQL must contain exactly one statement."]
+
+
+def test_validate_sql_rejects_bare_mixed_case_snowflake_columns():
+    report = validate_sql(
+        f"SELECT COUNT(DISTINCT StudyInstanceUID) FROM {DICOM_PIVOT}",
+        allowed_tables={DICOM_PIVOT},
+        table_schemas={DICOM_PIVOT: DICOM_PIVOT_SCHEMA},
+    )
+
+    assert report.ok is False
+    assert report.errors == [
+        'Use "StudyInstanceUID" instead of StudyInstanceUID; '
+        "Snowflake uppercases unquoted identifiers to STUDYINSTANCEUID."
+    ]
+
+
+def test_validate_sql_rejects_bare_lower_case_snowflake_columns():
+    report = validate_sql(
+        f"""
+        SELECT COUNT(DISTINCT "StudyInstanceUID")
+        FROM {DICOM_PIVOT}
+        WHERE LOWER(SegmentedPropertyTypeCodeSequence) = '15825003'
+          AND collection_id IN ('Community', 'nsclc_radiomics')
+        """,
+        allowed_tables={DICOM_PIVOT},
+        table_schemas={DICOM_PIVOT: DICOM_PIVOT_SCHEMA},
+    )
+
+    assert report.ok is False
+    assert report.errors == [
+        'Use "SegmentedPropertyTypeCodeSequence" instead of '
+        "SegmentedPropertyTypeCodeSequence; Snowflake uppercases unquoted identifiers to "
+        "SEGMENTEDPROPERTYTYPECODESEQUENCE.",
+        'Use "collection_id" instead of collection_id; '
+        "Snowflake uppercases unquoted identifiers to COLLECTION_ID.",
+    ]
+
+
+def test_validate_sql_accepts_quoted_snowflake_columns():
+    report = validate_sql(
+        f"""
+        SELECT COUNT(DISTINCT "StudyInstanceUID") AS unique_count
+        FROM {DICOM_PIVOT}
+        WHERE LOWER("SegmentedPropertyTypeCodeSequence") = '15825003'
+          AND "collection_id" IN ('Community', 'nsclc_radiomics')
+        """,
+        allowed_tables={DICOM_PIVOT},
+        table_schemas={DICOM_PIVOT: DICOM_PIVOT_SCHEMA},
+    )
+
+    assert report.ok is True
+    assert report.errors == []
+    assert report.warnings == []

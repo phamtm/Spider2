@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import fnmatch
 import json
-from pathlib import Path
 from collections.abc import Sequence
+from pathlib import Path
 
 from sol01.logging import get_logger
 from sol01.models import Task
@@ -86,7 +86,9 @@ def select_tasks(
     selected: list[Task] = []
     seen: set[str] = set()
     for task in tasks:
-        if not any(fnmatch.fnmatchcase(task.instance_id, selector) for selector in normalized_selectors):
+        if not any(
+            fnmatch.fnmatchcase(task.instance_id, selector) for selector in normalized_selectors
+        ):
             continue
         if task.instance_id in seen:
             continue

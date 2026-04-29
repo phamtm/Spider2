@@ -11,19 +11,29 @@ import pandas as pd
 import pytest
 
 from sol01.config import RuntimeConfig
-from sol01.coordinator import run_task, run_tasks
+from sol01.coordinator import (
+    _sql_generation_prompt,
+    _sql_reference_context,
+    _sql_repair_prompt,
+    run_task,
+    run_tasks,
+)
 from sol01.llm import PromptSpec
 from sol01.models import (
+    ColumnSchema,
     ConfidenceReport,
     FinalAnswer,
     Intent,
     SchemaSelection,
     SQLCandidate,
+    TableSchema,
     Task,
 )
 from sol01.output import ensure_run_paths
+from sol01.retrieval import load_db_index
 
 SALES_TABLE = "TEST_DB.PUBLIC.SALES"
+DICOM_TEST_TABLE = "TEST_DB.PUBLIC.DICOM_PIVOT"
 
 
 @dataclass
@@ -254,9 +264,7 @@ def test_run_tasks_keeps_going_after_unexpected_task_exception(
             trace_path=str(run_paths.traces_dir / f"{task.instance_id}.json"),
         )
 
-    monkeypatch.setattr(
-        "sol01.coordinator.ensure_run_paths", lambda *args, **kwargs: run_paths
-    )
+    monkeypatch.setattr("sol01.coordinator.ensure_run_paths", lambda *args, **kwargs: run_paths)
     monkeypatch.setattr("sol01.coordinator.run_task", fake_run_task)
 
     results = run_tasks(
@@ -470,6 +478,185 @@ def test_run_task_catches_execution_errors_and_writes_failed_trace(
     trace = json.loads((run_paths.traces_dir / "sf_local006.json").read_text(encoding="utf-8"))
     assert trace["status"] == "failed"
     assert "invalid identifier" in trace["attempts"][0]["execution_result"]["error"].lower()
+
+
+def test_run_task_repair_prompt_includes_schema_context_for_quoted_identifier_fix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
+):
+    task = Task(
+        instance_id="sf_bq320",
+        db="TEST_DB",
+        question="Count unique StudyInstanceUID for matching segment code and collection.",
+    )
+    run_paths = ensure_run_paths("quoted-identifier-repair-run", outputs_root=tmp_path)
+    captured_prompts: dict[str, list[str]] = {}
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Count matching studies.",
+                    entities=[
+                        "StudyInstanceUID",
+                        "SegmentedPropertyTypeCodeSequence",
+                        "collection_id",
+                    ],
+                    metrics=["COUNT(DISTINCT StudyInstanceUID)"],
+                    filters=[
+                        "SegmentedPropertyTypeCodeSequence = '15825003'",
+                        "collection_id IN ('Community', 'nsclc_radiomics')",
+                    ],
+                    time_constraints=[],
+                    output_expectation="one count",
+                    assumptions=[],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=(
+                        f"SELECT COUNT(DISTINCT StudyInstanceUID) FROM {DICOM_TEST_TABLE} "
+                        "WHERE LOWER(SegmentedPropertyTypeCodeSequence) = '15825003' "
+                        "AND collection_id IN ('Community', 'nsclc_radiomics')"
+                    ),
+                    explanation="Initial query leaves quoted columns bare.",
+                    assumptions=[],
+                    confidence=0.9,
+                )
+            ],
+            "sql_repair": [
+                SQLCandidate(
+                    sql=(
+                        f'SELECT COUNT(DISTINCT "StudyInstanceUID") FROM {DICOM_TEST_TABLE} '
+                        "WHERE LOWER(\"SegmentedPropertyTypeCodeSequence\") = '15825003' "
+                        "AND \"collection_id\" IN ('Community', 'nsclc_radiomics')"
+                    ),
+                    explanation="Quote all Snowflake columns shown as quoted in DDL.",
+                    assumptions=[],
+                    confidence=0.8,
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(confidence=0.9, issues=[], should_repair=False, repair_focus=None)
+            ],
+        },
+        prompts=captured_prompts,
+    )
+    table_schema = TableSchema(
+        name="DICOM_PIVOT",
+        database_name="TEST_DB",
+        schema_name="PUBLIC",
+        full_name=DICOM_TEST_TABLE,
+        ddl=(
+            'create or replace TABLE DICOM_PIVOT ("StudyInstanceUID" VARCHAR, '
+            '"SegmentedPropertyTypeCodeSequence" VARCHAR, "collection_id" VARCHAR);'
+        ),
+        columns=[
+            ColumnSchema(name="StudyInstanceUID", type="TEXT"),
+            ColumnSchema(name="SegmentedPropertyTypeCodeSequence", type="TEXT"),
+            ColumnSchema(name="collection_id", type="TEXT"),
+        ],
+        searchable_text="DICOM_PIVOT",
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="TEST_DB",
+            selected_tables=[DICOM_TEST_TABLE],
+            expanded_tables=[DICOM_TEST_TABLE],
+            rationale="DICOM_PIVOT has the needed columns",
+            confidence=0.9,
+        ),
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.load_db_index",
+        lambda *args, **kwargs: {DICOM_TEST_TABLE: table_schema},
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    assert answer.status == "success"
+    repair_prompt = captured_prompts["sql_repair"][0]
+    assert repair_prompt.startswith("SQL reference context:")
+    assert repair_prompt.index("Table: TEST_DB.PUBLIC.DICOM_PIVOT") < repair_prompt.index(
+        "Question:"
+    )
+    assert '"StudyInstanceUID"' in repair_prompt
+    assert '"SegmentedPropertyTypeCodeSequence"' in repair_prompt
+    assert '"collection_id"' in repair_prompt
+
+    trace = json.loads((run_paths.traces_dir / "sf_bq320.json").read_text(encoding="utf-8"))
+    assert trace["attempts"][0]["validation"]["ok"] is False
+    assert (
+        'Use "StudyInstanceUID" instead of StudyInstanceUID'
+        in trace["attempts"][0]["validation"]["errors"][0]
+    )
+
+
+def test_sql_generation_prompt_keeps_reference_context_before_dynamic_task_content():
+    task = Task(instance_id="sf_local001", db="TEST_DB", question="Show customer totals.")
+    intent = Intent(
+        summary="Find customer totals.",
+        entities=["sales"],
+        metrics=[],
+        filters=[],
+        time_constraints=[],
+        output_expectation="customer and total columns",
+        assumptions=[],
+    )
+    prompt = _sql_generation_prompt(
+        task,
+        intent,
+        "SQL reference context:\nDatabase: TEST_DB\nSelected tables:\n- TEST_DB.PUBLIC.SALES",
+        "No task-linked document context.",
+    )
+
+    assert prompt.startswith("SQL reference context:")
+    assert prompt.index("Document context:") < prompt.index("Question:")
+    assert prompt.index("Question:") < prompt.index("Intent:")
+
+
+def test_sql_repair_prompt_keeps_reference_context_before_failed_sql():
+    task = Task(instance_id="sf_local001", db="TEST_DB", question="Show customer totals.")
+    attempt = {
+        "sql": f"SELECT missing_column FROM {SALES_TABLE}",
+        "validation": {"ok": True, "errors": [], "warnings": []},
+        "execution_result": {"ok": False, "error": "invalid identifier"},
+    }
+
+    prompt = _sql_repair_prompt(
+        task,
+        attempt,
+        "SQL reference context:\nDatabase: TEST_DB\nSelected tables:\n- TEST_DB.PUBLIC.SALES",
+        "No task-linked document context.",
+    )
+
+    assert prompt.startswith("SQL reference context:")
+    assert prompt.index("Question:") < prompt.index("Failed SQL:")
+    assert prompt.index("Failed SQL:") < prompt.index("Validation:")
+
+
+def test_sql_reference_context_includes_dicom_pivot_quoted_columns():
+    table = load_db_index("IDC")["IDC.IDC_V17.DICOM_PIVOT"]
+    context = _sql_reference_context(
+        SchemaSelection(
+            db="IDC",
+            selected_tables=["IDC.IDC_V17.DICOM_PIVOT"],
+            expanded_tables=["IDC.IDC_V17.DICOM_PIVOT"],
+            rationale="DICOM_PIVOT has the needed columns",
+            confidence=1.0,
+        ),
+        {"IDC.IDC_V17.DICOM_PIVOT": table},
+    )
+
+    assert '"StudyInstanceUID"' in context
+    assert '"SegmentedPropertyTypeCodeSequence"' in context
+    assert '"collection_id"' in context
 
 
 def test_run_task_uses_only_external_knowledge_for_document_context(

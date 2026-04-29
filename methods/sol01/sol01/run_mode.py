@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from time import perf_counter
 
 from sol01.config import DEFAULT_DOTENV_PATH, RuntimeConfig
 from sol01.coordinator import run_tasks
@@ -24,6 +25,7 @@ from sol01.output import (
 )
 from sol01.registry import RegistryTaskRecord, record_registry_batch
 from sol01.tasks import ALL_TASK_SELECTOR, select_tasks
+from sol01.time_utils import format_duration
 
 logger = get_logger(__name__)
 
@@ -38,6 +40,7 @@ def run_persisted_mode(
 ) -> dict[str, Any]:
     """Run the solver and evaluator with durable local artifacts."""
 
+    started_at = perf_counter()
     normalized_selectors = _normalize_selectors(selectors, all_mode=all_mode)
     tasks = _resolve_tasks(normalized_selectors, all_mode=all_mode)
     mode_label = _mode_label(normalized_selectors, all_mode=all_mode)
@@ -137,6 +140,8 @@ def run_persisted_mode(
                 f"{sum(1 for row in eval_summary['per_instance'] if not row.get('passed'))} failed"
             ),
         ]
+        if len(tasks) == 1:
+            stdout_lines.append(f"Exec time: {format_duration(perf_counter() - started_at)}")
         stdout_text = "\n".join(stdout_lines) + "\n"
         stdout_path.write_text(stdout_text, encoding="utf-8")
         stderr_path.write_text("", encoding="utf-8")
@@ -314,9 +319,9 @@ def _mode_label(selectors: Sequence[str], *, all_mode: bool) -> str:
     if all_mode or selectors == [ALL_TASK_SELECTOR]:
         return "all"
     if len(selectors) == 1 and _is_exact_selector(selectors[0]):
-        return f"exact-{_slug(selectors[0])}"
-    digest = hashlib.sha256("\0".join(selectors).encode("utf-8")).hexdigest()[:8]
-    return f"patterns-{digest}"
+        return _slug(selectors[0])
+    digest = hashlib.sha256("\0".join(selectors).encode("utf-8")).hexdigest()[:3]
+    return f"pat-{digest}"
 
 
 def _is_exact_selector(selector: str) -> bool:
@@ -343,9 +348,9 @@ def _append_run_event(path: Path, event: dict[str, Any]) -> None:
 
 
 def _utc_now() -> str:
-    """Return a stable UTC timestamp."""
+    """Return a compact UTC timestamp."""
 
-    return datetime.now(UTC).strftime("%Y%m%dT%H%M%S.%fZ")
+    return datetime.now(UTC).strftime("%y%m%d.%H%M")
 
 
 def _slug(value: str) -> str:

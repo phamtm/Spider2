@@ -170,6 +170,92 @@ def per_instance_eval_path_for(run_paths: RunPaths) -> Path:
     return run_paths.eval_dir / "per_instance.jsonl"
 
 
+def eval_runs_dir_for(run_paths: RunPaths) -> Path:
+    """Return the root directory for durable official eval runs."""
+
+    return run_paths.eval_dir / "runs"
+
+
+def eval_run_dir_for(run_paths: RunPaths, *, eval_id: str) -> Path:
+    """Return the durable directory for one official eval invocation."""
+
+    return eval_runs_dir_for(run_paths) / eval_id
+
+
+def eval_input_csv_dir_for(run_paths: RunPaths, *, eval_id: str) -> Path:
+    """Return the persisted CSV input directory for one eval invocation."""
+
+    return eval_run_dir_for(run_paths, eval_id=eval_id) / "input_csv"
+
+
+def eval_workspace_dir_for(run_paths: RunPaths, *, eval_id: str) -> Path:
+    """Return the persisted workspace root for one eval invocation."""
+
+    return eval_run_dir_for(run_paths, eval_id=eval_id) / "workspace"
+
+
+def eval_workspace_suite_dir_for(run_paths: RunPaths, *, eval_id: str) -> Path:
+    """Return the evaluator cwd for one durable official eval run."""
+
+    return eval_workspace_dir_for(run_paths, eval_id=eval_id) / "spider2-snow" / "evaluation_suite"
+
+
+def eval_temp_dir_for(run_paths: RunPaths, *, eval_id: str) -> Path:
+    """Return the durable temp directory used by the official evaluator."""
+
+    return eval_workspace_dir_for(run_paths, eval_id=eval_id) / "temp"
+
+
+def eval_metadata_jsonl_path_for(run_paths: RunPaths, *, eval_id: str) -> Path:
+    """Return the staged Spider2-snow metadata path for one eval run."""
+
+    return (
+        eval_workspace_dir_for(run_paths, eval_id=eval_id) / "spider2-snow" / "spider2-snow.jsonl"
+    )
+
+
+def eval_credential_path_for(run_paths: RunPaths, *, eval_id: str) -> Path:
+    """Return the staged Snowflake credential path for one eval run."""
+
+    return eval_workspace_suite_dir_for(run_paths, eval_id=eval_id) / "snowflake_credential.json"
+
+
+def eval_log_path_for(run_paths: RunPaths, *, eval_id: str) -> Path:
+    """Return the evaluator log path for one eval run."""
+
+    return eval_workspace_suite_dir_for(run_paths, eval_id=eval_id) / "log.txt"
+
+
+def eval_command_path_for(run_paths: RunPaths, *, eval_id: str) -> Path:
+    """Return the command record path for one eval run."""
+
+    return eval_run_dir_for(run_paths, eval_id=eval_id) / "command.json"
+
+
+def eval_stdout_path_for(run_paths: RunPaths, *, eval_id: str) -> Path:
+    """Return the captured stdout path for one eval run."""
+
+    return eval_run_dir_for(run_paths, eval_id=eval_id) / "stdout.txt"
+
+
+def eval_stderr_path_for(run_paths: RunPaths, *, eval_id: str) -> Path:
+    """Return the captured stderr path for one eval run."""
+
+    return eval_run_dir_for(run_paths, eval_id=eval_id) / "stderr.txt"
+
+
+def eval_summary_path_for(run_paths: RunPaths, *, eval_id: str) -> Path:
+    """Return the durable summary path for one eval run."""
+
+    return eval_run_dir_for(run_paths, eval_id=eval_id) / "summary.json"
+
+
+def eval_per_instance_path_for(run_paths: RunPaths, *, eval_id: str) -> Path:
+    """Return the durable per-instance path for one eval run."""
+
+    return eval_run_dir_for(run_paths, eval_id=eval_id) / "per_instance.jsonl"
+
+
 def should_skip_task(
     run_paths: RunPaths,
     *,

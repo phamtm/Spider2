@@ -17,7 +17,7 @@ def test_run_persisted_mode_exact_selector_updates_registry_and_logs(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ):
-    monkeypatch.setattr(run_mode, "_utc_now", lambda: "20260429T120000.000000Z")
+    monkeypatch.setattr(run_mode, "_utc_now", lambda: "260429.1200")
     captured: dict[str, object] = {}
 
     def fake_run_tasks(
@@ -86,13 +86,15 @@ def test_run_persisted_mode_exact_selector_updates_registry_and_logs(
 
     assert captured["task_ids"] == ["sf_local003"]
     assert captured["eval_expected"] == ["sf_local003"]
-    assert result["run_id"] == "run-exact-sf-local003-20260429T120000.000000Z"
+    assert result["run_id"] == "run-sf-local003-260429.1200"
     assert result["task_count"] == 1
     assert (tmp_path / result["run_id"]).exists()
     assert (tmp_path / result["run_id"] / "logs" / "stdout.txt").exists()
     assert (tmp_path / result["run_id"] / "logs" / "stderr.txt").exists()
     assert (tmp_path / result["run_id"] / "logs" / "run.jsonl").exists()
-    assert "Run ID: run-exact-sf-local003-20260429T120000.000000Z" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "Run ID: run-sf-local003-260429.1200" in output
+    assert "Exec time:" in output
     run_events = [
         json.loads(line)
         for line in (tmp_path / result["run_id"] / "logs" / "run.jsonl")
@@ -118,7 +120,7 @@ def test_run_persisted_mode_multiple_globs_dedupe_and_preserve_order(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
-    monkeypatch.setattr(run_mode, "_utc_now", lambda: "20260429T120000.000000Z")
+    monkeypatch.setattr(run_mode, "_utc_now", lambda: "260429.1200")
     captured: dict[str, object] = {}
 
     def fake_run_tasks(
@@ -185,15 +187,15 @@ def test_run_persisted_mode_multiple_globs_dedupe_and_preserve_order(
 
     assert captured["task_ids"] == ["sf_local003", "sf_local004"]
     assert captured["eval_expected"] == ["sf_local003", "sf_local004"]
-    assert result["run_id"].startswith("run-patterns-")
-    assert result["run_id"].endswith("20260429T120000.000000Z")
+    assert result["run_id"].startswith("run-pat-")
+    assert result["run_id"].endswith("260429.1200")
 
 
 def test_run_persisted_mode_all_mode_resolves_full_dataset(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
-    monkeypatch.setattr(run_mode, "_utc_now", lambda: "20260429T120000.000000Z")
+    monkeypatch.setattr(run_mode, "_utc_now", lambda: "260429.1200")
     captured: dict[str, object] = {}
 
     def fake_run_tasks(
@@ -258,7 +260,7 @@ def test_run_persisted_mode_all_mode_resolves_full_dataset(
     )
 
     assert captured["task_count"] == 547
-    assert result["run_id"].startswith("run-all-20260429T120000.000000Z")
+    assert result["run_id"].startswith("run-all-260429.1200")
 
 
 def test_run_persisted_mode_rejects_bare_star(
@@ -276,7 +278,7 @@ def test_run_persisted_mode_marks_eval_failed_rows_in_registry(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
-    monkeypatch.setattr(run_mode, "_utc_now", lambda: "20260429T120000.000000Z")
+    monkeypatch.setattr(run_mode, "_utc_now", lambda: "260429.1200")
     captured: dict[str, object] = {}
 
     monkeypatch.setattr(
@@ -337,7 +339,7 @@ def test_run_persisted_mode_rejects_run_id_collisions(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ):
-    monkeypatch.setattr(run_mode, "_utc_now", lambda: "20260429T120000.000000Z")
+    monkeypatch.setattr(run_mode, "_utc_now", lambda: "260429.1200")
     monkeypatch.setattr(
         run_mode,
         "run_tasks",

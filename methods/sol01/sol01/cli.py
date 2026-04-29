@@ -6,7 +6,7 @@ import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
 from shutil import rmtree
-from tempfile import TemporaryDirectory
+from time import perf_counter
 from typing import Annotated, Any
 
 import typer
@@ -19,8 +19,14 @@ from sol01.index import CACHE_PATH, build_index_cache
 from sol01.logging import configure_logging, get_logger
 from sol01.models import FinalAnswer, Task
 from sol01.observability import configure_logfire
-from sol01.output import OUTPUTS_ROOT, ensure_ask_paths, ensure_run_paths
+from sol01.output import (
+    OUTPUTS_ROOT,
+    ensure_ask_paths,
+    ensure_run_paths,
+    eval_input_csv_dir_for,
+)
 from sol01.tasks import load_tasks
+from sol01.time_utils import format_duration
 
 app = typer.Typer(
     help="Snowflake Spider2-snow solver.",
@@ -72,6 +78,7 @@ def run(
 ) -> None:
     """Run the solver over the selected Spider2-snow tasks."""
 
+    started_at = perf_counter()
     logger.info(
         "run command",
         run_id=run_id,
@@ -98,6 +105,8 @@ def run(
         f"{results['eval_summary']['attempted_tasks']} correct, "
         f"missing CSV {results['eval_summary']['missing_csv_count']}"
     )
+    if len(results["tasks"]) == 1:
+        typer.echo(f"Exec time: {format_duration(perf_counter() - started_at)}")
     for line in _run_eval_lines(
         tasks=results["tasks"],
         answers=results["results"],
@@ -310,23 +319,25 @@ def handle_eval(
         ]
         if not task_ids:
             raise typer.Exit(code=1)
-        with TemporaryDirectory(prefix="sol01-eval-") as temp_dir:
-            staged_dir = _stage_filtered_eval_results(
-                run_id,
-                task_ids=task_ids,
-                destination=Path(temp_dir),
-            )
-            return run_official_eval(
-                run_id,
-                expected_instance_ids=task_ids,
-                artifact_tag=_filtered_eval_tag(
-                    instance_id=instance_id,
-                    db=db,
-                    question_contains=question_contains,
-                    limit=limit,
-                ),
-                result_dir=staged_dir,
-            )
+        artifact_tag = _filtered_eval_tag(
+            instance_id=instance_id,
+            db=db,
+            question_contains=question_contains,
+            limit=limit,
+        )
+        run_paths = ensure_run_paths(run_id)
+        staged_dir = _stage_filtered_eval_results(
+            run_id,
+            run_paths,
+            task_ids=task_ids,
+            destination=eval_input_csv_dir_for(run_paths, eval_id=artifact_tag),
+        )
+        return run_official_eval(
+            run_id,
+            expected_instance_ids=task_ids,
+            artifact_tag=artifact_tag,
+            result_dir=staged_dir,
+        )
     return run_official_eval(run_id)
 
 
@@ -490,14 +501,16 @@ def _question_preview(question: str, *, max_length: int = 90) -> str:
 
 def _stage_filtered_eval_results(
     run_id: str,
+    run_paths: Any,
     *,
     task_ids: list[str],
     destination: Path,
 ) -> Path:
-    """Copy only the requested CSVs into a temporary eval result directory."""
+    """Copy only the requested CSVs into a durable filtered eval input directory."""
 
-    run_paths = ensure_run_paths(run_id)
     destination.mkdir(parents=True, exist_ok=True)
+    for stale_csv in destination.glob("*.csv"):
+        stale_csv.unlink()
     for task_id in task_ids:
         source = run_paths.csv_dir / f"{task_id}.csv"
         if not source.exists():

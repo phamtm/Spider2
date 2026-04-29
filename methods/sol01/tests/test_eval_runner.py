@@ -16,7 +16,19 @@ from sol01.eval_runner import (
     run_official_eval,
     run_persisted_eval,
 )
-from sol01.output import ensure_run_paths
+from sol01.output import (
+    ensure_run_paths,
+    eval_command_path_for,
+    eval_input_csv_dir_for,
+    eval_log_path_for,
+    eval_metadata_jsonl_path_for,
+    eval_per_instance_path_for,
+    eval_stderr_path_for,
+    eval_stdout_path_for,
+    eval_summary_path_for,
+    eval_temp_dir_for,
+    eval_workspace_suite_dir_for,
+)
 
 
 def test_build_eval_command_uses_active_python_and_exec_result_mode(tmp_path: Path):
@@ -47,8 +59,10 @@ def test_run_official_eval_writes_stdout_and_summary(tmp_path: Path):
     def fake_runner(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
         assert command[0] == sys.executable
         assert command[1] == str(EVALUATE_SCRIPT)
-        assert cwd.name.startswith("sol01-snow-eval-")
+        assert cwd == eval_workspace_suite_dir_for(run_paths, eval_id="default")
+        assert (cwd.parent / "spider2-snow.jsonl").exists()
         assert (cwd / "snowflake_credential.json").exists()
+        (cwd / "log.txt").write_text("evaluator log\n", encoding="utf-8")
         return subprocess.CompletedProcess(
             args=command,
             returncode=0,
@@ -67,6 +81,7 @@ def test_run_official_eval_writes_stdout_and_summary(tmp_path: Path):
     )
 
     assert summary["run_id"] == "smoke-local003"
+    assert summary["eval_id"] == "default"
     assert summary["correct_tasks"] == 2
     assert summary["attempted_tasks"] == 4
     assert summary["instance_scores"] == {"sf_local003": 1, "sf_local004": 0}
@@ -77,9 +92,47 @@ def test_run_official_eval_writes_stdout_and_summary(tmp_path: Path):
     ]
     assert summary["missing_csv_count"] == 2
     assert summary["missing_instance_ids"] == ["sf_local004", "sf_local007"]
+    assert summary["result_dir"] == str(eval_input_csv_dir_for(run_paths, eval_id="default"))
+    assert summary["cwd"] == str(eval_workspace_suite_dir_for(run_paths, eval_id="default"))
+    assert summary["temp_dir"] == str(eval_temp_dir_for(run_paths, eval_id="default"))
+    assert summary["metadata_jsonl_path"] == str(
+        eval_metadata_jsonl_path_for(run_paths, eval_id="default")
+    )
+    assert summary["credential_staged_path"] == str(
+        eval_workspace_suite_dir_for(run_paths, eval_id="default") / "snowflake_credential.json"
+    )
+    assert summary["stdout_path"] == str(eval_stdout_path_for(run_paths, eval_id="default"))
+    assert summary["stderr_path"] == str(eval_stderr_path_for(run_paths, eval_id="default"))
+    assert summary["log_path"] == str(eval_log_path_for(run_paths, eval_id="default"))
+    assert (
+        eval_log_path_for(run_paths, eval_id="default").read_text(encoding="utf-8")
+        == "evaluator log\n"
+    )
     assert (run_paths.eval_dir / "official_stdout.txt").exists()
     assert (run_paths.eval_dir / "official_stderr.txt").exists()
     assert (run_paths.eval_dir / "summary.json").exists()
+    command_record = json.loads(
+        eval_command_path_for(run_paths, eval_id="default").read_text(encoding="utf-8")
+    )
+    assert command_record["completed_at"]
+    assert command_record["returncode"] == 0
+    assert command_record["argv"] == [
+        sys.executable,
+        str(EVALUATE_SCRIPT),
+        "--result_dir",
+        str(eval_input_csv_dir_for(run_paths, eval_id="default")),
+        "--mode",
+        "exec_result",
+        "--gold_dir",
+        str(GOLD_DIR),
+        "--temp_dir",
+        str(eval_temp_dir_for(run_paths, eval_id="default")),
+    ]
+    assert command_record["cwd"] == str(eval_workspace_suite_dir_for(run_paths, eval_id="default"))
+    assert command_record["result_dir"] == str(eval_input_csv_dir_for(run_paths, eval_id="default"))
+    assert command_record["temp_dir"] == str(eval_temp_dir_for(run_paths, eval_id="default"))
+    assert eval_summary_path_for(run_paths, eval_id="default").exists()
+    assert eval_per_instance_path_for(run_paths, eval_id="default").exists()
 
 
 def test_parse_eval_stdout_returns_local_and_full_scores():
@@ -120,12 +173,20 @@ def test_run_official_eval_persists_output_on_failure(tmp_path: Path):
     else:
         raise AssertionError("Expected CalledProcessError")
 
-    assert (run_paths.eval_dir / "official_stdout.txt").read_text(
-        encoding="utf-8"
-    ) == "partial stdout\n"
-    assert (run_paths.eval_dir / "official_stderr.txt").read_text(
-        encoding="utf-8"
-    ) == "failure details\n"
+    assert (
+        eval_stdout_path_for(run_paths, eval_id="default").read_text(encoding="utf-8")
+        == "partial stdout\n"
+    )
+    assert (
+        eval_stderr_path_for(run_paths, eval_id="default").read_text(encoding="utf-8")
+        == "failure details\n"
+    )
+    assert eval_summary_path_for(run_paths, eval_id="default").exists()
+    assert eval_command_path_for(run_paths, eval_id="default").exists()
+    command_record = json.loads(
+        eval_command_path_for(run_paths, eval_id="default").read_text(encoding="utf-8")
+    )
+    assert command_record["returncode"] == 2
     summary = (run_paths.eval_dir / "summary.json").read_text(encoding="utf-8")
     assert '"returncode": 2' in summary
 
@@ -150,15 +211,23 @@ def test_run_official_eval_with_artifact_tag_keeps_shared_summary_name_free(tmp_
         runner=fake_runner,
     )
 
+    tagged_run_dir = run_paths.eval_dir / "runs" / "filtered-sf-local003"
     assert not (run_paths.eval_dir / "summary.json").exists()
+    assert (tagged_run_dir / "summary.json").exists()
     tagged_summary = run_paths.eval_dir / "summary.filtered-sf-local003.json"
     assert tagged_summary.exists()
-    payload = tagged_summary.read_text(encoding="utf-8")
-    assert '"result_dir"' not in payload
+    payload = json.loads(tagged_summary.read_text(encoding="utf-8"))
+    assert payload["eval_id"] == "filtered-sf-local003"
+    assert payload["result_dir"] == str(
+        eval_input_csv_dir_for(run_paths, eval_id="filtered-sf-local003")
+    )
+    assert payload["cwd"] == str(
+        eval_workspace_suite_dir_for(run_paths, eval_id="filtered-sf-local003")
+    )
 
 
 def test_run_official_eval_uses_the_scored_result_dir_for_bookkeeping(tmp_path: Path):
-    ensure_run_paths("filtered-run", outputs_root=tmp_path)
+    run_paths = ensure_run_paths("filtered-run", outputs_root=tmp_path)
     scored_dir = tmp_path / "scored"
     scored_dir.mkdir(parents=True, exist_ok=True)
     (scored_dir / "sf_local003.csv").write_text("answer\n1\n", encoding="utf-8")
@@ -181,7 +250,7 @@ def test_run_official_eval_uses_the_scored_result_dir_for_bookkeeping(tmp_path: 
         runner=fake_runner,
     )
 
-    assert summary["result_dir"] == str(scored_dir)
+    assert summary["result_dir"] == str(eval_input_csv_dir_for(run_paths, eval_id="default"))
     assert summary["missing_csv_count"] == 1
     assert summary["missing_instance_ids"] == ["sf_local004"]
     assert summary["per_instance"] == [
@@ -223,16 +292,21 @@ def test_run_persisted_eval_copies_scored_csvs_and_writes_per_instance_records(
         runner=fake_runner,
     )
 
-    assert summary["result_dir"] == str(run_paths.eval_scored_csv_dir)
-    assert captured["cwd"].name.startswith("sol01-snow-eval-")
-    assert str(run_paths.eval_scored_csv_dir) in captured["command"]
+    assert summary["result_dir"] == str(eval_input_csv_dir_for(run_paths, eval_id="default"))
+    assert captured["cwd"] == eval_workspace_suite_dir_for(run_paths, eval_id="default")
+    assert str(eval_input_csv_dir_for(run_paths, eval_id="default")) in captured["command"]
+    assert str(eval_temp_dir_for(run_paths, eval_id="default")) in captured["command"]
+    command_record = json.loads(
+        eval_command_path_for(run_paths, eval_id="default").read_text(encoding="utf-8")
+    )
+    assert command_record["result_dir"] == str(eval_input_csv_dir_for(run_paths, eval_id="default"))
+    assert command_record["temp_dir"] == str(eval_temp_dir_for(run_paths, eval_id="default"))
     assert (run_paths.eval_scored_csv_dir / "sf_local003.csv").exists()
     assert not (run_paths.eval_scored_csv_dir / "sf_local004.csv").exists()
+    per_instance_path = eval_per_instance_path_for(run_paths, eval_id="default")
     per_instance_rows = [
         json.loads(line)
-        for line in (run_paths.eval_dir / "per_instance.jsonl")
-        .read_text(encoding="utf-8")
-        .splitlines()
+        for line in per_instance_path.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
     assert per_instance_rows == [
@@ -267,9 +341,12 @@ def test_run_persisted_eval_handles_no_csv_without_crashing(tmp_path: Path):
         expected_instance_ids=["sf_local003", "sf_local004"],
     )
 
-    assert summary["result_dir"] == str(run_paths.eval_scored_csv_dir)
+    assert summary["eval_id"] == "default"
+    assert summary["result_dir"] == str(eval_input_csv_dir_for(run_paths, eval_id="default"))
     assert summary["missing_csv_count"] == 2
     assert summary["missing_instance_ids"] == ["sf_local003", "sf_local004"]
+    assert summary["stdout_path"] == str(eval_stdout_path_for(run_paths, eval_id="default"))
+    assert summary["stderr_path"] == str(eval_stderr_path_for(run_paths, eval_id="default"))
     assert summary["per_instance"] == [
         {
             "csv_present": False,
@@ -286,9 +363,13 @@ def test_run_persisted_eval_handles_no_csv_without_crashing(tmp_path: Path):
             "score": None,
         },
     ]
+    assert eval_summary_path_for(run_paths, eval_id="default").exists()
     assert (run_paths.eval_dir / "summary.json").exists()
+    assert eval_stdout_path_for(run_paths, eval_id="default").read_text(encoding="utf-8") == ""
+    assert eval_stderr_path_for(run_paths, eval_id="default").read_text(encoding="utf-8") == ""
     assert (run_paths.eval_dir / "official_stdout.txt").read_text(encoding="utf-8") == ""
     assert (run_paths.eval_dir / "official_stderr.txt").read_text(encoding="utf-8") == ""
+    assert eval_per_instance_path_for(run_paths, eval_id="default").exists()
     assert (run_paths.eval_dir / "per_instance.jsonl").exists()
 
 
@@ -372,5 +453,38 @@ def test_run_official_eval_stages_local_credentials_without_mutating_suite(
     assert '"password": "pat-token"' in captured["credential"]
     assert '"QUERY_TAG": "sol01"' in captured["credential"]
     assert run_paths.eval_dir.exists()
+    assert (
+        eval_workspace_suite_dir_for(run_paths, eval_id="default") / "snowflake_credential.json"
+    ).exists()
     after = suite_credential.read_text(encoding="utf-8") if suite_credential.exists() else None
     assert after == before
+
+
+def test_run_official_eval_refreshes_temp_workspace_on_rerun(tmp_path: Path):
+    run_paths = ensure_run_paths("temp-refresh-run", outputs_root=tmp_path)
+    run_paths.manifest_path.write_text('{"task_ids": ["sf_local003"]}\n', encoding="utf-8")
+    (run_paths.csv_dir / "sf_local003.csv").write_text("answer\n1\n", encoding="utf-8")
+    temp_dir = eval_temp_dir_for(run_paths, eval_id="default")
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    (temp_dir / "stale.txt").write_text("stale\n", encoding="utf-8")
+
+    def fake_runner(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+        assert cwd == eval_workspace_suite_dir_for(run_paths, eval_id="default")
+        assert temp_dir.exists()
+        assert list(temp_dir.iterdir()) == []
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=0,
+            stdout="Final score: 1.0, Correct examples: 1, Total examples: 1\n",
+            stderr="",
+        )
+
+    run_official_eval(
+        "temp-refresh-run",
+        outputs_root=tmp_path,
+        expected_instance_ids=["sf_local003"],
+        runner=fake_runner,
+    )
+
+    assert temp_dir.exists()
+    assert list(temp_dir.iterdir()) == []

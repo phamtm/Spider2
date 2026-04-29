@@ -7,15 +7,26 @@ import json
 import re
 import subprocess
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
-from shutil import copy2
-from tempfile import TemporaryDirectory
+from shutil import copy2, rmtree
 from typing import Any
 
 from sol01.logging import get_logger
 from sol01.output import (
     RunPaths,
     ensure_run_paths,
+    eval_command_path_for,
+    eval_credential_path_for,
+    eval_input_csv_dir_for,
+    eval_log_path_for,
+    eval_metadata_jsonl_path_for,
+    eval_per_instance_path_for,
+    eval_stderr_path_for,
+    eval_stdout_path_for,
+    eval_summary_path_for,
+    eval_temp_dir_for,
+    eval_workspace_suite_dir_for,
     per_instance_eval_path_for,
     scored_csv_dir_for,
 )
@@ -53,40 +64,83 @@ def run_official_eval(
         run_id,
         outputs_root=outputs_root or REPO_ROOT / "methods" / "sol01" / "outputs",
     )
+    eval_id = _eval_id_for(artifact_tag)
     scored_result_dir = result_dir or run_paths.csv_dir
+    eval_input_dir = eval_input_csv_dir_for(run_paths, eval_id=eval_id)
+    eval_cwd = eval_workspace_suite_dir_for(run_paths, eval_id=eval_id)
+    eval_temp_dir = eval_temp_dir_for(run_paths, eval_id=eval_id)
+    eval_metadata_jsonl_path = eval_metadata_jsonl_path_for(run_paths, eval_id=eval_id)
+    eval_credential_path = eval_credential_path_for(run_paths, eval_id=eval_id)
+    eval_command_path = eval_command_path_for(run_paths, eval_id=eval_id)
+    eval_stdout_path = eval_stdout_path_for(run_paths, eval_id=eval_id)
+    eval_stderr_path = eval_stderr_path_for(run_paths, eval_id=eval_id)
+    eval_summary_path = eval_summary_path_for(run_paths, eval_id=eval_id)
+    eval_per_instance_path = eval_per_instance_path_for(run_paths, eval_id=eval_id)
+    eval_log_path = eval_log_path_for(run_paths, eval_id=eval_id)
+    _prepare_eval_workspace(
+        eval_cwd=eval_cwd,
+        eval_metadata_jsonl_path=eval_metadata_jsonl_path,
+        eval_temp_dir=eval_temp_dir,
+        credential_path=credential_path,
+        eval_credential_path=eval_credential_path,
+    )
+    copied_csv_count = _copy_scored_csvs(scored_result_dir, eval_input_dir)
     logger.info(
         "evaluation start",
         run_id=run_id,
-        result_dir=str(scored_result_dir),
+        result_dir=str(eval_input_dir),
         expected_instance_count=len(expected_instance_ids) if expected_instance_ids else None,
         artifact_tag=artifact_tag,
     )
     command = build_eval_command(
         run_paths,
         python_executable=python_executable,
-        result_dir=scored_result_dir,
+        result_dir=eval_input_dir,
+        temp_dir=eval_temp_dir,
     )
-    with TemporaryDirectory(prefix="sol01-snow-eval-") as temp_dir:
-        eval_workspace = Path(temp_dir)
-        _write_eval_credential(
-            eval_workspace / "snowflake_credential.json",
-            credential_path=credential_path,
-        )
-        completed = (runner or _run_subprocess)(command, cwd=eval_workspace)
+    started_at = datetime.now(UTC).isoformat()
+    _write_json(
+        eval_command_path,
+        {
+            "argv": command,
+            "credential_staged_path": str(eval_credential_path),
+            "cwd": str(eval_cwd),
+            "eval_id": eval_id,
+            "metadata_jsonl_path": str(eval_metadata_jsonl_path),
+            "result_dir": str(eval_input_dir),
+            "run_id": run_id,
+            "started_at": started_at,
+            "temp_dir": str(eval_temp_dir),
+        },
+    )
+    completed = (runner or _run_subprocess)(command, cwd=eval_cwd)
+    completed_at = datetime.now(UTC).isoformat()
 
-    suffix = f".{artifact_tag}" if artifact_tag else ""
-    stdout_path = run_paths.eval_dir / f"official_stdout{suffix}.txt"
-    stderr_path = run_paths.eval_dir / f"official_stderr{suffix}.txt"
-    stdout_path.write_text(completed.stdout or "", encoding="utf-8")
-    stderr_path.write_text(completed.stderr or "", encoding="utf-8")
+    stdout_text = completed.stdout or ""
+    stderr_text = completed.stderr or ""
+    _write_eval_outputs(
+        run_paths,
+        artifact_tag=artifact_tag,
+        eval_stdout_path=eval_stdout_path,
+        eval_stderr_path=eval_stderr_path,
+        stdout_text=stdout_text,
+        stderr_text=stderr_text,
+    )
 
     # Some injected test runners may return None instead of an empty string.
-    summary = parse_eval_stdout(completed.stdout or "")
+    summary = parse_eval_stdout(stdout_text)
     summary["run_id"] = run_id
-    summary["stdout_path"] = str(stdout_path)
-    summary["stderr_path"] = str(stderr_path)
-    if artifact_tag is None:
-        summary["result_dir"] = str(scored_result_dir)
+    summary["eval_id"] = eval_id
+    summary["cwd"] = str(eval_cwd)
+    summary["command_path"] = str(eval_command_path)
+    summary["result_dir"] = str(eval_input_dir)
+    summary["temp_dir"] = str(eval_temp_dir)
+    summary["metadata_jsonl_path"] = str(eval_metadata_jsonl_path)
+    summary["credential_staged_path"] = str(eval_credential_path)
+    summary["stdout_path"] = str(eval_stdout_path)
+    summary["stderr_path"] = str(eval_stderr_path)
+    summary["log_path"] = str(eval_log_path)
+    summary["copied_csv_count"] = copied_csv_count
     expected_ids = (
         set(expected_instance_ids)
         if expected_instance_ids is not None
@@ -95,27 +149,52 @@ def run_official_eval(
     summary["per_instance"] = _per_instance_summary(
         expected_ids=expected_ids,
         instance_scores=summary.get("instance_scores", {}),
-        result_dir=scored_result_dir,
+        result_dir=eval_input_dir,
     )
     summary["missing_csv_count"] = _missing_csv_count(
-        scored_result_dir,
+        eval_input_dir,
         expected_ids=expected_ids,
     )
     summary["missing_instance_ids"] = _missing_instance_ids(
-        scored_result_dir,
+        eval_input_dir,
         expected_ids=expected_ids,
     )
     summary["returncode"] = completed.returncode
 
-    summary_path = _summary_path_for(run_paths, artifact_tag=artifact_tag)
-    _write_eval_summary(summary_path, summary)
+    _write_eval_artifacts(
+        run_paths,
+        artifact_tag=artifact_tag,
+        eval_id=eval_id,
+        eval_summary_path=eval_summary_path,
+        eval_per_instance_path=eval_per_instance_path,
+        summary=summary,
+    )
+    _write_json(
+        eval_command_path,
+        {
+            "argv": command,
+            "completed_at": completed_at,
+            "credential_staged_path": str(eval_credential_path),
+            "cwd": str(eval_cwd),
+            "eval_id": eval_id,
+            "log_path": str(eval_log_path),
+            "metadata_jsonl_path": str(eval_metadata_jsonl_path),
+            "result_dir": str(eval_input_dir),
+            "returncode": completed.returncode,
+            "run_id": run_id,
+            "started_at": started_at,
+            "stderr_path": str(eval_stderr_path),
+            "stdout_path": str(eval_stdout_path),
+            "temp_dir": str(eval_temp_dir),
+        },
+    )
     logger.info(
         "evaluation complete",
         run_id=run_id,
         returncode=completed.returncode,
-        stdout_path=str(stdout_path),
-        stderr_path=str(stderr_path),
-        summary_path=str(summary_path),
+        stdout_path=str(eval_stdout_path),
+        stderr_path=str(eval_stderr_path),
+        summary_path=str(eval_summary_path),
         missing_csv_count=summary["missing_csv_count"],
         correct_tasks=summary["correct_tasks"],
         attempted_tasks=summary["attempted_tasks"],
@@ -146,20 +225,58 @@ def run_persisted_eval(
         run_id,
         outputs_root=outputs_root or REPO_ROOT / "methods" / "sol01" / "outputs",
     )
+    eval_id = _eval_id_for(artifact_tag)
+    eval_input_dir = eval_input_csv_dir_for(run_paths, eval_id=eval_id)
+    eval_cwd = eval_workspace_suite_dir_for(run_paths, eval_id=eval_id)
+    eval_temp_dir = eval_temp_dir_for(run_paths, eval_id=eval_id)
+    eval_metadata_jsonl_path = eval_metadata_jsonl_path_for(run_paths, eval_id=eval_id)
+    eval_credential_path = eval_credential_path_for(run_paths, eval_id=eval_id)
+    eval_stdout_path = eval_stdout_path_for(run_paths, eval_id=eval_id)
+    eval_stderr_path = eval_stderr_path_for(run_paths, eval_id=eval_id)
+    eval_log_path = eval_log_path_for(run_paths, eval_id=eval_id)
     persisted_result_dir = scored_csv_dir_for(run_paths)
     copied_csv_count = _copy_scored_csvs(run_paths.csv_dir, persisted_result_dir)
     expected_ids = set(expected_instance_ids)
 
     if copied_csv_count == 0:
+        eval_input_dir.mkdir(parents=True, exist_ok=True)
+        _prepare_eval_workspace(
+            eval_cwd=eval_cwd,
+            eval_metadata_jsonl_path=eval_metadata_jsonl_path,
+            eval_temp_dir=eval_temp_dir,
+            credential_path=credential_path,
+            eval_credential_path=eval_credential_path,
+        )
+        eval_log_path.write_text("", encoding="utf-8")
+        _write_eval_outputs(
+            run_paths,
+            artifact_tag=artifact_tag,
+            eval_stdout_path=eval_stdout_path,
+            eval_stderr_path=eval_stderr_path,
+            stdout_text="",
+            stderr_text="",
+        )
         summary = _build_no_csv_summary(
             run_id=run_id,
+            eval_id=eval_id,
             run_paths=run_paths,
             expected_ids=expected_ids,
-            result_dir=persisted_result_dir,
+            result_dir=eval_input_dir,
+            cwd=eval_cwd,
+            temp_dir=eval_temp_dir,
+            metadata_jsonl_path=eval_metadata_jsonl_path,
+            credential_staged_path=eval_credential_path,
+            stdout_path=eval_stdout_path,
+            stderr_path=eval_stderr_path,
+            log_path=eval_log_path,
         )
-        _write_per_instance_records(
-            per_instance_eval_path_for(run_paths),
-            summary["per_instance"],
+        _write_eval_artifacts(
+            run_paths,
+            artifact_tag=artifact_tag,
+            eval_id=eval_id,
+            eval_summary_path=eval_summary_path_for(run_paths, eval_id=eval_id),
+            eval_per_instance_path=eval_per_instance_path_for(run_paths, eval_id=eval_id),
+            summary=summary,
         )
         return summary
 
@@ -180,27 +297,34 @@ def run_persisted_eval(
         summary = _load_failed_eval_summary(
             run_id=run_id,
             run_paths=run_paths,
-            result_dir=persisted_result_dir,
+            result_dir=eval_input_dir,
             artifact_tag=artifact_tag,
             error=exc,
         )
     per_instance_rows = _per_instance_rows(
         expected_ids=expected_ids,
         instance_scores=summary.get("instance_scores", {}),
-        result_dir=persisted_result_dir,
+        result_dir=eval_input_dir,
         eval_failed=eval_failed,
     )
     summary["per_instance"] = per_instance_rows
     summary["missing_csv_count"] = _missing_csv_count(
-        persisted_result_dir,
+        eval_input_dir,
         expected_ids=expected_ids,
     )
     summary["missing_instance_ids"] = _missing_instance_ids(
-        persisted_result_dir,
+        eval_input_dir,
         expected_ids=expected_ids,
     )
-    _write_per_instance_records(per_instance_eval_path_for(run_paths), per_instance_rows)
-    _write_eval_summary(_summary_path_for(run_paths, artifact_tag=artifact_tag), summary)
+    summary["result_dir"] = str(eval_input_dir)
+    _write_eval_artifacts(
+        run_paths,
+        artifact_tag=artifact_tag,
+        eval_id=eval_id,
+        eval_summary_path=eval_summary_path_for(run_paths, eval_id=eval_id),
+        eval_per_instance_path=eval_per_instance_path_for(run_paths, eval_id=eval_id),
+        summary=summary,
+    )
     return summary
 
 
@@ -209,10 +333,11 @@ def build_eval_command(
     *,
     python_executable: str | None = None,
     result_dir: Path | None = None,
+    temp_dir: Path | None = None,
 ) -> list[str]:
     """Build the official evaluator subprocess command."""
 
-    return [
+    command = [
         python_executable or sys.executable,
         str(EVALUATE_SCRIPT),
         "--result_dir",
@@ -222,6 +347,9 @@ def build_eval_command(
         "--gold_dir",
         str(GOLD_DIR),
     ]
+    if temp_dir is not None:
+        command.extend(["--temp_dir", str(temp_dir)])
+    return command
 
 
 def parse_eval_stdout(stdout: str) -> dict[str, Any]:
@@ -346,16 +474,26 @@ def _load_failed_eval_summary(
     if summary_path.exists():
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
     else:
+        eval_id = _eval_id_for(artifact_tag)
         summary = parse_eval_stdout(error.output or "")
         summary["run_id"] = run_id
-        summary["stdout_path"] = str(run_paths.eval_dir / "official_stdout.txt")
-        summary["stderr_path"] = str(run_paths.eval_dir / "official_stderr.txt")
-        if artifact_tag is None:
-            summary["result_dir"] = str(result_dir)
+        summary["eval_id"] = eval_id
+        summary["cwd"] = str(eval_workspace_suite_dir_for(run_paths, eval_id=eval_id))
+        summary["command_path"] = str(eval_command_path_for(run_paths, eval_id=eval_id))
+        summary["temp_dir"] = str(eval_temp_dir_for(run_paths, eval_id=eval_id))
+        summary["metadata_jsonl_path"] = str(
+            eval_metadata_jsonl_path_for(run_paths, eval_id=eval_id)
+        )
+        summary["credential_staged_path"] = str(
+            eval_credential_path_for(run_paths, eval_id=eval_id)
+        )
+        summary["stdout_path"] = str(eval_stdout_path_for(run_paths, eval_id=eval_id))
+        summary["stderr_path"] = str(eval_stderr_path_for(run_paths, eval_id=eval_id))
+        summary["log_path"] = str(eval_log_path_for(run_paths, eval_id=eval_id))
+        summary["result_dir"] = str(result_dir)
     summary["returncode"] = error.returncode
     summary["eval_error"] = "official_eval_failed"
-    if artifact_tag is None:
-        summary["result_dir"] = str(result_dir)
+    summary["result_dir"] = str(result_dir)
     return summary
 
 
@@ -375,6 +513,8 @@ def _missing_csv_count(result_dir: Path, *, expected_ids: set[str]) -> int:
 def _copy_scored_csvs(source_dir: Path, destination_dir: Path) -> int:
     """Copy CSV outputs into the durable eval input directory."""
 
+    if source_dir.resolve() == destination_dir.resolve():
+        return len(list(destination_dir.glob("*.csv")))
     destination_dir.mkdir(parents=True, exist_ok=True)
     for stale_csv in destination_dir.glob("*.csv"):
         stale_csv.unlink()
@@ -388,16 +528,20 @@ def _copy_scored_csvs(source_dir: Path, destination_dir: Path) -> int:
 def _build_no_csv_summary(
     *,
     run_id: str,
+    eval_id: str,
     run_paths: RunPaths,
     expected_ids: set[str],
     result_dir: Path,
+    cwd: Path,
+    temp_dir: Path,
+    metadata_jsonl_path: Path,
+    credential_staged_path: Path,
+    stdout_path: Path,
+    stderr_path: Path,
+    log_path: Path,
 ) -> dict[str, Any]:
     """Create a local summary when there are no scored CSVs to evaluate."""
 
-    stdout_path = run_paths.eval_dir / "official_stdout.txt"
-    stderr_path = run_paths.eval_dir / "official_stderr.txt"
-    stdout_path.write_text("", encoding="utf-8")
-    stderr_path.write_text("", encoding="utf-8")
     per_instance = _per_instance_rows(
         expected_ids=expected_ids,
         instance_scores={},
@@ -409,19 +553,116 @@ def _build_no_csv_summary(
         "attempted_score": 0.0,
         "benchmark_total": BENCHMARK_TOTAL,
         "benchmark_score": 0.0,
+        "cwd": str(cwd),
+        "credential_staged_path": str(credential_staged_path),
+        "eval_id": eval_id,
+        "log_path": str(log_path),
+        "metadata_jsonl_path": str(metadata_jsonl_path),
         "instance_scores": {},
         "run_id": run_id,
         "stdout_path": str(stdout_path),
         "stderr_path": str(stderr_path),
         "result_dir": str(result_dir),
+        "temp_dir": str(temp_dir),
         "per_instance": per_instance,
         "missing_csv_count": len(expected_ids),
         "missing_instance_ids": sorted(expected_ids),
         "returncode": 0,
     }
-    summary_path = run_paths.eval_dir / "summary.json"
-    _write_eval_summary(summary_path, summary)
     return summary
+
+
+def _official_stdout_path_for(run_paths: RunPaths, *, artifact_tag: str | None) -> Path:
+    """Return the convenience stdout path for one eval invocation."""
+
+    suffix = f".{artifact_tag}" if artifact_tag else ""
+    return run_paths.eval_dir / f"official_stdout{suffix}.txt"
+
+
+def _official_stderr_path_for(run_paths: RunPaths, *, artifact_tag: str | None) -> Path:
+    """Return the convenience stderr path for one eval invocation."""
+
+    suffix = f".{artifact_tag}" if artifact_tag else ""
+    return run_paths.eval_dir / f"official_stderr{suffix}.txt"
+
+
+def _eval_id_for(artifact_tag: str | None) -> str:
+    """Use the artifact tag as the durable eval ID when one is supplied."""
+
+    return artifact_tag or "default"
+
+
+def _prepare_eval_workspace(
+    *,
+    eval_cwd: Path,
+    eval_metadata_jsonl_path: Path,
+    eval_temp_dir: Path,
+    credential_path: Path | None,
+    eval_credential_path: Path,
+) -> None:
+    """Create the durable workspace tree expected by the official evaluator."""
+
+    eval_cwd.mkdir(parents=True, exist_ok=True)
+    if eval_temp_dir.exists():
+        rmtree(eval_temp_dir)
+    eval_temp_dir.mkdir(parents=True, exist_ok=True)
+    eval_metadata_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
+    copy2(REPO_ROOT / "spider2-snow" / "spider2-snow.jsonl", eval_metadata_jsonl_path)
+    _write_eval_credential(
+        eval_credential_path,
+        credential_path=credential_path,
+    )
+
+
+def _write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Write one JSON artifact with stable formatting."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _write_eval_outputs(
+    run_paths: RunPaths,
+    *,
+    artifact_tag: str | None,
+    eval_stdout_path: Path,
+    eval_stderr_path: Path,
+    stdout_text: str,
+    stderr_text: str,
+) -> None:
+    """Persist stdout and stderr in both durable and convenience locations."""
+
+    eval_stdout_path.write_text(stdout_text, encoding="utf-8")
+    eval_stderr_path.write_text(stderr_text, encoding="utf-8")
+    _official_stdout_path_for(run_paths, artifact_tag=artifact_tag).write_text(
+        stdout_text,
+        encoding="utf-8",
+    )
+    _official_stderr_path_for(run_paths, artifact_tag=artifact_tag).write_text(
+        stderr_text,
+        encoding="utf-8",
+    )
+
+
+def _write_eval_artifacts(
+    run_paths: RunPaths,
+    *,
+    artifact_tag: str | None,
+    eval_id: str,
+    eval_summary_path: Path,
+    eval_per_instance_path: Path,
+    summary: dict[str, Any],
+) -> None:
+    """Persist the final summary in both durable and convenience locations."""
+
+    summary_payload = dict(summary)
+    summary_payload["eval_id"] = eval_id
+    _write_eval_summary(eval_summary_path, summary_payload)
+    _write_eval_summary(_summary_path_for(run_paths, artifact_tag=artifact_tag), summary_payload)
+    _write_per_instance_records(eval_per_instance_path, summary_payload["per_instance"])
+    _write_per_instance_records(
+        per_instance_eval_path_for(run_paths), summary_payload["per_instance"]
+    )
 
 
 def _summary_path_for(run_paths: RunPaths, *, artifact_tag: str | None) -> Path:
