@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from time import perf_counter
 from typing import Any, Protocol
 
@@ -32,7 +31,7 @@ from sol01.output import (
 )
 from sol01.profiling import profile_dataframe
 from sol01.retrieval import retrieve_schema
-from sol01.sqlite_runner import _dataframe_records, fetch_query_dataframe
+from sol01.snowflake_runner import _dataframe_records, fetch_query_dataframe
 from sol01.validation import validate_sql
 
 logger = get_logger(__name__)
@@ -125,7 +124,6 @@ def run_task(
     run_paths: RunPaths,
     config: RuntimeConfig,
     llm_client: StructuredLLM | None = None,
-    db_path: Path | None = None,
     force: bool = False,
     skip_failed: bool = False,
     initial_candidates: int = 3,
@@ -236,7 +234,6 @@ def run_task(
             task=task,
             candidate=candidate,
             schema=schema,
-            db_path=db_path,
             stage=stage,
         )
         attempts.append(attempt)
@@ -275,7 +272,6 @@ def run_task(
             task=task,
             candidate=repaired_candidate,
             schema=schema,
-            db_path=db_path,
             stage="repair",
         )
         attempts.append(attempt)
@@ -337,7 +333,6 @@ def run_task(
                 task=task,
                 candidate=repaired_candidate,
                 schema=schema,
-                db_path=db_path,
                 stage="critic_repair",
             )
             attempts.append(attempt)
@@ -466,7 +461,6 @@ def _evaluate_candidate(
     task: Task,
     candidate: SQLCandidate,
     schema: SchemaSelection,
-    db_path: Path | None,
     stage: str,
 ) -> dict[str, Any]:
     """Validate and execute one candidate, then return a trace-ready attempt record."""
@@ -475,7 +469,7 @@ def _evaluate_candidate(
     validation = validate_sql(candidate.sql, allowed_tables=schema.expanded_tables)
     if validation.ok:
         try:
-            dataframe = fetch_query_dataframe(candidate.sql, db=task.db, db_path=db_path)
+            dataframe = fetch_query_dataframe(candidate.sql, db=task.db)
             execution = ExecutionResult(
                 ok=True,
                 row_count=len(dataframe),

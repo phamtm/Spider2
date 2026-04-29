@@ -1,4 +1,4 @@
-"""Run the official Spider2-Lite evaluator and save a local summary."""
+"""Run the official Spider2-snow evaluator and save a summary."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from sol01.logging import get_logger
 from sol01.output import RunPaths, ensure_run_paths
 from sol01.tasks import REPO_ROOT, load_tasks
 
-EVALUATION_SUITE_DIR = REPO_ROOT / "spider2-lite" / "evaluation_suite"
+EVALUATION_SUITE_DIR = REPO_ROOT / "spider2-snow" / "evaluation_suite"
 EVALUATE_SCRIPT = EVALUATION_SUITE_DIR / "evaluate.py"
 GOLD_DIR = EVALUATION_SUITE_DIR / "gold"
 LOCAL_SUBSET_TOTAL = 135

@@ -23,7 +23,7 @@ from sol01.output import OUTPUTS_ROOT, ensure_ask_paths, ensure_run_paths
 from sol01.tasks import load_tasks
 
 app = typer.Typer(
-    help="SQLite-local Spider2-Lite solver.",
+    help="Snowflake Spider2-snow solver.",
     no_args_is_help=True,
 )
 logger = get_logger(__name__)
@@ -47,7 +47,7 @@ def run(
     ] = None,
     instance_id: Annotated[
         str | None,
-        typer.Option(help="Run one exact Spider2-Lite instance."),
+        typer.Option(help="Run one exact Spider2-snow instance."),
     ] = None,
     db: Annotated[
         str | None,
@@ -61,10 +61,6 @@ def run(
         int | None,
         typer.Option(min=0, help="Limit how many tasks to run."),
     ] = None,
-    local_only: Annotated[
-        bool,
-        typer.Option("--local-only/--all", help="sol01 only supports local tasks."),
-    ] = True,
     force: Annotated[
         bool,
         typer.Option(help="Rerun tasks even when resume would skip them."),
@@ -78,7 +74,7 @@ def run(
         typer.Option(help="How to choose tables before SQL generation."),
     ] = "llm_only",
 ) -> None:
-    """Run the solver over the selected local tasks."""
+    """Run the solver over the selected Spider2-snow tasks."""
 
     logger.info(
         "run command",
@@ -87,7 +83,6 @@ def run(
         db=db,
         question_contains=question_contains,
         limit=limit,
-        local_only=local_only,
         force=force,
         skip_failed=skip_failed,
         retrieval_mode=retrieval_mode,
@@ -98,7 +93,6 @@ def run(
         db=db,
         question_contains=question_contains,
         limit=limit,
-        local_only=local_only,
         force=force,
         skip_failed=skip_failed,
         retrieval_mode=retrieval_mode,
@@ -220,14 +214,14 @@ def compare_retrieval_command(
 def ask(
     db: Annotated[
         str,
-        typer.Option(help="SQLite database name to query."),
+        typer.Option(help="Snowflake database name to query."),
     ],
     question: Annotated[
         str,
         typer.Argument(help="Ad hoc question to answer."),
     ],
 ) -> None:
-    """Run one ad hoc question against one local SQLite database."""
+    """Run one ad hoc question against one Snowflake database."""
 
     logger.info("ask command", db=db)
     answer = handle_ask(db=db, question=question)
@@ -268,14 +262,12 @@ def handle_run(
     db: str | None,
     question_contains: str | None,
     limit: int | None,
-    local_only: bool,
     force: bool,
     skip_failed: bool,
     retrieval_mode: RetrievalMode,
 ) -> dict[str, Any]:
-    """Load local tasks, then pass them to the batch coordinator."""
+    """Load tasks, then pass them to the batch coordinator."""
 
-    _require_local_only(local_only)
     tasks = _load_filtered_tasks(
         instance_id=instance_id,
         db=db,
@@ -427,13 +419,6 @@ def handle_ask(*, db: str, question: str) -> FinalAnswer:
     finally:
         rmtree(run_paths.root, ignore_errors=True)
         logger.info("ask cleanup complete", ask_root=str(ask_paths.root))
-
-
-def _require_local_only(local_only: bool) -> None:
-    """Fail fast if someone asks this SQLite-only method to run everything."""
-
-    if not local_only:
-        raise typer.BadParameter("sol01 only supports local Spider2-Lite tasks")
 
 
 def _load_filtered_tasks(

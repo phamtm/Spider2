@@ -1,4 +1,4 @@
-"""sol01 SQLite-local Spider2-Lite solver."""
+"""sol01 Snowflake Spider2-snow solver."""
 
 __all__ = ["__version__"]
 

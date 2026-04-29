@@ -134,7 +134,9 @@ spider2-lite/baselines/yyx_tmp/
 
 
 
-# **/snowflake_credential.json
+**/snowflake_credential.json
+**/snowflake_credential.local.json
+!**/snowflake_credential.example.json
 # **/bigquery_credential.json
 # **/bigquery_credential*.json
 

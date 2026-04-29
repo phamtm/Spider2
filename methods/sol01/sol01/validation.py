@@ -1,4 +1,4 @@
-"""Validate generated SQL before it touches a SQLite database."""
+"""Validate generated SQL before it touches Snowflake."""
 
 from __future__ import annotations
 
@@ -26,7 +26,6 @@ DISALLOWED_STATEMENTS = (
     exp.Update,
     exp.Use,
 )
-SAFE_DB_QUALIFIERS = {"", "main", "temp"}
 
 
 def validate_sql(sql: str, *, allowed_tables: Iterable[str]) -> ValidationReport:
@@ -64,16 +63,16 @@ def validate_sql(sql: str, *, allowed_tables: Iterable[str]) -> ValidationReport
 
 
 def _parse_statements(sql: str) -> tuple[list[exp.Expression], str | None]:
-    """Parse SQL with the SQLite dialect and return a clean parse error if needed."""
+    """Parse SQL with the Snowflake dialect and return a clean parse error if needed."""
 
     try:
-        return sqlglot.parse(sql, read="sqlite"), None
+        return sqlglot.parse(sql, read="snowflake"), None
     except ParseError as exc:
         return [], f"SQL could not be parsed: {exc}"
 
 
 def _statement_error(statement: exp.Expression) -> str | None:
-    """Reject non-query roots and explicitly blocked SQLite commands."""
+    """Reject non-query roots and explicitly blocked Snowflake commands."""
 
     if isinstance(statement, DISALLOWED_STATEMENTS):
         return f"Disallowed statement type: {statement.key.upper()}."
@@ -91,7 +90,7 @@ def _statement_error(statement: exp.Expression) -> str | None:
 
 
 def _extension_loading_error(statement: exp.Expression) -> str | None:
-    """Reject SQLite extension loading even when it appears inside a SELECT."""
+    """Reject extension loading even when it appears inside a SELECT."""
 
     for function in statement.find_all(exp.Func):
         if getattr(function, "name", "").lower() == "load_extension":
@@ -107,6 +106,7 @@ def _resolve_referenced_tables(
     """Collect base table names from resolved scopes instead of raw name matching."""
 
     allowed_lookup = {table.lower(): table for table in allowed_tables}
+    suffix_lookup = _allowed_suffix_lookup(allowed_tables)
     referenced_tables: list[str] = []
     errors: list[str] = []
     warnings: list[str] = []
@@ -114,16 +114,9 @@ def _resolve_referenced_tables(
     seen_unknown_tables: set[str] = set()
 
     for table in _resolved_base_tables(statement):
-        table_name = table.name
+        table_name = _table_identifier(table)
         normalized_name = table_name.lower()
-
-        if table.db and table.db.lower() not in SAFE_DB_QUALIFIERS:
-            if table.db.lower() not in seen_unknown_tables:
-                seen_unknown_tables.add(table.db.lower())
-                errors.append(f"Unsupported database qualifier on table '{table.sql()}'.")
-            continue
-
-        canonical_name = allowed_lookup.get(normalized_name)
+        canonical_name = allowed_lookup.get(normalized_name) or suffix_lookup.get(normalized_name)
         if canonical_name is None:
             if normalized_name not in seen_unknown_tables:
                 seen_unknown_tables.add(normalized_name)
@@ -135,6 +128,36 @@ def _resolve_referenced_tables(
             referenced_tables.append(canonical_name)
 
     return referenced_tables, errors, warnings
+
+
+def _table_identifier(table: exp.Table) -> str:
+    """Return a Snowflake table reference from catalog, schema, and table parts."""
+
+    parts = [part for part in (table.catalog, table.db, table.name) if part]
+    return ".".join(parts)
+
+
+def _allowed_suffix_lookup(allowed_tables: Iterable[str]) -> dict[str, str]:
+    """Allow unique short or schema-qualified references to selected tables."""
+
+    candidates: dict[str, str | None] = {}
+    for table in allowed_tables:
+        parts = [part for part in table.split(".") if part]
+        suffixes = [parts[-1:]]
+        if len(parts) >= 2:
+            suffixes.append(parts[-2:])
+
+        for suffix_parts in suffixes:
+            suffix = ".".join(suffix_parts).lower()
+            existing = candidates.get(suffix)
+            if existing is None and suffix in candidates:
+                continue
+            if existing is not None and existing != table:
+                candidates[suffix] = None
+            else:
+                candidates[suffix] = table
+
+    return {suffix: table for suffix, table in candidates.items() if table is not None}
 
 
 def _resolved_base_tables(statement: exp.Expression) -> list[exp.Table]:

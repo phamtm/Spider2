@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
 import pytest
 
 from sol01.config import RuntimeConfig
@@ -22,6 +22,8 @@ from sol01.models import (
     Task,
 )
 from sol01.output import ensure_run_paths
+
+SALES_TABLE = "TEST_DB.PUBLIC.SALES"
 
 
 @dataclass
@@ -70,37 +72,29 @@ class FakeLLMClient:
 
 
 @pytest.fixture
-def temp_db(tmp_path: Path) -> Path:
-    """Create a tiny SQLite database for coordinator tests."""
+def fake_snowflake(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Return deterministic DataFrames instead of opening Snowflake connections."""
 
-    path = tmp_path / "sample.sqlite"
-    connection = sqlite3.connect(path)
-    try:
-        connection.execute(
-            """
-            CREATE TABLE sales (
-                id INTEGER PRIMARY KEY,
-                customer TEXT,
-                amount REAL
-            )
-            """
-        )
-        connection.executemany(
-            "INSERT INTO sales (customer, amount) VALUES (?, ?)",
+    def fake_fetch_query_dataframe(sql: str, *, db: str) -> pd.DataFrame:
+        if db != "TEST_DB":
+            raise AssertionError(f"Unexpected database: {db}")
+        if "missing_column" in sql or "still_missing" in sql:
+            raise RuntimeError("invalid identifier 'MISSING_COLUMN'")
+        return pd.DataFrame(
             [
-                ("alice", 10.5),
-                ("bob", 12.0),
-                ("carol", 7.5),
-            ],
+                {"customer": "bob", "amount": 12.0},
+                {"customer": "alice", "amount": 10.5},
+                {"customer": "carol", "amount": 7.5},
+            ]
         )
-        connection.commit()
-    finally:
-        connection.close()
-    return path
+
+    monkeypatch.setattr("sol01.coordinator.fetch_query_dataframe", fake_fetch_query_dataframe)
 
 
-def test_run_task_success_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, temp_db: Path):
-    task = Task(instance_id="local003", db="test_db", question="Show customer totals.")
+def test_run_task_success_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
+):
+    task = Task(instance_id="sf_local003", db="TEST_DB", question="Show customer totals.")
     run_paths = ensure_run_paths("success-run", outputs_root=tmp_path)
     llm = FakeLLMClient(
         outputs={
@@ -117,7 +111,7 @@ def test_run_task_success_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, 
             ],
             "sql_generation": [
                 SQLCandidate(
-                    sql="SELECT customer, amount FROM sales ORDER BY amount DESC",
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE} ORDER BY amount DESC",
                     explanation="Read customer amounts directly.",
                     assumptions=["amount already stores totals"],
                     confidence=0.8,
@@ -133,8 +127,8 @@ def test_run_task_success_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, 
         "sol01.coordinator.retrieve_schema",
         lambda *args, **kwargs: SchemaSelection(
             db="test_db",
-            selected_tables=["sales"],
-            expanded_tables=["sales"],
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
             rationale="sales is enough",
             confidence=0.9,
         ),
@@ -145,7 +139,6 @@ def test_run_task_success_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, 
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
         llm_client=llm,
-        db_path=temp_db,
         initial_candidates=1,
     )
 
@@ -153,9 +146,9 @@ def test_run_task_success_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, 
     assert answer.status == "success"
     assert answer.csv_path is not None
     assert Path(answer.csv_path).exists()
-    assert (run_paths.sql_dir / "local003.sql").exists()
+    assert (run_paths.sql_dir / "sf_local003.sql").exists()
 
-    trace = json.loads((run_paths.traces_dir / "local003.json").read_text(encoding="utf-8"))
+    trace = json.loads((run_paths.traces_dir / "sf_local003.json").read_text(encoding="utf-8"))
     assert trace["status"] == "success"
     assert trace["retrieval_mode"] == "llm_only"
     assert trace["prompt_hashes"]["intent"] == "hash-intent"
@@ -165,9 +158,9 @@ def test_run_task_success_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, 
 
 
 def test_run_task_repairs_validation_failure(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, temp_db: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
 ):
-    task = Task(instance_id="local004", db="test_db", question="Show the first customer.")
+    task = Task(instance_id="sf_local004", db="TEST_DB", question="Show the first customer.")
     run_paths = ensure_run_paths("repair-run", outputs_root=tmp_path)
     llm = FakeLLMClient(
         outputs={
@@ -192,7 +185,7 @@ def test_run_task_repairs_validation_failure(
             ],
             "sql_repair": [
                 SQLCandidate(
-                    sql="SELECT customer FROM sales ORDER BY id LIMIT 1",
+                    sql=f"SELECT customer FROM {SALES_TABLE} LIMIT 1",
                     explanation="Repair to the real table.",
                     assumptions=[],
                     confidence=0.8,
@@ -208,8 +201,8 @@ def test_run_task_repairs_validation_failure(
         "sol01.coordinator.retrieve_schema",
         lambda *args, **kwargs: SchemaSelection(
             db="test_db",
-            selected_tables=["sales"],
-            expanded_tables=["sales"],
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
             rationale="sales is enough",
             confidence=0.9,
         ),
@@ -220,13 +213,12 @@ def test_run_task_repairs_validation_failure(
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
         llm_client=llm,
-        db_path=temp_db,
         initial_candidates=1,
     )
 
     assert answer.status == "success"
 
-    trace = json.loads((run_paths.traces_dir / "local004.json").read_text(encoding="utf-8"))
+    trace = json.loads((run_paths.traces_dir / "sf_local004.json").read_text(encoding="utf-8"))
     assert trace["status"] == "success"
     assert len(trace["attempts"]) == 2
     assert trace["attempts"][0]["validation"]["ok"] is False
@@ -234,9 +226,9 @@ def test_run_task_repairs_validation_failure(
 
 
 def test_run_task_failure_writes_trace_without_csv(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, temp_db: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
 ):
-    task = Task(instance_id="local005", db="test_db", question="Show a missing table.")
+    task = Task(instance_id="sf_local005", db="TEST_DB", question="Show a missing table.")
     run_paths = ensure_run_paths("failed-run", outputs_root=tmp_path)
     llm = FakeLLMClient(
         outputs={
@@ -274,8 +266,8 @@ def test_run_task_failure_writes_trace_without_csv(
         "sol01.coordinator.retrieve_schema",
         lambda *args, **kwargs: SchemaSelection(
             db="test_db",
-            selected_tables=["sales"],
-            expanded_tables=["sales"],
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
             rationale="sales is enough",
             confidence=0.9,
         ),
@@ -286,24 +278,23 @@ def test_run_task_failure_writes_trace_without_csv(
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
         llm_client=llm,
-        db_path=temp_db,
         initial_candidates=1,
     )
 
     assert answer.status == "failed"
     assert answer.csv_path is None
-    assert not (run_paths.csv_dir / "local005.csv").exists()
+    assert not (run_paths.csv_dir / "sf_local005.csv").exists()
 
-    trace = json.loads((run_paths.traces_dir / "local005.json").read_text(encoding="utf-8"))
+    trace = json.loads((run_paths.traces_dir / "sf_local005.json").read_text(encoding="utf-8"))
     assert trace["status"] == "failed"
     assert trace["csv_path"] is None
     assert len(trace["attempts"]) == 2
 
 
 def test_run_task_catches_execution_errors_and_writes_failed_trace(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, temp_db: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
 ):
-    task = Task(instance_id="local006", db="test_db", question="Select a missing column.")
+    task = Task(instance_id="sf_local006", db="TEST_DB", question="Select a missing column.")
     run_paths = ensure_run_paths("execution-fail-run", outputs_root=tmp_path)
     llm = FakeLLMClient(
         outputs={
@@ -320,7 +311,7 @@ def test_run_task_catches_execution_errors_and_writes_failed_trace(
             ],
             "sql_generation": [
                 SQLCandidate(
-                    sql="SELECT missing_column FROM sales",
+                    sql=f"SELECT missing_column FROM {SALES_TABLE}",
                     explanation="Runtime error path.",
                     assumptions=[],
                     confidence=0.9,
@@ -328,7 +319,7 @@ def test_run_task_catches_execution_errors_and_writes_failed_trace(
             ],
             "sql_repair": [
                 SQLCandidate(
-                    sql="SELECT still_missing FROM sales",
+                    sql=f"SELECT still_missing FROM {SALES_TABLE}",
                     explanation="Still broken after repair.",
                     assumptions=[],
                     confidence=0.4,
@@ -341,8 +332,8 @@ def test_run_task_catches_execution_errors_and_writes_failed_trace(
         "sol01.coordinator.retrieve_schema",
         lambda *args, **kwargs: SchemaSelection(
             db="test_db",
-            selected_tables=["sales"],
-            expanded_tables=["sales"],
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
             rationale="sales is enough",
             confidence=0.9,
         ),
@@ -353,22 +344,21 @@ def test_run_task_catches_execution_errors_and_writes_failed_trace(
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
         llm_client=llm,
-        db_path=temp_db,
         initial_candidates=1,
     )
 
     assert answer.status == "failed"
-    trace = json.loads((run_paths.traces_dir / "local006.json").read_text(encoding="utf-8"))
+    trace = json.loads((run_paths.traces_dir / "sf_local006.json").read_text(encoding="utf-8"))
     assert trace["status"] == "failed"
-    assert "no such column" in trace["attempts"][0]["execution_result"]["error"].lower()
+    assert "invalid identifier" in trace["attempts"][0]["execution_result"]["error"].lower()
 
 
 def test_run_task_uses_only_external_knowledge_for_document_context(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, temp_db: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
 ):
     task = Task(
-        instance_id="local003",
-        db="test_db",
+        instance_id="sf_local003",
+        db="TEST_DB",
         question="Show customer totals.",
         external_knowledge="RFM.md",
     )
@@ -389,7 +379,7 @@ def test_run_task_uses_only_external_knowledge_for_document_context(
             ],
             "sql_generation": [
                 SQLCandidate(
-                    sql="SELECT customer, amount FROM sales ORDER BY amount DESC",
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE} ORDER BY amount DESC",
                     explanation="Read customer amounts directly.",
                     assumptions=["amount already stores totals"],
                     confidence=0.8,
@@ -406,8 +396,8 @@ def test_run_task_uses_only_external_knowledge_for_document_context(
         "sol01.coordinator.retrieve_schema",
         lambda *args, **kwargs: SchemaSelection(
             db="test_db",
-            selected_tables=["sales"],
-            expanded_tables=["sales"],
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
             rationale="sales is enough",
             confidence=0.9,
         ),
@@ -422,7 +412,6 @@ def test_run_task_uses_only_external_knowledge_for_document_context(
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
         llm_client=llm,
-        db_path=temp_db,
         initial_candidates=1,
     )
 
@@ -432,11 +421,11 @@ def test_run_task_uses_only_external_knowledge_for_document_context(
 
 
 def test_run_task_without_external_knowledge_uses_no_document_context(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, temp_db: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
 ):
     task = Task(
-        instance_id="local999",
-        db="test_db",
+        instance_id="sf_local999",
+        db="TEST_DB",
         question="Show customer totals.",
         external_knowledge=None,
     )
@@ -457,7 +446,7 @@ def test_run_task_without_external_knowledge_uses_no_document_context(
             ],
             "sql_generation": [
                 SQLCandidate(
-                    sql="SELECT customer, amount FROM sales ORDER BY amount DESC",
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE} ORDER BY amount DESC",
                     explanation="Read customer amounts directly.",
                     assumptions=["amount already stores totals"],
                     confidence=0.8,
@@ -474,8 +463,8 @@ def test_run_task_without_external_knowledge_uses_no_document_context(
         "sol01.coordinator.retrieve_schema",
         lambda *args, **kwargs: SchemaSelection(
             db="test_db",
-            selected_tables=["sales"],
-            expanded_tables=["sales"],
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
             rationale="sales is enough",
             confidence=0.9,
         ),
@@ -486,7 +475,6 @@ def test_run_task_without_external_knowledge_uses_no_document_context(
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
         llm_client=llm,
-        db_path=temp_db,
         initial_candidates=1,
     )
 

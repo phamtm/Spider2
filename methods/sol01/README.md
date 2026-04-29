@@ -1,10 +1,9 @@
 # sol01
 
-SQLite-only Spider2-Lite solver for local tasks.
+Snowflake-only Spider2-snow solver.
 
-This method is scoped to Spider2-Lite instances whose `instance_id` starts with
-`local`. It generates read-only SQLite SQL, executes against local SQLite
-databases, writes CSV predictions, and evaluates the local subset.
+This method loads Spider2-snow tasks, generates read-only Snowflake SQL,
+executes through Snowflake, writes CSV predictions, and records traces.
 
 ## Setup
 
@@ -16,6 +15,19 @@ uv run python -c "import sol01"
 For local development, copy [`.env.example`](./.env.example) to `.env`.
 The `sol01` CLI loads `methods/sol01/.env` automatically, but real shell
 variables still win.
+
+Create `methods/sol01/snowflake_credential.json` locally with a programmatic
+access token:
+
+```json
+{
+  "username": "<your_username>",
+  "password": "<your_generated_token>",
+  "account": "RSRSBDK-YDB67606",
+  "role": "PARTICIPANT",
+  "warehouse": "COMPUTE_WH_PARTICIPANT"
+}
+```
 
 Pydantic Logfire is enabled by default for CLI runs.
 
@@ -39,10 +51,10 @@ just check
 
 ```bash
 uv run sol01 index
-uv run sol01 run --local-only
+uv run sol01 run
 uv run sol01 eval --run-id <run_id>
 uv run sol01 analyze --run-id <run_id>
-uv run sol01 ask --db E_commerce "Which customers have the highest AOV?"
+uv run sol01 ask --db E_COMMERCE "Which customers have the highest AOV?"
 ```
 
 The implementation plan is tracked in `PLAN.md`.

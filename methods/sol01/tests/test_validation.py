@@ -3,6 +3,11 @@
 from sol01.validation import validate_sql
 
 ALLOWED_TABLES = {"customers", "orders", "order_items"}
+SNOW_ALLOWED_TABLES = {
+    "E_COMMERCE.E_COMMERCE.CUSTOMERS",
+    "E_COMMERCE.E_COMMERCE.ORDERS",
+    "E_COMMERCE.E_COMMERCE.ORDER_ITEMS",
+}
 
 
 def test_validate_sql_allows_valid_cte_query():
@@ -60,13 +65,45 @@ def test_validate_sql_does_not_skip_qualified_base_table_with_same_cte_name():
             FROM customers
         )
         SELECT *
-        FROM main.customers
+        FROM E_COMMERCE.E_COMMERCE.CUSTOMERS
         """,
         allowed_tables=set(),
     )
 
     assert report.ok is False
-    assert report.errors == ["Unknown table referenced: customers."]
+    assert report.errors == [
+        "Unknown table referenced: customers.",
+        "Unknown table referenced: E_COMMERCE.E_COMMERCE.CUSTOMERS.",
+    ]
+
+
+def test_validate_sql_allows_snowflake_fully_qualified_tables():
+    report = validate_sql(
+        """
+        SELECT c.customer_id, o.order_id
+        FROM "E_COMMERCE"."E_COMMERCE"."CUSTOMERS" AS c
+        JOIN E_COMMERCE.E_COMMERCE.ORDERS AS o
+            ON c.customer_id = o.customer_id
+        """,
+        allowed_tables=SNOW_ALLOWED_TABLES,
+    )
+
+    assert report.ok is True
+    assert report.errors == []
+    assert set(report.referenced_tables) == {
+        "E_COMMERCE.E_COMMERCE.CUSTOMERS",
+        "E_COMMERCE.E_COMMERCE.ORDERS",
+    }
+
+
+def test_validate_sql_allows_unique_short_reference_to_selected_snowflake_table():
+    report = validate_sql(
+        "SELECT customer_id FROM CUSTOMERS",
+        allowed_tables=SNOW_ALLOWED_TABLES,
+    )
+
+    assert report.ok is True
+    assert report.referenced_tables == ["E_COMMERCE.E_COMMERCE.CUSTOMERS"]
 
 
 def test_validate_sql_rejects_drop_table():
@@ -79,24 +116,24 @@ def test_validate_sql_rejects_drop_table():
     assert report.errors == ["Disallowed statement type: DROP."]
 
 
-def test_validate_sql_rejects_pragma():
+def test_validate_sql_rejects_session_commands():
     report = validate_sql(
-        "PRAGMA table_info(customers)",
+        "USE DATABASE E_COMMERCE",
         allowed_tables=ALLOWED_TABLES,
     )
 
     assert report.ok is False
-    assert report.errors == ["Disallowed statement type: PRAGMA."]
+    assert report.errors == ["Disallowed statement type: USE."]
 
 
-def test_validate_sql_rejects_unsafe_database_qualifier():
+def test_validate_sql_rejects_unselected_qualified_table():
     report = validate_sql(
-        "SELECT * FROM other.customers",
-        allowed_tables=ALLOWED_TABLES,
+        "SELECT * FROM OTHER_DB.PUBLIC.CUSTOMERS",
+        allowed_tables=SNOW_ALLOWED_TABLES,
     )
 
     assert report.ok is False
-    assert report.errors == ["Unsupported database qualifier on table 'other.customers'."]
+    assert report.errors == ["Unknown table referenced: OTHER_DB.PUBLIC.CUSTOMERS."]
 
 
 def test_validate_sql_rejects_mutation_hidden_inside_cte():

@@ -102,7 +102,7 @@ class ValidationReport(BaseModel):
 
 
 class ExecutionResult(BaseModel):
-    """SQLite execution output plus the CSV path when a result is written."""
+    """SQL execution output plus the CSV path when a result is written."""
 
     ok: bool
     row_count: int = Field(ge=0)
