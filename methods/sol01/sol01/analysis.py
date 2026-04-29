@@ -24,9 +24,8 @@ FAILURE_CATEGORIES = (
     "critic",
     "missing_csv",
     "retrieval_miss",
-    "aggregation_issue",
-    "date_filter_issue",
 )
+FAILURE_HINTS = ("possible_aggregation_issue", "possible_date_filter_issue")
 logger = get_logger(__name__)
 
 
@@ -45,13 +44,20 @@ def analyze_run(
 
     by_category = {category: [] for category in FAILURE_CATEGORIES}
     for trace in traces:
-        record = _trace_record(trace)
-        for category in _trace_categories(trace):
-            by_category[category].append(record)
+        classification = _trace_classification(trace)
+        hints = _trace_hints(trace)
+        for category, evidence in classification.items():
+            by_category[category].append(_trace_record(trace, evidence=evidence, hints=hints))
 
     for instance_id in _missing_csv_ids(run_paths, trace_index, eval_summary):
         trace = trace_index.get(instance_id)
-        by_category["missing_csv"].append(_trace_record(trace, instance_id=instance_id))
+        by_category["missing_csv"].append(
+            _trace_record(
+                trace,
+                instance_id=instance_id,
+                evidence=["CSV output was missing from eval summary or run artifacts."],
+            )
+        )
 
     for records in by_category.values():
         records.sort(key=lambda record: record["instance_id"])
@@ -170,6 +176,8 @@ def _trace_record(
     trace: dict[str, Any] | None,
     *,
     instance_id: str | None = None,
+    evidence: list[str] | None = None,
+    hints: list[str] | None = None,
 ) -> dict[str, Any]:
     """Keep only the fields that make failure reports easy to scan."""
 
@@ -179,19 +187,23 @@ def _trace_record(
             "db": None,
             "status": "missing_trace",
             "question": None,
+            "evidence": evidence or [],
+            "hints": hints or [],
         }
     return {
         "instance_id": trace.get("instance_id", instance_id),
         "db": trace.get("db"),
         "status": trace.get("status"),
         "question": trace.get("question"),
+        "evidence": evidence or [],
+        "hints": hints or [],
     }
 
 
-def _trace_categories(trace: dict[str, Any]) -> set[str]:
-    """Classify one trace into one or more failure buckets."""
+def _trace_classification(trace: dict[str, Any]) -> dict[str, list[str]]:
+    """Classify one trace into conservative failure buckets with evidence."""
 
-    categories: set[str] = set()
+    categories: dict[str, list[str]] = {}
     status = str(trace.get("status") or "")
     attempts = trace.get("attempts") or []
     final_attempt = attempts[-1] if attempts else {}
@@ -201,27 +213,50 @@ def _trace_categories(trace: dict[str, Any]) -> set[str]:
 
     if status != "success" and attempts:
         if not final_validation.get("ok", False):
-            categories.add("validation")
+            categories["validation"] = _validation_evidence(final_validation)
         elif not final_execution.get("ok", False):
-            categories.add("execution")
+            categories["execution"] = _execution_evidence(final_execution)
 
     is_failed = status == "failed"
 
     if _is_empty_result(trace):
-        categories.add("empty_result")
+        categories["empty_result"] = ["Final execution succeeded with zero rows."]
     if is_failed and _has_critic_signal(trace):
-        categories.add("critic")
-    if is_failed and _looks_like_retrieval_miss(trace, final_attempt):
-        categories.add("retrieval_miss")
-    if is_failed and _looks_like_aggregation_issue(trace, final_attempt):
-        categories.add("aggregation_issue")
-    if is_failed and _looks_like_date_filter_issue(trace, final_attempt):
-        categories.add("date_filter_issue")
+        categories["critic"] = _critic_evidence(trace)
+    retrieval_evidence = _retrieval_miss_evidence(trace, final_attempt) if is_failed else []
+    if retrieval_evidence:
+        categories["retrieval_miss"] = retrieval_evidence
 
     if status == "success" and final_trace_execution and not final_trace_execution.get("ok", True):
-        categories.add("execution")
+        categories["execution"] = _execution_evidence(final_trace_execution)
 
     return categories
+
+
+def _validation_evidence(validation: dict[str, Any]) -> list[str]:
+    """Keep validation evidence short enough for reports."""
+
+    errors = [str(error) for error in validation.get("errors", []) if error]
+    return errors[:3] or ["Final validation failed."]
+
+
+def _execution_evidence(execution: dict[str, Any]) -> list[str]:
+    """Keep execution evidence short enough for reports."""
+
+    error = execution.get("error")
+    return [str(error)] if error else ["Final execution failed."]
+
+
+def _critic_evidence(trace: dict[str, Any]) -> list[str]:
+    """Collect the critic issues that caused repair or failure."""
+
+    evidence = []
+    for attempt in trace.get("attempts") or []:
+        critic = attempt.get("critic") or {}
+        if critic.get("should_repair"):
+            evidence.append("Critic requested a repair.")
+        evidence.extend(str(issue) for issue in critic.get("issues", []) if issue)
+    return evidence[:3] or ["Critic reported an issue."]
 
 
 def _is_empty_result(trace: dict[str, Any]) -> bool:
@@ -243,11 +278,11 @@ def _has_critic_signal(trace: dict[str, Any]) -> bool:
     return False
 
 
-def _looks_like_retrieval_miss(
+def _retrieval_miss_evidence(
     trace: dict[str, Any],
     final_attempt: dict[str, Any],
-) -> bool:
-    """Use a narrow heuristic for schema-selection misses."""
+) -> list[str]:
+    """Report retrieval misses only when table evidence points there."""
 
     schema = trace.get("schema_selection") or {}
     validation = final_attempt.get("validation") or {}
@@ -262,31 +297,38 @@ def _looks_like_retrieval_miss(
             if item
         ]
     ).lower()
-    if "schema_selection" in trace and not schema.get("expanded_tables"):
-        return True
-    return "not allowed" in error_text and "table" in error_text
+    expanded_tables = schema.get("expanded_tables") or []
+    has_table_error = "not allowed" in error_text and "table" in error_text
+
+    evidence = []
+    if "schema_selection" not in trace:
+        return evidence
+    if not expanded_tables and has_table_error:
+        evidence.append(
+            "Schema selection expanded no tables and validation reported a table error."
+        )
+    elif has_table_error:
+        evidence.append("Validation reported a table outside the selected schema.")
+    return evidence
 
 
-def _looks_like_aggregation_issue(
-    trace: dict[str, Any],
-    final_attempt: dict[str, Any],
-) -> bool:
-    """Tag traces that likely failed on totals, grouping, or rollups."""
+def _trace_hints(trace: dict[str, Any]) -> list[str]:
+    """Attach weak signals as hints, never as root-cause categories."""
 
+    status = str(trace.get("status") or "")
+    if status != "failed":
+        return []
+    attempts = trace.get("attempts") or []
+    final_attempt = attempts[-1] if attempts else {}
     text = _analysis_text(trace, final_attempt)
-    keywords = ("group by", "aggregate", "aggregation", "sum(", "avg(", "count(")
-    return any(keyword in text for keyword in keywords)
-
-
-def _looks_like_date_filter_issue(
-    trace: dict[str, Any],
-    final_attempt: dict[str, Any],
-) -> bool:
-    """Tag traces that likely failed on date or time filtering."""
-
-    text = _analysis_text(trace, final_attempt)
-    keywords = ("date", "time", "month", "year", "quarter", "strftime", "between")
-    return any(keyword in text for keyword in keywords)
+    hints = []
+    if any(keyword in text for keyword in ("group by", "aggregate", "aggregation", "sum(", "avg(")):
+        hints.append("possible_aggregation_issue")
+    if any(
+        keyword in text for keyword in ("date", "timestamp", "month", "year", "quarter", "between")
+    ):
+        hints.append("possible_date_filter_issue")
+    return [hint for hint in FAILURE_HINTS if hint in hints]
 
 
 def _analysis_text(trace: dict[str, Any], final_attempt: dict[str, Any]) -> str:

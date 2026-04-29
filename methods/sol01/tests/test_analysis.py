@@ -58,6 +58,10 @@ def test_analyze_run_groups_failures_and_writes_reports(tmp_path: Path):
             "question": "Broken table lookup.",
             "status": "failed",
             "csv_path": None,
+            "schema_selection": {
+                "selected_tables": ["known_table"],
+                "expanded_tables": ["known_table"],
+            },
             "attempts": [
                 {
                     "sql": "SELECT * FROM missing_table",
@@ -177,6 +181,13 @@ def test_analyze_run_groups_failures_and_writes_reports(tmp_path: Path):
     assert [item["instance_id"] for item in report["by_category"]["critic"]] == ["local006"]
     assert [item["instance_id"] for item in report["by_category"]["missing_csv"]] == ["local005"]
     assert [item["instance_id"] for item in report["by_category"]["retrieval_miss"]] == ["local002"]
+    assert report["by_category"]["validation"][0]["evidence"] == [
+        "Table missing_table is not allowed."
+    ]
+    assert report["by_category"]["retrieval_miss"][0]["evidence"] == [
+        "Validation reported a table outside the selected schema."
+    ]
+    assert report["by_category"]["execution"][1]["hints"] == []
 
     summary_text = (run_paths.analysis_dir / "summary.md").read_text(encoding="utf-8")
     assert "Analysis for analysis-run" in summary_text
@@ -224,8 +235,74 @@ def test_analyze_run_does_not_label_success_keywords_as_failures(tmp_path: Path)
     report = analyze_run("success-keywords", outputs_root=tmp_path)
 
     assert report["by_category"]["critic"] == []
-    assert report["by_category"]["aggregation_issue"] == []
-    assert report["by_category"]["date_filter_issue"] == []
+    assert "aggregation_issue" not in report["by_category"]
+    assert "date_filter_issue" not in report["by_category"]
+    assert report["by_category"]["retrieval_miss"] == []
+
+
+def test_analyze_run_keeps_speculative_signals_as_hints(tmp_path: Path):
+    """Weak date and aggregation signals should not become failure categories."""
+
+    run_paths = ensure_run_paths("failure-hints", outputs_root=tmp_path)
+    write_trace(
+        run_paths,
+        instance_id="local151",
+        trace={
+            "instance_id": "local151",
+            "db": "db_dates",
+            "question": "Show total sales by month.",
+            "status": "failed",
+            "csv_path": None,
+            "attempts": [
+                {
+                    "sql": (
+                        "SELECT DATE_TRUNC('month', order_date), SUM(amount) FROM sales GROUP BY 1"
+                    ),
+                    "validation": {"ok": True, "errors": []},
+                    "execution_result": {"ok": False, "error": "invalid timestamp"},
+                }
+            ],
+        },
+    )
+
+    report = analyze_run("failure-hints", outputs_root=tmp_path)
+
+    execution_record = report["by_category"]["execution"][0]
+    assert execution_record["instance_id"] == "local151"
+    assert execution_record["hints"] == [
+        "possible_aggregation_issue",
+        "possible_date_filter_issue",
+    ]
+    assert "aggregation_issue" not in report["by_category"]
+    assert "date_filter_issue" not in report["by_category"]
+
+
+def test_analyze_run_requires_schema_evidence_for_retrieval_miss(tmp_path: Path):
+    """Table validation errors alone should not be called retrieval misses."""
+
+    run_paths = ensure_run_paths("schema-evidence", outputs_root=tmp_path)
+    write_trace(
+        run_paths,
+        instance_id="local175",
+        trace={
+            "instance_id": "local175",
+            "db": "db_schema",
+            "question": "Read a missing table.",
+            "status": "failed",
+            "csv_path": None,
+            "attempts": [
+                {
+                    "sql": "SELECT * FROM missing_table",
+                    "validation": {"ok": False, "errors": ["Table missing_table is not allowed."]},
+                    "execution_result": {"ok": False, "error": "Validation failed."},
+                }
+            ],
+        },
+    )
+
+    report = analyze_run("schema-evidence", outputs_root=tmp_path)
+
+    assert [item["instance_id"] for item in report["by_category"]["validation"]] == ["local175"]
     assert report["by_category"]["retrieval_miss"] == []
 
 
