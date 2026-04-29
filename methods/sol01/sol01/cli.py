@@ -14,7 +14,7 @@ import typer
 from sol01.analysis import analyze_run
 from sol01.config import DEFAULT_DOTENV_PATH, RuntimeConfig
 from sol01.coordinator import run_task, run_tasks
-from sol01.eval_runner import run_official_eval
+from sol01.eval_runner import run_official_eval, run_persisted_eval
 from sol01.index import CACHE_PATH, build_index_cache
 from sol01.logging import configure_logging, get_logger
 from sol01.models import FinalAnswer, Task
@@ -269,18 +269,10 @@ def handle_run(
         force=force,
         skip_failed=skip_failed,
     )
-    scored_task_ids = [answer.instance_id for answer in results if answer.csv_path]
-    with TemporaryDirectory(prefix="sol01-run-eval-") as temp_dir:
-        staged_dir = _stage_filtered_eval_results(
-            effective_run_id,
-            task_ids=scored_task_ids,
-            destination=Path(temp_dir),
-        )
-        eval_summary = run_official_eval(
-            effective_run_id,
-            expected_instance_ids=[task.instance_id for task in tasks],
-            result_dir=staged_dir,
-        )
+    eval_summary = run_persisted_eval(
+        effective_run_id,
+        expected_instance_ids=[task.instance_id for task in tasks],
+    )
     return {
         "tasks": tasks,
         "results": results,

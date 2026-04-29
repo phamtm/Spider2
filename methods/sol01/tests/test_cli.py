@@ -122,26 +122,27 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
 
     monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
     monkeypatch.setattr(cli, "run_tasks", fake_run_tasks)
-    monkeypatch.setattr(
-        cli,
-        "_stage_filtered_eval_results",
-        lambda run_id, *, task_ids, destination: destination,
-    )
 
-    def fake_run_official_eval(run_id, *, expected_instance_ids=None, result_dir=None, **kwargs):
+    def fake_run_persisted_eval(run_id, *, expected_instance_ids=None, **kwargs):
         called["eval_run_id"] = run_id
         called["expected_instance_ids"] = expected_instance_ids
-        called["result_dir"] = result_dir
         return {
             "correct_tasks": 1,
             "attempted_tasks": 1,
             "missing_csv_count": 0,
+            "result_dir": f"/persisted/{run_id}/eval/scored_csv",
             "per_instance": [
-                {"instance_id": "local003", "passed": True, "score": 1, "csv_present": True}
+                {
+                    "instance_id": "local003",
+                    "passed": True,
+                    "score": 1,
+                    "csv_present": True,
+                    "failure_reason": None,
+                }
             ],
         }
 
-    monkeypatch.setattr(cli, "run_official_eval", fake_run_official_eval)
+    monkeypatch.setattr(cli, "run_persisted_eval", fake_run_persisted_eval)
 
     result = cli.handle_run(
         run_id="smoke-local003",
@@ -159,7 +160,6 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
     assert called["run_id"] == "smoke-local003"
     assert called["eval_run_id"] == "smoke-local003"
     assert called["expected_instance_ids"] == ["local003"]
-    assert called["result_dir"] is not None
     assert result["eval_summary"]["correct_tasks"] == 1
 
 
@@ -204,11 +204,7 @@ def test_handle_run_only_stages_csv_backed_results_for_eval(monkeypatch, tmp_pat
         ],
     )
 
-    def fake_stage(run_id, *, task_ids, destination):
-        called["staged_task_ids"] = task_ids
-        return destination
-
-    def fake_eval(run_id, *, expected_instance_ids=None, result_dir=None, **kwargs):
+    def fake_run_persisted_eval(run_id, *, expected_instance_ids=None, **kwargs):
         called["expected_instance_ids"] = expected_instance_ids
         return {
             "correct_tasks": 1,
@@ -217,8 +213,7 @@ def test_handle_run_only_stages_csv_backed_results_for_eval(monkeypatch, tmp_pat
             "per_instance": [],
         }
 
-    monkeypatch.setattr(cli, "_stage_filtered_eval_results", fake_stage)
-    monkeypatch.setattr(cli, "run_official_eval", fake_eval)
+    monkeypatch.setattr(cli, "run_persisted_eval", fake_run_persisted_eval)
 
     cli.handle_run(
         run_id="smoke-local003",
@@ -230,7 +225,6 @@ def test_handle_run_only_stages_csv_backed_results_for_eval(monkeypatch, tmp_pat
         skip_failed=False,
     )
 
-    assert called["staged_task_ids"] == ["local003"]
     assert called["expected_instance_ids"] == ["local003", "local004"]
 
 

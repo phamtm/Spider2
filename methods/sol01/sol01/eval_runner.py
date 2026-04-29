@@ -7,12 +7,18 @@ import json
 import re
 import subprocess
 import sys
+from shutil import copy2
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
 from sol01.logging import get_logger
-from sol01.output import RunPaths, ensure_run_paths
+from sol01.output import (
+    RunPaths,
+    ensure_run_paths,
+    per_instance_eval_path_for,
+    scored_csv_dir_for,
+)
 from sol01.snowflake_runner import DEFAULT_CREDENTIAL_PATH
 from sol01.tasks import REPO_ROOT, load_tasks
 
@@ -124,6 +130,59 @@ def run_official_eval(
     return summary
 
 
+def run_persisted_eval(
+    run_id: str,
+    *,
+    expected_instance_ids: list[str],
+    python_executable: str | None = None,
+    outputs_root: Path | None = None,
+    artifact_tag: str | None = None,
+    credential_path: Path | None = None,
+    runner: Runner | None = None,
+) -> dict[str, Any]:
+    """Persist scored CSVs, run eval, and write durable per-instance records."""
+
+    run_paths = ensure_run_paths(
+        run_id,
+        outputs_root=outputs_root or REPO_ROOT / "methods" / "sol01" / "outputs",
+    )
+    persisted_result_dir = scored_csv_dir_for(run_paths)
+    copied_csv_count = _copy_scored_csvs(run_paths.csv_dir, persisted_result_dir)
+    expected_ids = set(expected_instance_ids)
+
+    if copied_csv_count == 0:
+        summary = _build_no_csv_summary(
+            run_id=run_id,
+            run_paths=run_paths,
+            expected_ids=expected_ids,
+            result_dir=persisted_result_dir,
+        )
+        _write_per_instance_records(
+            per_instance_eval_path_for(run_paths),
+            summary["per_instance"],
+        )
+        return summary
+
+    summary = run_official_eval(
+        run_id,
+        python_executable=python_executable,
+        outputs_root=outputs_root,
+        expected_instance_ids=expected_instance_ids,
+        artifact_tag=artifact_tag,
+        result_dir=persisted_result_dir,
+        credential_path=credential_path,
+        runner=runner,
+    )
+    per_instance_rows = _per_instance_rows(
+        expected_ids=expected_ids,
+        instance_scores=summary.get("instance_scores", {}),
+        result_dir=persisted_result_dir,
+    )
+    summary["per_instance"] = per_instance_rows
+    _write_per_instance_records(per_instance_eval_path_for(run_paths), per_instance_rows)
+    return summary
+
+
 def build_eval_command(
     run_paths: RunPaths,
     *,
@@ -215,6 +274,40 @@ def _per_instance_summary(
     return rows
 
 
+def _per_instance_rows(
+    *,
+    expected_ids: set[str],
+    instance_scores: dict[str, int],
+    result_dir: Path,
+) -> list[dict[str, Any]]:
+    """Build stable per-task eval records with a failure reason when available."""
+
+    present_ids = {path.stem for path in result_dir.glob("*.csv")}
+    rows: list[dict[str, Any]] = []
+    for instance_id in sorted(expected_ids):
+        score = instance_scores.get(instance_id)
+        csv_present = instance_id in present_ids
+        if csv_present:
+            if score == 1:
+                failure_reason = None
+            elif score is not None:
+                failure_reason = "official_fail"
+            else:
+                failure_reason = "eval_failed"
+        else:
+            failure_reason = "missing_csv"
+        rows.append(
+            {
+                "instance_id": instance_id,
+                "score": score,
+                "passed": score == 1,
+                "csv_present": csv_present,
+                "failure_reason": failure_reason,
+            }
+        )
+    return rows
+
+
 def _missing_instance_ids(result_dir: Path, *, expected_ids: set[str]) -> list[str]:
     """List task IDs that do not have a CSV in the run output."""
 
@@ -226,6 +319,68 @@ def _missing_csv_count(result_dir: Path, *, expected_ids: set[str]) -> int:
     """Count how many tasks still do not have a CSV output."""
 
     return len(_missing_instance_ids(result_dir, expected_ids=expected_ids))
+
+
+def _copy_scored_csvs(source_dir: Path, destination_dir: Path) -> int:
+    """Copy CSV outputs into the durable eval input directory."""
+
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    for stale_csv in destination_dir.glob("*.csv"):
+        stale_csv.unlink()
+    copied = 0
+    for source in sorted(source_dir.glob("*.csv")):
+        copy2(source, destination_dir / source.name)
+        copied += 1
+    return copied
+
+
+def _build_no_csv_summary(
+    *,
+    run_id: str,
+    run_paths: RunPaths,
+    expected_ids: set[str],
+    result_dir: Path,
+) -> dict[str, Any]:
+    """Create a local summary when there are no scored CSVs to evaluate."""
+
+    stdout_path = run_paths.eval_dir / "official_stdout.txt"
+    stderr_path = run_paths.eval_dir / "official_stderr.txt"
+    stdout_path.write_text("", encoding="utf-8")
+    stderr_path.write_text("", encoding="utf-8")
+    per_instance = _per_instance_rows(
+        expected_ids=expected_ids,
+        instance_scores={},
+        result_dir=result_dir,
+    )
+    summary = {
+        "attempted_tasks": 0,
+        "correct_tasks": 0,
+        "attempted_score": 0.0,
+        "benchmark_total": BENCHMARK_TOTAL,
+        "benchmark_score": 0.0,
+        "instance_scores": {},
+        "run_id": run_id,
+        "stdout_path": str(stdout_path),
+        "stderr_path": str(stderr_path),
+        "result_dir": str(result_dir),
+        "per_instance": per_instance,
+        "missing_csv_count": len(expected_ids),
+        "missing_instance_ids": sorted(expected_ids),
+        "returncode": 0,
+    }
+    summary_path = run_paths.eval_dir / "summary.json"
+    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return summary
+
+
+def _write_per_instance_records(path: Path, rows: list[dict[str, Any]]) -> None:
+    """Write one JSONL row per expected task in stable order."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        for row in rows:
+            handle.write(json.dumps(row, sort_keys=True))
+            handle.write("\n")
 
 
 def _expected_instance_ids(run_paths: RunPaths) -> set[str]:
