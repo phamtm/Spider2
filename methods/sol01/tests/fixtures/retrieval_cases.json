@@ -1,35 +1,53 @@
 {
   "cases": [
     {
-      "instance_id": "local003",
-      "db": "E_commerce",
+      "instance_id": "sf_local003",
+      "db": "E_COMMERCE",
       "question": "According to the RFM definition document, calculate the average sales per order for each customer within distinct RFM segments, considering only 'delivered' orders. Use the customer unique identifier. Clearly define how to calculate Recency based on the latest purchase timestamp and specify the criteria for classifying RFM segments. The average sales should be computed as the total spend divided by the total number of orders. Please analyze and report the differences in average sales across the RFM segments",
       "external_knowledge": "RFM.md",
-      "expected_tables": ["customers", "orders", "order_items"]
+      "expected_tables": [
+        "E_COMMERCE.E_COMMERCE.CUSTOMERS",
+        "E_COMMERCE.E_COMMERCE.ORDERS",
+        "E_COMMERCE.E_COMMERCE.ORDER_ITEMS"
+      ]
     },
     {
-      "instance_id": "local004",
-      "db": "E_commerce",
+      "instance_id": "sf_local004",
+      "db": "E_COMMERCE",
       "question": "Could you tell me the number of orders, average payment per order and customer lifespan in weeks of the 3 custumers with the highest average payment per order, where the lifespan is calculated by subtracting the earliest purchase date from the latest purchase date in days, dividing by seven, and if the result is less than seven days, setting it to 1.0?",
-      "expected_tables": ["customers", "orders", "order_payments"]
+      "expected_tables": [
+        "E_COMMERCE.E_COMMERCE.CUSTOMERS",
+        "E_COMMERCE.E_COMMERCE.ORDERS",
+        "E_COMMERCE.E_COMMERCE.ORDER_PAYMENTS"
+      ]
     },
     {
-      "instance_id": "local007",
-      "db": "Baseball",
+      "instance_id": "sf_local007",
+      "db": "BASEBALL",
       "question": "Could you help me calculate the average single career span value in years for all baseball players? Please precise the result as a float number. First, calculate the difference in years, months, and days between the debut and final game dates. For each player, the career span is computed as the sum of the absolute number of years, plus the absolute number of months divided by 12, plus the absolute number of days divided by 365. Round each part to two decimal places before summing. Finally, average the career spans and round the result to a float number.",
-      "expected_tables": ["player"]
+      "expected_tables": ["BASEBALL.BASEBALL.PLAYER"]
     },
     {
-      "instance_id": "local015",
-      "db": "California_Traffic_Collision",
+      "instance_id": "sf_local015",
+      "db": "CALIFORNIA_TRAFFIC_COLLISION",
       "question": "Please calculate the fatality rate for motorcycle collisions, separated by helmet usage. Specifically, calculate two percentages: 1) the percentage of motorcyclist fatalities in collisions where parties (drivers or passengers) wore helmets, and 2) the percentage of motorcyclist fatalities in collisions where parties did not wear helmets.",
-      "expected_tables": ["collisions", "parties", "victims"]
+      "expected_tables": [
+        "CALIFORNIA_TRAFFIC_COLLISION.CALIFORNIA_TRAFFIC_COLLISION.COLLISIONS",
+        "CALIFORNIA_TRAFFIC_COLLISION.CALIFORNIA_TRAFFIC_COLLISION.PARTIES",
+        "CALIFORNIA_TRAFFIC_COLLISION.CALIFORNIA_TRAFFIC_COLLISION.VICTIMS"
+      ]
     },
     {
-      "instance_id": "local020",
+      "instance_id": "sf_local020",
       "db": "IPL",
       "question": "Which bowler has the lowest bowling average per wicket taken?",
-      "expected_tables": ["ball_by_ball", "batsman_scored", "extra_runs", "player", "wicket_taken"]
+      "expected_tables": [
+        "IPL.IPL.BALL_BY_BALL",
+        "IPL.IPL.BATSMAN_SCORED",
+        "IPL.IPL.EXTRA_RUNS",
+        "IPL.IPL.PLAYER",
+        "IPL.IPL.WICKET_TAKEN"
+      ]
     }
   ]
 }

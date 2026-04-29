@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any, Protocol
 
-from sol01.index import CACHE_PATH, build_index_cache
+from sol01.index import CACHE_PATH, build_db_index, build_index_cache
 from sol01.logging import get_logger
 from sol01.models import (
     RetrievalMode,
@@ -117,11 +117,12 @@ def retrieve_schema(
 def load_db_index(db: str, *, cache_path: Path = CACHE_PATH) -> dict[str, TableSchema]:
     """Load one database index from the cache, building it when needed."""
 
-    payload = load_index_cache(cache_path=cache_path)
-    try:
-        return payload[db]
-    except KeyError as exc:
-        raise KeyError(f"Unknown database: {db}") from exc
+    payload = load_index_cache(cache_path=cache_path) if cache_path.exists() else {}
+    if db not in payload:
+        payload[db] = build_db_index(db)
+        _write_index_cache(payload, cache_path)
+
+    return payload[db]
 
 
 def _retrieve_schema_with_llm(
@@ -205,6 +206,27 @@ def load_index_cache(
     }
 
 
+def _write_index_cache(
+    payload: dict[str, dict[str, TableSchema]],
+    cache_path: Path,
+) -> None:
+    """Persist a schema index cache payload."""
+
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    cache_path.write_text(
+        json.dumps(
+            {
+                db: {table: schema.model_dump(mode="json") for table, schema in tables.items()}
+                for db, tables in payload.items()
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def _rank_tables(
     question: str, db_index: dict[str, TableSchema]
 ) -> list[tuple[str, float, list[str]]]:
@@ -214,7 +236,8 @@ def _rank_tables(
     ranked: list[tuple[str, float, list[str]]] = []
 
     for table_name, table in db_index.items():
-        name_terms = _token_set(table.name)
+        table_name_text = " ".join(part for part in [table.name, table.full_name or ""] if part)
+        name_terms = _token_set(table_name_text)
         column_terms = _token_set(" ".join(column.name for column in table.columns))
         description_terms = _token_set(
             " ".join(column.description or "" for column in table.columns)
@@ -237,7 +260,7 @@ def _rank_tables(
                 matches.append(term)
                 score += term_score
 
-        if _phrase_match(question, table.name):
+        if _phrase_match(question, table.name) or _phrase_match(question, table.full_name or ""):
             score += 4.0
         if any(_phrase_match(question, column.name) for column in table.columns):
             score += 2.0
@@ -341,13 +364,22 @@ def _sanitize_llm_tables(
 ) -> list[str]:
     """Keep valid unique table names and surface an empty selection when none survive."""
 
-    valid_tables = set(db_index)
+    valid_tables = {table_name.lower(): table_name for table_name in db_index}
+    short_name_lookup: dict[str, list[str]] = {}
+    for table_identity, table in db_index.items():
+        short_name_lookup.setdefault(table.name.lower(), []).append(table_identity)
+
     selected_tables: list[str] = []
     for table_name in requested_tables:
-        normalized = table_name.strip()
-        if normalized not in valid_tables or normalized in selected_tables:
+        normalized = table_name.strip().lower()
+        canonical = valid_tables.get(normalized)
+        if canonical is None:
+            matches = short_name_lookup.get(normalized, [])
+            if len(matches) == 1:
+                canonical = matches[0]
+        if canonical is None or canonical in selected_tables:
             continue
-        selected_tables.append(normalized)
+        selected_tables.append(canonical)
         if len(selected_tables) == max_tables:
             break
     return selected_tables

@@ -1,4 +1,4 @@
-"""Load allowed markdown documents used as task-linked context."""
+"""Load allowed Spider2-snow markdown documents used as task-linked context."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from sol01.tasks import REPO_ROOT
 
-DOCUMENTS_ROOT = REPO_ROOT / "spider2-lite" / "resource" / "documents"
+DOCUMENTS_ROOT = REPO_ROOT / "spider2-snow" / "resource" / "documents"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")
 
 

@@ -1,4 +1,4 @@
-"""Build a compact schema index from the Spider2-Lite SQLite metadata files."""
+"""Build a compact schema index from the Spider2-snow metadata files."""
 
 from __future__ import annotations
 
@@ -11,30 +11,47 @@ from sol01.logging import get_logger
 from sol01.models import ColumnSchema, TableSchema
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SQLITE_METADATA_ROOT = REPO_ROOT / "spider2-lite" / "resource" / "databases" / "sqlite"
-CACHE_PATH = (REPO_ROOT / "methods" / "sol01" / ".cache" / "index.json").resolve()
+SNOW_METADATA_ROOT = REPO_ROOT / "spider2-snow" / "resource" / "databases"
+CACHE_PATH = (REPO_ROOT / "methods" / "sol01" / ".cache" / "snow_index.json").resolve()
 logger = get_logger(__name__)
 
 
-def build_db_index(
-    db: str, *, metadata_root: Path = SQLITE_METADATA_ROOT
-) -> dict[str, TableSchema]:
-    """Build table metadata for one SQLite database."""
+def build_db_index(db: str, *, metadata_root: Path = SNOW_METADATA_ROOT) -> dict[str, TableSchema]:
+    """Build table metadata for one Snowflake database."""
 
     db_dir = metadata_root / db
     logger.info("db index start", db=db, metadata_root=str(metadata_root))
-    ddl_by_table = _read_ddl_map(db_dir / "DDL.csv")
     index: dict[str, TableSchema] = {}
 
-    for table_name, ddl in ddl_by_table.items():
-        metadata = _read_table_metadata(db_dir / f"{table_name}.json")
-        index[table_name] = TableSchema(
-            name=table_name,
-            ddl=ddl,
-            columns=_build_columns(metadata),
-            sample_rows=_metadata_rows(metadata),
-            searchable_text=_build_searchable_text(table_name, metadata),
-        )
+    for schema_dir in _schema_dirs(db_dir):
+        schema_name = None if schema_dir == db_dir else schema_dir.name
+        ddl_by_table = _read_ddl_map(schema_dir / "DDL.csv")
+
+        for metadata_path in sorted(schema_dir.glob("*.json")):
+            metadata = _read_table_metadata(metadata_path)
+            table_name = _short_table_name(metadata, metadata_path)
+            table_identity = _table_identity(
+                metadata,
+                db=db,
+                schema=schema_name,
+                table_name=table_name,
+            )
+            index[table_identity] = TableSchema(
+                name=table_name,
+                database_name=db,
+                schema_name=schema_name,
+                full_name=table_identity,
+                ddl=_table_ddl(
+                    ddl_by_table,
+                    metadata=metadata,
+                    schema=schema_name,
+                    table_name=table_name,
+                    table_identity=table_identity,
+                ),
+                columns=_build_columns(metadata),
+                sample_rows=_metadata_rows(metadata),
+                searchable_text=_build_searchable_text(table_identity, table_name, metadata),
+            )
 
     logger.info("db index complete", db=db, table_count=len(index))
     return index
@@ -42,10 +59,10 @@ def build_db_index(
 
 def build_index_cache(
     *,
-    metadata_root: Path = SQLITE_METADATA_ROOT,
+    metadata_root: Path = SNOW_METADATA_ROOT,
     cache_path: Path = CACHE_PATH,
 ) -> dict[str, dict[str, TableSchema]]:
-    """Build and persist the full SQLite metadata cache used by later retrieval."""
+    """Build and persist the full Snowflake metadata cache used by later retrieval."""
 
     logger.info("index cache start", metadata_root=str(metadata_root), cache_path=str(cache_path))
     payload = {
@@ -68,6 +85,16 @@ def build_index_cache(
     )
     logger.info("index cache complete", database_count=len(payload), cache_path=str(cache_path))
     return payload
+
+
+def _schema_dirs(db_dir: Path) -> list[Path]:
+    """Return schema metadata directories for one database."""
+
+    if (db_dir / "DDL.csv").exists():
+        return [db_dir]
+    return sorted(
+        path for path in db_dir.iterdir() if path.is_dir() and (path / "DDL.csv").exists()
+    )
 
 
 def _read_ddl_map(path: Path) -> dict[str, str]:
@@ -105,10 +132,63 @@ def _build_columns(metadata: dict[str, object]) -> list[ColumnSchema]:
     return columns
 
 
-def _build_searchable_text(table_name: str, metadata: dict[str, object]) -> str:
+def _short_table_name(metadata: dict[str, object], metadata_path: Path) -> str:
+    """Return the unqualified table name from metadata."""
+
+    raw_name = str(metadata.get("table_name") or metadata_path.stem).strip()
+    return raw_name.split(".")[-1] if raw_name else metadata_path.stem
+
+
+def _table_identity(
+    metadata: dict[str, object],
+    *,
+    db: str,
+    schema: str | None,
+    table_name: str,
+) -> str:
+    """Return the canonical table identity used by retrieval."""
+
+    full_name = str(metadata.get("table_fullname") or "").strip()
+    if full_name:
+        return full_name
+
+    raw_name = str(metadata.get("table_name") or "").strip()
+    if raw_name and schema is None:
+        return raw_name
+    if raw_name.count(".") >= 2:
+        return raw_name
+    if schema is not None:
+        return f"{db}.{schema}.{table_name}"
+    return table_name
+
+
+def _table_ddl(
+    ddl_by_table: dict[str, str],
+    *,
+    metadata: dict[str, object],
+    schema: str | None,
+    table_name: str,
+    table_identity: str,
+) -> str:
+    """Find the best DDL entry for a table across short and qualified names."""
+
+    raw_name = str(metadata.get("table_name") or "").strip()
+    candidates = [table_name, raw_name, table_identity]
+    if schema is not None:
+        candidates.append(f"{schema}.{table_name}")
+
+    for candidate in candidates:
+        if candidate in ddl_by_table:
+            return ddl_by_table[candidate]
+    return ""
+
+
+def _build_searchable_text(
+    table_identity: str, table_name: str, metadata: dict[str, object]
+) -> str:
     """Flatten useful names, descriptions, and examples into one search string."""
 
-    parts: list[str] = [table_name, str(metadata.get("table_fullname", ""))]
+    parts: list[str] = [table_identity, table_name, str(metadata.get("table_name", ""))]
     parts.extend(str(name) for name in _metadata_list(metadata, "column_names"))
     parts.extend(str(value) for value in _metadata_list(metadata, "column_types"))
     parts.extend(str(value) for value in _metadata_list(metadata, "description"))

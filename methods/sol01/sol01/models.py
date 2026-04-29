@@ -8,7 +8,7 @@ RetrievalMode = Literal["lexical", "llm_only"]
 
 
 class Task(BaseModel):
-    """A Spider2-Lite task that is safe to use during generation."""
+    """A benchmark task that is safe to use during generation."""
 
     instance_id: str
     db: str
@@ -41,6 +41,9 @@ class TableSchema(BaseModel):
     """Schema text and examples used to decide which tables matter."""
 
     name: str
+    database_name: str | None = None
+    schema_name: str | None = None
+    full_name: str | None = None
     ddl: str
     columns: list[ColumnSchema] = Field(default_factory=list)
     sample_rows: list[dict[str, object]] = Field(default_factory=list)

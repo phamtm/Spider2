@@ -1,4 +1,4 @@
-"""Load and filter Spider2-Lite tasks for the local SQLite subset."""
+"""Load and filter Spider2-snow tasks."""
 
 from __future__ import annotations
 
@@ -9,21 +9,21 @@ from sol01.logging import get_logger
 from sol01.models import Task
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-SPIDER2_LITE_PATH = REPO_ROOT / "spider2-lite" / "spider2-lite.jsonl"
+SPIDER2_SNOW_PATH = REPO_ROOT / "spider2-snow" / "spider2-snow.jsonl"
 logger = get_logger(__name__)
 
 
 def load_tasks(
     *,
-    dataset_path: Path = SPIDER2_LITE_PATH,
+    dataset_path: Path = SPIDER2_SNOW_PATH,
     instance_id: str | None = None,
     db: str | None = None,
     question_contains: str | None = None,
     limit: int | None = None,
 ) -> list[Task]:
-    """Return local Spider2-Lite tasks after applying the requested filters."""
+    """Return Spider2-snow tasks after applying the requested filters."""
 
-    tasks = [task for task in _read_tasks(dataset_path) if task.instance_id.startswith("local")]
+    tasks = _read_tasks(dataset_path)
 
     if instance_id is not None:
         tasks = [task for task in tasks if task.instance_id == instance_id]
@@ -56,4 +56,16 @@ def _read_tasks(dataset_path: Path) -> list[Task]:
     """Read the JSONL dataset into typed task objects."""
 
     with dataset_path.open(encoding="utf-8") as handle:
-        return [Task.model_validate(json.loads(line)) for line in handle if line.strip()]
+        return [_task_from_record(json.loads(line)) for line in handle if line.strip()]
+
+
+def _task_from_record(record: dict[str, object]) -> Task:
+    """Adapt a Spider2-snow JSONL record to the compact task contract."""
+
+    external_knowledge = record.get("external_knowledge")
+    return Task(
+        instance_id=str(record["instance_id"]),
+        db=str(record["db_id"]),
+        question=str(record["instruction"]),
+        external_knowledge=str(external_knowledge) if external_knowledge is not None else None,
+    )

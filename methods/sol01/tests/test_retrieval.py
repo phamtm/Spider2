@@ -13,6 +13,8 @@ from sol01.models import FinalAnswer, SchemaSelection, TableSelectionDecision, T
 from sol01.retrieval import retrieve_schema
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "retrieval_cases.json"
+CUSTOMERS = "E_COMMERCE.E_COMMERCE.CUSTOMERS"
+ORDERS = "E_COMMERCE.E_COMMERCE.ORDERS"
 
 
 class FakeSelectorLLM:
@@ -49,11 +51,11 @@ def test_retrieval_fixture_contains_expected_vague_cases():
 
     assert len(payload["cases"]) >= 5
     assert {case["instance_id"] for case in payload["cases"]} >= {
-        "local003",
-        "local004",
-        "local007",
-        "local015",
-        "local020",
+        "sf_local003",
+        "sf_local004",
+        "sf_local007",
+        "sf_local015",
+        "sf_local020",
     }
 
 
@@ -68,7 +70,7 @@ def test_retrieve_schema_defaults_to_llm_only_mode():
 
     selection = retrieve_schema(
         "Which customers placed the highest value orders?",
-        "E_commerce",
+        "E_COMMERCE",
         llm_client=llm,
     )
 
@@ -76,7 +78,7 @@ def test_retrieve_schema_defaults_to_llm_only_mode():
     assert selection.retrieval_mode == "llm_only"
     assert selection.selection_prompt_chars > 0
     assert selection.candidate_table_count == 11
-    assert selection.selected_tables == ["orders", "customers"]
+    assert selection.selected_tables == [ORDERS, CUSTOMERS]
     assert selection.expanded_tables == selection.selected_tables
 
 
@@ -91,14 +93,14 @@ def test_retrieve_schema_llm_only_uses_schema_selector_and_filters_unknown_table
 
     selection = retrieve_schema(
         "Which customers placed the highest value orders?",
-        "E_commerce",
+        "E_COMMERCE",
         retrieval_mode="llm_only",
         llm_client=llm,
         max_tables=3,
     )
 
     assert selection.retrieval_mode == "llm_only"
-    assert selection.selected_tables == ["orders", "customers"]
+    assert selection.selected_tables == [ORDERS, CUSTOMERS]
     assert selection.expanded_tables == selection.selected_tables
     assert selection.selection_prompt_chars > 0
     assert selection.candidate_table_count == 11
@@ -118,7 +120,7 @@ def test_retrieve_schema_llm_only_surfaces_empty_valid_selection():
 
     selection = retrieve_schema(
         "Which customers placed the highest value orders?",
-        "E_commerce",
+        "E_COMMERCE",
         retrieval_mode="llm_only",
         llm_client=llm,
     )
@@ -139,10 +141,10 @@ def test_compare_retrieval_modes_writes_comparison_artifacts(
             {
                 "cases": [
                     {
-                        "instance_id": "local003",
-                        "db": "E_commerce",
+                        "instance_id": "sf_local003",
+                        "db": "E_COMMERCE",
                         "question": "RFM question",
-                        "expected_tables": ["customers", "orders"],
+                        "expected_tables": [CUSTOMERS, ORDERS],
                     }
                 ]
             }
@@ -154,12 +156,12 @@ def test_compare_retrieval_modes_writes_comparison_artifacts(
         selection = {
             "db": task.db,
             "retrieval_mode": config.retrieval_mode,
-            "selected_tables": ["orders"]
+            "selected_tables": [ORDERS]
             if config.retrieval_mode == "lexical"
-            else ["orders", "customers"],
-            "expanded_tables": ["orders"]
+            else [ORDERS, CUSTOMERS],
+            "expanded_tables": [ORDERS]
             if config.retrieval_mode == "lexical"
-            else ["orders", "customers"],
+            else [ORDERS, CUSTOMERS],
             "rationale": f"{config.retrieval_mode} selection",
             "confidence": 0.8,
             "selection_prompt_chars": 0 if config.retrieval_mode == "lexical" else 240,
