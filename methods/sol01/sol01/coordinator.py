@@ -81,7 +81,6 @@ def run_tasks(
             "provider_routing": config.provider_routing,
             "config": {
                 "concurrency": config.concurrency,
-                "retrieval_mode": config.retrieval_mode,
             },
         },
     )
@@ -140,7 +139,6 @@ def run_task(
         run_paths,
         instance_id=task.instance_id,
         skip_failed=skip_failed,
-        expected_retrieval_mode=config.retrieval_mode,
     ):
         existing_trace = json.loads(task_trace_path.read_text(encoding="utf-8"))
         logger.info(
@@ -174,7 +172,6 @@ def run_task(
     schema = retrieve_schema(
         task.question,
         task.db,
-        retrieval_mode=config.retrieval_mode,
         llm_client=client,
     )
     logger.info(

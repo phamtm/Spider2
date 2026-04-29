@@ -4,8 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-RetrievalMode = Literal["lexical", "llm_only"]
-
 
 class Task(BaseModel):
     """A benchmark task that is safe to use during generation."""
@@ -51,10 +49,10 @@ class TableSchema(BaseModel):
 
 
 class SchemaSelection(BaseModel):
-    """The retrieved table set after ranking and optional expansion."""
+    """The LLM-selected table set for one task."""
 
     db: str
-    retrieval_mode: RetrievalMode = "llm_only"
+    retrieval_mode: Literal["llm_only"] = "llm_only"
     selected_tables: list[str] = Field(default_factory=list)
     expanded_tables: list[str] = Field(default_factory=list)
     rationale: str
@@ -64,7 +62,7 @@ class SchemaSelection(BaseModel):
 
 
 class TableSelectionDecision(BaseModel):
-    """The LLM's table shortlist when we skip lexical pre-ranking."""
+    """The LLM's table shortlist for one task."""
 
     selected_tables: list[str] = Field(default_factory=list)
     rationale: str

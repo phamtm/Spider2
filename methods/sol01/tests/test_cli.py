@@ -86,7 +86,6 @@ def test_run_command_dispatches_expected_filters(monkeypatch):
         "limit": None,
         "force": False,
         "skip_failed": False,
-        "retrieval_mode": "llm_only",
     }
     assert "Eval summary: 1/1 correct, missing CSV 0" in result.output
     assert "- local003: PASS | task success | Question text" in result.output
@@ -111,7 +110,6 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
     def fake_run_tasks(tasks, *, run_id, config, force, skip_failed):
         called["task_ids"] = [task.instance_id for task in tasks]
         called["run_id"] = run_id
-        called["retrieval_mode"] = config.retrieval_mode
         return [
             FinalAnswer(
                 instance_id="local003",
@@ -153,14 +151,12 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
         limit=None,
         force=False,
         skip_failed=False,
-        retrieval_mode="llm_only",
     )
 
     assert called["require_api_key"] is True
     assert called["dotenv_path"] == cli.DEFAULT_DOTENV_PATH
     assert called["task_ids"] == ["local003"]
     assert called["run_id"] == "smoke-local003"
-    assert called["retrieval_mode"] == "llm_only"
     assert called["eval_run_id"] == "smoke-local003"
     assert called["expected_instance_ids"] == ["local003"]
     assert called["result_dir"] is not None
@@ -232,7 +228,6 @@ def test_handle_run_only_stages_csv_backed_results_for_eval(monkeypatch, tmp_pat
         limit=None,
         force=False,
         skip_failed=False,
-        retrieval_mode="lexical",
     )
 
     assert called["staged_task_ids"] == ["local003"]
@@ -395,30 +390,6 @@ def test_analyze_command_dispatches(monkeypatch):
 
     assert result.exit_code == 0
     assert called == {"run_id": "smoke-local003"}
-
-
-def test_compare_retrieval_command_dispatches(monkeypatch):
-    """The compare-retrieval command should call the experiment handler."""
-
-    called: dict[str, Any] = {}
-
-    def fake_handle_compare_retrieval(**kwargs: Any) -> dict[str, Any]:
-        called.update(kwargs)
-        return {
-            "case_count": 5,
-            "summary": {
-                "lexical": {"miss_count": 3},
-                "llm_only": {"miss_count": 1},
-            },
-        }
-
-    monkeypatch.setattr(cli, "handle_compare_retrieval", fake_handle_compare_retrieval)
-
-    result = runner.invoke(cli.app, ["compare-retrieval", "--run-id", "retrieval-exp"])
-
-    assert result.exit_code == 0
-    assert called == {"run_id": "retrieval-exp"}
-    assert "Retrieval comparison" in result.output
 
 
 def test_ask_command_dispatches(monkeypatch):

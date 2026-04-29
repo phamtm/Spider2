@@ -35,5 +35,5 @@ programmatic access token, not the normal Snowsight password.
 ## Remaining Work
 
 - Improve prompt quality and repair strategy from real Spider2-snow failures.
-- Add broader retrieval fixtures for schema collisions and multi-schema databases.
+- Improve LLM schema-selection prompts from real Spider2-snow failures.
 - Add optional smoke scripts for live Snowflake connectivity when credentials are present.

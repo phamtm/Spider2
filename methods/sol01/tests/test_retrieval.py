@@ -1,18 +1,13 @@
-"""Tests for retrieval modes and the retrieval comparison experiment."""
+"""Tests for LLM-backed schema retrieval."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
-from sol01.analysis import compare_retrieval_modes
-from sol01.config import RuntimeConfig
 from sol01.llm import PromptSpec
-from sol01.models import FinalAnswer, SchemaSelection, TableSelectionDecision, Task
+from sol01.models import SchemaSelection, TableSelectionDecision
 from sol01.retrieval import retrieve_schema
 
-FIXTURE_PATH = Path(__file__).parent / "fixtures" / "retrieval_cases.json"
 CUSTOMERS = "E_COMMERCE.E_COMMERCE.CUSTOMERS"
 ORDERS = "E_COMMERCE.E_COMMERCE.ORDERS"
 
@@ -44,19 +39,6 @@ class FakeSelectorLLM:
         )
         assert output_type is TableSelectionDecision
         return self.decision
-
-
-def test_retrieval_fixture_contains_expected_vague_cases():
-    payload = json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
-
-    assert len(payload["cases"]) >= 5
-    assert {case["instance_id"] for case in payload["cases"]} >= {
-        "sf_local003",
-        "sf_local004",
-        "sf_local007",
-        "sf_local015",
-        "sf_local020",
-    }
 
 
 def test_retrieve_schema_defaults_to_llm_only_mode():
@@ -94,7 +76,6 @@ def test_retrieve_schema_llm_only_uses_schema_selector_and_filters_unknown_table
     selection = retrieve_schema(
         "Which customers placed the highest value orders?",
         "E_COMMERCE",
-        retrieval_mode="llm_only",
         llm_client=llm,
         max_tables=3,
     )
@@ -121,7 +102,6 @@ def test_retrieve_schema_llm_only_surfaces_empty_valid_selection():
     selection = retrieve_schema(
         "Which customers placed the highest value orders?",
         "E_COMMERCE",
-        retrieval_mode="llm_only",
         llm_client=llm,
     )
 
@@ -129,81 +109,3 @@ def test_retrieve_schema_llm_only_surfaces_empty_valid_selection():
     assert selection.expanded_tables == []
     assert selection.confidence == 0.0
     assert "No valid tables matched the schema summary." in selection.rationale
-
-
-def test_compare_retrieval_modes_writes_comparison_artifacts(
-    monkeypatch,
-    tmp_path: Path,
-):
-    fixture_path = tmp_path / "retrieval_cases.json"
-    fixture_path.write_text(
-        json.dumps(
-            {
-                "cases": [
-                    {
-                        "instance_id": "sf_local003",
-                        "db": "E_COMMERCE",
-                        "question": "RFM question",
-                        "expected_tables": [CUSTOMERS, ORDERS],
-                    }
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    def fake_run_task(task: Task, *, run_paths, config, force=False, **_: Any) -> FinalAnswer:
-        selection = {
-            "db": task.db,
-            "retrieval_mode": config.retrieval_mode,
-            "selected_tables": [ORDERS]
-            if config.retrieval_mode == "lexical"
-            else [ORDERS, CUSTOMERS],
-            "expanded_tables": [ORDERS]
-            if config.retrieval_mode == "lexical"
-            else [ORDERS, CUSTOMERS],
-            "rationale": f"{config.retrieval_mode} selection",
-            "confidence": 0.8,
-            "selection_prompt_chars": 0 if config.retrieval_mode == "lexical" else 240,
-            "candidate_table_count": 11,
-        }
-        trace = {
-            "instance_id": task.instance_id,
-            "db": task.db,
-            "question": task.question,
-            "status": "failed" if config.retrieval_mode == "lexical" else "success",
-            "schema_selection": selection,
-            "sql_path": str(run_paths.sql_dir / f"{task.instance_id}.sql"),
-        }
-        (run_paths.sql_dir / f"{task.instance_id}.sql").write_text("SELECT 1;\n", encoding="utf-8")
-        (run_paths.traces_dir / f"{task.instance_id}.json").write_text(
-            json.dumps(trace, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-        return FinalAnswer(
-            instance_id=task.instance_id,
-            status=trace["status"],
-            sql="SELECT 1;",
-            csv_path=None,
-            trace_path=str(run_paths.traces_dir / f"{task.instance_id}.json"),
-        )
-
-    monkeypatch.setattr("sol01.analysis.run_task", fake_run_task)
-
-    report = compare_retrieval_modes(
-        "retrieval-exp",
-        config=RuntimeConfig(api_key="test-key"),
-        fixture_path=fixture_path,
-        outputs_root=tmp_path / "outputs",
-    )
-
-    compare_json = tmp_path / "outputs" / "retrieval-exp" / "analysis" / "retrieval_compare.json"
-    compare_md = tmp_path / "outputs" / "retrieval-exp" / "analysis" / "retrieval_compare.md"
-    payload = json.loads(compare_json.read_text(encoding="utf-8"))
-
-    assert report["summary"]["lexical"]["miss_count"] == 1
-    assert report["summary"]["llm_only"]["miss_count"] == 0
-    assert compare_json.exists()
-    assert compare_md.exists()
-    assert payload["cases"][0]["modes"]["llm_only"]["final_sql_outcome"] == "success"
-    assert "llm_only" in compare_md.read_text(encoding="utf-8")

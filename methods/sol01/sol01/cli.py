@@ -11,13 +11,13 @@ from typing import Annotated, Any
 
 import typer
 
-from sol01.analysis import analyze_run, compare_retrieval_modes
+from sol01.analysis import analyze_run
 from sol01.config import DEFAULT_DOTENV_PATH, RuntimeConfig
 from sol01.coordinator import run_task, run_tasks
 from sol01.eval_runner import run_official_eval
 from sol01.index import CACHE_PATH, build_index_cache
 from sol01.logging import configure_logging, get_logger
-from sol01.models import FinalAnswer, RetrievalMode, Task
+from sol01.models import FinalAnswer, Task
 from sol01.observability import configure_logfire
 from sol01.output import OUTPUTS_ROOT, ensure_ask_paths, ensure_run_paths
 from sol01.tasks import load_tasks
@@ -69,10 +69,6 @@ def run(
         bool,
         typer.Option(help="Skip failed traces during resume mode."),
     ] = False,
-    retrieval_mode: Annotated[
-        RetrievalMode,
-        typer.Option(help="How to choose tables before SQL generation."),
-    ] = "llm_only",
 ) -> None:
     """Run the solver over the selected Spider2-snow tasks."""
 
@@ -85,7 +81,6 @@ def run(
         limit=limit,
         force=force,
         skip_failed=skip_failed,
-        retrieval_mode=retrieval_mode,
     )
     results = handle_run(
         run_id=run_id,
@@ -95,7 +90,6 @@ def run(
         limit=limit,
         force=force,
         skip_failed=skip_failed,
-        retrieval_mode=retrieval_mode,
     )
     typer.echo(f"Completed {len(results['results'])} task(s).")
     typer.echo(
@@ -190,26 +184,6 @@ def analyze(
     )
 
 
-@app.command("compare-retrieval")
-def compare_retrieval_command(
-    run_id: Annotated[
-        str,
-        typer.Option(help="Run ID used for outputs/<run_id>/analysis."),
-    ],
-) -> None:
-    """Run the retrieval-mode experiment over the named fixture set."""
-
-    logger.info("compare retrieval command", run_id=run_id)
-    report = handle_compare_retrieval(run_id=run_id)
-    typer.echo(
-        "Retrieval comparison: "
-        f"{report['case_count']} cases, "
-        f"lexical misses {report['summary']['lexical']['miss_count']}, "
-        f"llm-only misses {report['summary']['llm_only']['miss_count']}"
-    )
-    logger.info("compare retrieval complete", run_id=run_id, case_count=report["case_count"])
-
-
 @app.command()
 def ask(
     db: Annotated[
@@ -264,7 +238,6 @@ def handle_run(
     limit: int | None,
     force: bool,
     skip_failed: bool,
-    retrieval_mode: RetrievalMode,
 ) -> dict[str, Any]:
     """Load tasks, then pass them to the batch coordinator."""
 
@@ -281,7 +254,7 @@ def handle_run(
     config = RuntimeConfig.from_env(
         require_api_key=True,
         dotenv_path=DEFAULT_DOTENV_PATH,
-    ).model_copy(update={"retrieval_mode": retrieval_mode})
+    )
     effective_run_id = run_id or _default_run_id("run")
     logger.info(
         "run start",
@@ -313,16 +286,6 @@ def handle_run(
         "results": results,
         "eval_summary": eval_summary,
     }
-
-
-def handle_compare_retrieval(*, run_id: str) -> dict[str, Any]:
-    """Run the named retrieval experiment and write the analysis artifacts."""
-
-    config = RuntimeConfig.from_env(
-        require_api_key=True,
-        dotenv_path=DEFAULT_DOTENV_PATH,
-    )
-    return compare_retrieval_modes(run_id, config=config)
 
 
 def handle_eval(
@@ -452,7 +415,6 @@ def _runtime_config_summary(config: Any) -> dict[str, Any]:
         "model": getattr(config, "model", None),
         "base_url": getattr(config, "base_url", None),
         "concurrency": getattr(config, "concurrency", None),
-        "retrieval_mode": getattr(config, "retrieval_mode", None),
     }
 
 

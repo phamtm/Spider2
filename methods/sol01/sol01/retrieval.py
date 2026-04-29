@@ -3,57 +3,22 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any, Protocol
 
 from sol01.index import CACHE_PATH, build_db_index, build_index_cache
 from sol01.logging import get_logger
 from sol01.models import (
-    RetrievalMode,
     SchemaSelection,
     TableSchema,
     TableSelectionDecision,
 )
 
-TOKEN_RE = re.compile(r"[a-z0-9_]+")
-MIN_SELECTION_SCORE = 1.5
-STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "at",
-    "by",
-    "find",
-    "for",
-    "from",
-    "give",
-    "highest",
-    "in",
-    "least",
-    "list",
-    "lowest",
-    "me",
-    "most",
-    "name",
-    "names",
-    "of",
-    "on",
-    "show",
-    "the",
-    "to",
-    "what",
-    "when",
-    "where",
-    "which",
-    "who",
-    "with",
-}
 logger = get_logger(__name__)
 
 
 class StructuredSelector(Protocol):
-    """Minimal LLM surface needed for the LLM-only table-selection experiment."""
+    """Minimal LLM surface needed for table selection."""
 
     def load_prompt(self, prompt_name: str) -> Any: ...
 
@@ -71,46 +36,22 @@ def retrieve_schema(
     question: str,
     db: str,
     *,
-    retrieval_mode: RetrievalMode = "llm_only",
     llm_client: StructuredSelector | None = None,
     max_tables: int = 4,
     cache_path: Path = CACHE_PATH,
 ) -> SchemaSelection:
-    """Return the best-fit table set for a question within one database."""
+    """Ask the LLM for the best-fit table set within one database."""
 
     if max_tables < 1:
         raise ValueError("max_tables must be at least 1")
 
     db_index = load_db_index(db, cache_path=cache_path)
-    if retrieval_mode == "llm_only":
-        return _retrieve_schema_with_llm(
-            question,
-            db,
-            db_index,
-            llm_client=llm_client,
-            max_tables=max_tables,
-        )
-
-    ranked_tables = _rank_tables(question, db_index)
-    selected_tables = _pick_selected_tables(ranked_tables, max_tables=max_tables)
-    expanded_tables = list(selected_tables)
-    logger.info(
-        "schema retrieval complete",
-        db=db,
-        selected_tables=selected_tables,
-        expanded_tables=expanded_tables,
-        confidence=_confidence(ranked_tables, selected_tables),
-    )
-
-    return SchemaSelection(
-        db=db,
-        retrieval_mode="lexical",
-        selected_tables=selected_tables,
-        expanded_tables=expanded_tables,
-        rationale=_build_rationale(question, ranked_tables, selected_tables),
-        confidence=_confidence(ranked_tables, selected_tables),
-        selection_prompt_chars=0,
-        candidate_table_count=len(db_index),
+    return _retrieve_schema_with_llm(
+        question,
+        db,
+        db_index,
+        llm_client=llm_client,
+        max_tables=max_tables,
     )
 
 
@@ -133,10 +74,10 @@ def _retrieve_schema_with_llm(
     llm_client: StructuredSelector | None,
     max_tables: int,
 ) -> SchemaSelection:
-    """Let the LLM pick tables directly from one DB summary without lexical pre-ranking."""
+    """Let the LLM pick tables directly from one DB summary."""
 
     if llm_client is None:
-        raise ValueError("llm_client is required when retrieval_mode='llm_only'")
+        raise ValueError("llm_client is required for schema retrieval")
 
     schema_summary = _db_schema_summary(db_index)
     prompt = llm_client.load_prompt("schema_selection")
@@ -227,112 +168,8 @@ def _write_index_cache(
     )
 
 
-def _rank_tables(
-    question: str, db_index: dict[str, TableSchema]
-) -> list[tuple[str, float, list[str]]]:
-    """Score tables by overlap with the question across names, columns, and examples."""
-
-    question_terms = _question_terms(question)
-    ranked: list[tuple[str, float, list[str]]] = []
-
-    for table_name, table in db_index.items():
-        table_name_text = " ".join(part for part in [table.name, table.full_name or ""] if part)
-        name_terms = _token_set(table_name_text)
-        column_terms = _token_set(" ".join(column.name for column in table.columns))
-        description_terms = _token_set(
-            " ".join(column.description or "" for column in table.columns)
-        )
-        sample_terms = _token_set(_sample_text(table))
-        matches: list[str] = []
-        score = 0.0
-
-        for term in sorted(question_terms):
-            term_score = 0.0
-            if term in name_terms:
-                term_score += 6.0
-            if term in column_terms:
-                term_score += 3.0
-            if term in description_terms:
-                term_score += 1.5
-            if term in sample_terms:
-                term_score += 0.25
-            if term_score > 0:
-                matches.append(term)
-                score += term_score
-
-        if _phrase_match(question, table.name) or _phrase_match(question, table.full_name or ""):
-            score += 4.0
-        if any(_phrase_match(question, column.name) for column in table.columns):
-            score += 2.0
-
-        ranked.append((table_name, score, matches))
-
-    return sorted(ranked, key=lambda item: (-item[1], item[0]))
-
-
-def _pick_selected_tables(
-    ranked_tables: list[tuple[str, float, list[str]]],
-    *,
-    max_tables: int,
-) -> list[str]:
-    """Keep the top lexical hits, falling back to one best table when overlap is weak."""
-
-    selected = [
-        table_name for table_name, score, _ in ranked_tables if score >= MIN_SELECTION_SCORE
-    ][:max_tables]
-    if selected:
-        return selected
-    return [ranked_tables[0][0]]
-
-
-def _build_rationale(
-    question: str,
-    ranked_tables: list[tuple[str, float, list[str]]],
-    selected_tables: list[str],
-) -> str:
-    """Explain why the selected tables won."""
-
-    top_hits: list[str] = []
-    for table_name, _score, matches in ranked_tables:
-        if table_name not in selected_tables:
-            continue
-        if matches:
-            top_hits.append(f"{table_name} ({', '.join(matches[:3])})")
-        else:
-            top_hits.append(f"{table_name} (best fallback)")
-
-    rationale = (
-        f"Ranked tables for '{question}' using overlap across table names, columns, and examples: "
-        + ", ".join(top_hits)
-        + "."
-    )
-    return rationale
-
-
-def _confidence(
-    ranked_tables: list[tuple[str, float, list[str]]],
-    selected_tables: list[str],
-) -> float:
-    """Turn the lexical ranking margin into a bounded confidence score."""
-
-    if not ranked_tables or not selected_tables:
-        return 0.0
-
-    selected_scores = [
-        score for table_name, score, _ in ranked_tables if table_name in selected_tables
-    ]
-    best_score = selected_scores[0]
-    next_score = next(
-        (score for table_name, score, _ in ranked_tables if table_name not in selected_tables),
-        0.0,
-    )
-    margin = max(best_score - next_score, 0.0)
-    confidence = 0.45 + min(best_score, 12.0) / 30.0 + min(margin, 6.0) / 20.0
-    return min(round(confidence, 3), 0.95)
-
-
 def _db_schema_summary(db_index: dict[str, TableSchema]) -> str:
-    """Render one compact all-table schema summary for the LLM-only selector."""
+    """Render one compact all-table schema summary for the selector."""
 
     parts: list[str] = []
     for table_name in sorted(db_index):
@@ -383,75 +220,3 @@ def _sanitize_llm_tables(
         if len(selected_tables) == max_tables:
             break
     return selected_tables
-
-
-def _question_terms(question: str) -> set[str]:
-    """Extract simple singularized tokens from the question text."""
-
-    return _token_set(question)
-
-
-def _token_set(text: str) -> set[str]:
-    """Split text into normalized words and simple singular forms."""
-
-    terms: set[str] = set()
-    for raw_token in TOKEN_RE.findall(text.lower()):
-        if not raw_token:
-            continue
-        parts = [part for part in raw_token.split("_") if part]
-        for part in parts or [raw_token]:
-            if len(part) < 2:
-                continue
-            singular = _singularize(part)
-            if singular in STOPWORDS:
-                continue
-            terms.add(part)
-            if singular != part:
-                terms.add(singular)
-    return terms
-
-
-def _phrase_match(question: str, name: str) -> bool:
-    """Check whether a whole table or column name appears as a phrase."""
-
-    normalized_question = _normalize_phrase_text(question)
-    normalized_name = _normalize_phrase_text(name)
-    return normalized_name in normalized_question
-
-
-def _normalize_phrase_text(text: str) -> str:
-    """Normalize text into a stable space-separated phrase string."""
-
-    parts: list[str] = []
-    for raw_token in TOKEN_RE.findall(text.lower()):
-        if not raw_token:
-            continue
-        for part in raw_token.split("_"):
-            if len(part) < 2:
-                continue
-            singular = _singularize(part)
-            if singular in STOPWORDS:
-                continue
-            parts.append(singular)
-    return " ".join(parts)
-
-
-def _sample_text(table: TableSchema) -> str:
-    """Collect example values without mixing them into stronger schema signals."""
-
-    parts: list[str] = []
-    for column in table.columns:
-        parts.extend(column.sample_values)
-    for row in table.sample_rows:
-        parts.extend(str(value) for value in row.values() if value is not None)
-    return " ".join(parts)
-
-
-def _singularize(token: str) -> str:
-    """Apply a small singularization rule for common plural forms."""
-
-    if token.endswith("ies") and len(token) > 3:
-        return token[:-3] + "y"
-    if token.endswith("s") and not token.endswith("ss") and len(token) > 3:
-        return token[:-1]
-    return token

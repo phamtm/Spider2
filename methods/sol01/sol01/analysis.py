@@ -6,17 +6,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sol01.config import RuntimeConfig
-from sol01.coordinator import run_task
 from sol01.logging import get_logger
-from sol01.models import RetrievalMode, Task
 from sol01.output import RunPaths, ensure_run_paths
 from sol01.tasks import REPO_ROOT
 
 OUTPUTS_ROOT = REPO_ROOT / "methods" / "sol01" / "outputs"
-DEFAULT_RETRIEVAL_FIXTURE = (
-    REPO_ROOT / "methods" / "sol01" / "tests" / "fixtures" / "retrieval_cases.json"
-)
 FAILURE_CATEGORIES = (
     "validation",
     "execution",
@@ -83,74 +77,6 @@ def analyze_run(
         trace_count=len(traces),
         summary_path=str(summary_path),
         failures_path=str(failures_path),
-    )
-    return report
-
-
-def compare_retrieval_modes(
-    run_id: str,
-    *,
-    config: RuntimeConfig,
-    fixture_path: Path = DEFAULT_RETRIEVAL_FIXTURE,
-    outputs_root: Path = OUTPUTS_ROOT,
-) -> dict[str, Any]:
-    """Run the lexical and LLM-only retrieval paths over one fixed case set."""
-
-    run_paths = ensure_run_paths(run_id, outputs_root=outputs_root)
-    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-    cases = fixture.get("cases", [])
-    internal_root = run_paths.analysis_dir / "_retrieval_compare"
-
-    results = []
-    for case in cases:
-        task = Task(
-            instance_id=case["instance_id"],
-            db=case["db"],
-            question=case["question"],
-            external_knowledge=case.get("external_knowledge"),
-        )
-        expected_tables = list(case.get("expected_tables", []))
-        mode_results = {
-            mode: _run_retrieval_mode_case(
-                task,
-                expected_tables=expected_tables,
-                mode=mode,
-                config=config,
-                outputs_root=internal_root,
-            )
-            for mode in ("lexical", "llm_only")
-        }
-        results.append(
-            {
-                "instance_id": task.instance_id,
-                "db": task.db,
-                "question": task.question,
-                "expected_tables": expected_tables,
-                "modes": mode_results,
-            }
-        )
-
-    report = {
-        "run_id": run_id,
-        "fixture_path": str(fixture_path),
-        "case_count": len(results),
-        "cases": results,
-        "summary": {
-            "lexical": _mode_summary(results, "lexical"),
-            "llm_only": _mode_summary(results, "llm_only"),
-        },
-    }
-
-    compare_json = run_paths.analysis_dir / "retrieval_compare.json"
-    compare_json.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    compare_md = run_paths.analysis_dir / "retrieval_compare.md"
-    compare_md.write_text(_render_retrieval_compare(report), encoding="utf-8")
-    logger.info(
-        "retrieval compare complete",
-        run_id=run_id,
-        case_count=len(results),
-        compare_json=str(compare_json),
-        compare_md=str(compare_md),
     )
     return report
 
@@ -486,98 +412,5 @@ def _render_summary(report: dict[str, Any]) -> str:
             f"success {bucket['success']}, failed {bucket['failed']}, skipped {bucket['skipped']}"
         )
 
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _run_retrieval_mode_case(
-    task: Task,
-    *,
-    expected_tables: list[str],
-    mode: RetrievalMode,
-    config: RuntimeConfig,
-    outputs_root: Path,
-) -> dict[str, Any]:
-    """Run one fixture question with one retrieval mode and capture its outcome."""
-
-    run_paths = ensure_run_paths(f"{task.instance_id}-{mode}", outputs_root=outputs_root)
-    answer = run_task(
-        task,
-        run_paths=run_paths,
-        config=config.model_copy(update={"retrieval_mode": mode}),
-        force=True,
-    )
-    trace = json.loads(Path(answer.trace_path).read_text(encoding="utf-8"))
-    schema = trace.get("schema_selection") or {}
-    expanded_tables = list(schema.get("expanded_tables") or [])
-    return {
-        "selected_tables": list(schema.get("selected_tables") or []),
-        "expanded_tables": expanded_tables,
-        "selection_prompt_chars": int(schema.get("selection_prompt_chars") or 0),
-        "candidate_table_count": int(schema.get("candidate_table_count") or 0),
-        "missing_expected_tables": sorted(
-            table for table in expected_tables if table not in expanded_tables
-        ),
-        "final_sql_outcome": answer.status,
-        "trace_path": answer.trace_path,
-        "sql_path": trace.get("sql_path"),
-    }
-
-
-def _mode_summary(results: list[dict[str, Any]], mode: RetrievalMode) -> dict[str, Any]:
-    """Roll per-case retrieval results into a small scorecard."""
-
-    prompt_chars = 0
-    miss_count = 0
-    success_count = 0
-    for case in results:
-        outcome = case["modes"][mode]
-        prompt_chars += outcome["selection_prompt_chars"]
-        if outcome["missing_expected_tables"]:
-            miss_count += 1
-        if outcome["final_sql_outcome"] == "success":
-            success_count += 1
-    case_count = len(results)
-    return {
-        "case_count": case_count,
-        "success_count": success_count,
-        "miss_count": miss_count,
-        "average_selection_prompt_chars": round(prompt_chars / case_count, 1)
-        if case_count
-        else 0.0,
-    }
-
-
-def _render_retrieval_compare(report: dict[str, Any]) -> str:
-    """Write a concise markdown summary of the retrieval experiment."""
-
-    lexical = report["summary"]["lexical"]
-    llm_only = report["summary"]["llm_only"]
-    lines = [f"# Retrieval comparison for {report['run_id']}", ""]
-    lines.append(
-        "- Lexical: "
-        f"{lexical['success_count']}/{lexical['case_count']} success, "
-        f"{lexical['miss_count']} table misses, "
-        f"avg selector prompt {lexical['average_selection_prompt_chars']} chars"
-    )
-    lines.append(
-        "- LLM-only: "
-        f"{llm_only['success_count']}/{llm_only['case_count']} success, "
-        f"{llm_only['miss_count']} table misses, "
-        f"avg selector prompt {llm_only['average_selection_prompt_chars']} chars"
-    )
-    lines.append("")
-    lines.append("## Cases")
-    for case in report["cases"]:
-        lines.append(f"- {case['instance_id']} ({case['db']})")
-        for mode in ("lexical", "llm_only"):
-            outcome = case["modes"][mode]
-            misses = ", ".join(outcome["missing_expected_tables"]) or "none"
-            selected = ", ".join(outcome["selected_tables"]) or "none"
-            lines.append(
-                f"  - {mode}: selected [{selected}], "
-                f"selector prompt {outcome['selection_prompt_chars']} chars, "
-                f"misses [{misses}], outcome {outcome['final_sql_outcome']}"
-            )
     lines.append("")
     return "\n".join(lines)
