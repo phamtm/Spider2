@@ -67,7 +67,14 @@ def test_retrieve_schema_defaults_to_llm_only_mode():
 def test_retrieve_schema_llm_only_uses_schema_selector_and_filters_unknown_tables():
     llm = FakeSelectorLLM(
         TableSelectionDecision(
-            selected_tables=["orders", "missing_table", "customers", "orders"],
+            selected_tables=[
+                "orders",
+                "missing_table",
+                "customers",
+                "order_items",
+                "products",
+                "orders",
+            ],
             rationale="Orders and customers are the core business entities here.",
             confidence=0.82,
         )
@@ -77,16 +84,22 @@ def test_retrieve_schema_llm_only_uses_schema_selector_and_filters_unknown_table
         "Which customers placed the highest value orders?",
         "E_COMMERCE",
         llm_client=llm,
-        max_tables=3,
     )
 
     assert selection.retrieval_mode == "llm_only"
-    assert selection.selected_tables == [ORDERS, CUSTOMERS]
+    assert selection.selected_tables == [
+        ORDERS,
+        CUSTOMERS,
+        "E_COMMERCE.E_COMMERCE.ORDER_ITEMS",
+        "E_COMMERCE.E_COMMERCE.PRODUCTS",
+    ]
     assert selection.expanded_tables == selection.selected_tables
     assert selection.selection_prompt_chars > 0
     assert selection.candidate_table_count == 11
     assert llm.calls[0]["prompt_name"] == "schema_selection"
     assert "Schema summary:" in llm.calls[0]["user_prompt"]
+    assert "Choose every table needed" in llm.calls[0]["user_prompt"]
+    assert "at most" not in llm.calls[0]["user_prompt"].lower()
     assert "missing_table" not in selection.selected_tables
 
 

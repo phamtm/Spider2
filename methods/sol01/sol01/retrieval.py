@@ -37,13 +37,9 @@ def retrieve_schema(
     db: str,
     *,
     llm_client: StructuredSelector | None = None,
-    max_tables: int = 4,
     cache_path: Path = CACHE_PATH,
 ) -> SchemaSelection:
     """Ask the LLM for the best-fit table set within one database."""
-
-    if max_tables < 1:
-        raise ValueError("max_tables must be at least 1")
 
     db_index = load_db_index(db, cache_path=cache_path)
     return _retrieve_schema_with_llm(
@@ -51,7 +47,6 @@ def retrieve_schema(
         db,
         db_index,
         llm_client=llm_client,
-        max_tables=max_tables,
     )
 
 
@@ -72,7 +67,6 @@ def _retrieve_schema_with_llm(
     db_index: dict[str, TableSchema],
     *,
     llm_client: StructuredSelector | None,
-    max_tables: int,
 ) -> SchemaSelection:
     """Let the LLM pick tables directly from one DB summary."""
 
@@ -84,7 +78,7 @@ def _retrieve_schema_with_llm(
     user_prompt = (
         f"Question: {question}\n\n"
         f"Database: {db}\n\n"
-        f"Choose at most {max_tables} tables from this schema summary.\n\n"
+        "Choose every table needed to answer the question, including join or bridge tables.\n\n"
         f"Schema summary:\n{schema_summary}"
     )
     decision = llm_client.run_structured_with_prompt(
@@ -95,7 +89,6 @@ def _retrieve_schema_with_llm(
     selected_tables = _sanitize_llm_tables(
         decision.selected_tables,
         db_index,
-        max_tables=max_tables,
     )
     confidence = decision.confidence if selected_tables else 0.0
     expanded_tables = list(selected_tables)
@@ -196,8 +189,6 @@ def _column_summary(column: Any) -> str:
 def _sanitize_llm_tables(
     requested_tables: list[str],
     db_index: dict[str, TableSchema],
-    *,
-    max_tables: int,
 ) -> list[str]:
     """Keep valid unique table names and surface an empty selection when none survive."""
 
@@ -217,6 +208,4 @@ def _sanitize_llm_tables(
         if canonical is None or canonical in selected_tables:
             continue
         selected_tables.append(canonical)
-        if len(selected_tables) == max_tables:
-            break
     return selected_tables
