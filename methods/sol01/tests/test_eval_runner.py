@@ -13,8 +13,8 @@ from sol01.eval_runner import (
     GOLD_DIR,
     build_eval_command,
     parse_eval_stdout,
-    run_persisted_eval,
     run_official_eval,
+    run_persisted_eval,
 )
 from sol01.output import ensure_run_paths
 
@@ -230,7 +230,9 @@ def test_run_persisted_eval_copies_scored_csvs_and_writes_per_instance_records(
     assert not (run_paths.eval_scored_csv_dir / "sf_local004.csv").exists()
     per_instance_rows = [
         json.loads(line)
-        for line in (run_paths.eval_dir / "per_instance.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (run_paths.eval_dir / "per_instance.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
         if line.strip()
     ]
     assert per_instance_rows == [
@@ -288,6 +290,43 @@ def test_run_persisted_eval_handles_no_csv_without_crashing(tmp_path: Path):
     assert (run_paths.eval_dir / "official_stdout.txt").read_text(encoding="utf-8") == ""
     assert (run_paths.eval_dir / "official_stderr.txt").read_text(encoding="utf-8") == ""
     assert (run_paths.eval_dir / "per_instance.jsonl").exists()
+
+
+def test_run_persisted_eval_records_per_instance_rows_when_official_eval_fails(
+    tmp_path: Path,
+):
+    run_paths = ensure_run_paths("failed-persisted-run", outputs_root=tmp_path)
+    (run_paths.csv_dir / "sf_local003.csv").write_text("answer\n1\n", encoding="utf-8")
+
+    def failing_runner(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=2,
+            stdout="partial stdout\n",
+            stderr="failure details\n",
+        )
+
+    summary = run_persisted_eval(
+        "failed-persisted-run",
+        outputs_root=tmp_path,
+        expected_instance_ids=["sf_local003"],
+        runner=failing_runner,
+    )
+
+    assert summary["returncode"] == 2
+    assert summary["eval_error"] == "official_eval_failed"
+    assert summary["per_instance"] == [
+        {
+            "csv_present": True,
+            "failure_reason": "eval_failed",
+            "instance_id": "sf_local003",
+            "passed": False,
+            "score": None,
+        }
+    ]
+    assert (run_paths.eval_dir / "per_instance.jsonl").exists()
+    saved_summary = json.loads((run_paths.eval_dir / "summary.json").read_text(encoding="utf-8"))
+    assert saved_summary["per_instance"] == summary["per_instance"]
 
 
 def test_run_official_eval_stages_local_credentials_without_mutating_suite(

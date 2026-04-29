@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
+from sol01 import run_mode
 from sol01.config import RuntimeConfig
 from sol01.models import FinalAnswer, Task
-from sol01 import run_mode
 
 
 def test_run_persisted_mode_exact_selector_updates_registry_and_logs(
@@ -95,7 +95,9 @@ def test_run_persisted_mode_exact_selector_updates_registry_and_logs(
     assert "Run ID: run-exact-sf-local003-20260429T120000.000000Z" in capsys.readouterr().out
     run_events = [
         json.loads(line)
-        for line in (tmp_path / result["run_id"] / "logs" / "run.jsonl").read_text(encoding="utf-8").splitlines()
+        for line in (tmp_path / result["run_id"] / "logs" / "run.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
         if line.strip()
     ]
     assert [event["event"] for event in run_events] == [
@@ -169,7 +171,11 @@ def test_run_persisted_mode_multiple_globs_dedupe_and_preserve_order(
 
     monkeypatch.setattr(run_mode, "run_tasks", fake_run_tasks)
     monkeypatch.setattr(run_mode, "run_persisted_eval", fake_eval)
-    monkeypatch.setattr(run_mode, "record_registry_batch", lambda records, *, outputs_root: {"task_results": list(records)})
+    monkeypatch.setattr(
+        run_mode,
+        "record_registry_batch",
+        lambda records, *, outputs_root: {"task_results": list(records)},
+    )
 
     result = run_mode.run_persisted_mode(
         ["sf_local003", "sf_local00[34]"],
@@ -239,7 +245,11 @@ def test_run_persisted_mode_all_mode_resolves_full_dataset(
 
     monkeypatch.setattr(run_mode, "run_tasks", fake_run_tasks)
     monkeypatch.setattr(run_mode, "run_persisted_eval", fake_eval)
-    monkeypatch.setattr(run_mode, "record_registry_batch", lambda records, *, outputs_root: {"task_results": list(records)})
+    monkeypatch.setattr(
+        run_mode,
+        "record_registry_batch",
+        lambda records, *, outputs_root: {"task_results": list(records)},
+    )
 
     result = run_mode.run_persisted_mode(
         all_mode=True,
@@ -260,6 +270,67 @@ def test_run_persisted_mode_rejects_bare_star(
             outputs_root=tmp_path,
             config=RuntimeConfig(api_key="test-key"),
         )
+
+
+def test_run_persisted_mode_marks_eval_failed_rows_in_registry(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+):
+    monkeypatch.setattr(run_mode, "_utc_now", lambda: "20260429T120000.000000Z")
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(
+        run_mode,
+        "run_tasks",
+        lambda tasks, *, run_id, config, outputs_root=None, force=False, skip_failed=False: [
+            FinalAnswer(
+                instance_id=task.instance_id,
+                status="success",
+                sql="SELECT 1",
+                csv_path=str(tmp_path / f"{task.instance_id}.csv"),
+                trace_path=str(tmp_path / f"{task.instance_id}.json"),
+            )
+            for task in tasks
+        ],
+    )
+    monkeypatch.setattr(
+        run_mode,
+        "run_persisted_eval",
+        lambda run_id, *, expected_instance_ids, outputs_root=None, **kwargs: {
+            "attempted_tasks": 1,
+            "correct_tasks": 0,
+            "missing_csv_count": 0,
+            "per_instance": [
+                {
+                    "instance_id": "sf_local003",
+                    "score": None,
+                    "passed": False,
+                    "csv_present": True,
+                    "failure_reason": "eval_failed",
+                }
+            ],
+            "instance_scores": {},
+            "result_dir": str(tmp_path / run_id / "eval" / "scored_csv"),
+            "returncode": 0,
+        },
+    )
+
+    def fake_registry(records, *, outputs_root: Path) -> dict[str, object]:
+        records = list(records)
+        captured["records"] = records
+        return {"task_results": [{"instance_id": record.instance_id} for record in records]}
+
+    monkeypatch.setattr(run_mode, "record_registry_batch", fake_registry)
+
+    run_mode.run_persisted_mode(
+        ["sf_local003"],
+        outputs_root=tmp_path,
+        config=RuntimeConfig(api_key="test-key"),
+    )
+
+    records = captured["records"]
+    assert records[0].eval_status == "failed"
+    assert records[0].eval_error == "eval_failed"
 
 
 def test_run_persisted_mode_rejects_run_id_collisions(

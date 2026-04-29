@@ -68,6 +68,7 @@ just smoke sf_bq320
 
 Use quotes around patterns so the shell does not expand them first.
 Bare `*` is rejected by the helper on purpose.
+`just smoke` is only for exact instance IDs and runs the gold SQL smoke path.
 
 ## Output Layout
 

@@ -42,10 +42,7 @@ def run_persisted_mode(
     tasks = _resolve_tasks(normalized_selectors, all_mode=all_mode)
     mode_label = _mode_label(normalized_selectors, all_mode=all_mode)
     effective_run_id = run_id or _build_run_id(mode_label)
-    run_root = outputs_root / effective_run_id
-    if run_root.exists():
-        raise ValueError(f"run_id collision: {effective_run_id}")
-
+    _reserve_run_root(effective_run_id, outputs_root=outputs_root)
     run_paths = ensure_run_paths(effective_run_id, outputs_root=outputs_root)
     stdout_path = stdout_log_path_for(run_paths)
     stderr_path = stderr_log_path_for(run_paths)
@@ -234,12 +231,19 @@ def _update_registry(
         for row in eval_summary.get("per_instance", [])
         if row.get("instance_id")
     }
-    eval_status = "failed" if eval_summary.get("returncode", 0) != 0 else "success"
+    global_eval_error = eval_summary.get("eval_error")
+    global_eval_failed = eval_summary.get("returncode", 0) != 0 or bool(global_eval_error)
     records: list[RegistryTaskRecord] = []
     now = _utc_now()
     for task, result in zip(tasks, results, strict=True):
         row = per_instance.get(task.instance_id, {})
         failure_reason = row.get("failure_reason")
+        row_eval_failed = global_eval_failed or failure_reason == "eval_failed"
+        eval_error = None
+        if global_eval_failed:
+            eval_error = global_eval_error or "official_eval_failed"
+        elif failure_reason == "eval_failed":
+            eval_error = "eval_failed"
         records.append(
             RegistryTaskRecord(
                 run_id=run_id,
@@ -252,8 +256,8 @@ def _update_registry(
                 trace_path=result.trace_path,
                 eval_path=str(run_paths.eval_dir / "summary.json"),
                 solver_status=result.status,
-                eval_status=eval_status,
-                eval_error=None if eval_status == "success" else "official_eval_failed",
+                eval_status="failed" if row_eval_failed else "success",
+                eval_error=eval_error,
                 extra_artifacts={
                     "solver_csv_path": result.csv_path,
                     "stdout_path": str(run_paths.logs_dir / "stdout.txt"),
@@ -264,6 +268,18 @@ def _update_registry(
             )
         )
     return record_registry_batch(records, outputs_root=outputs_root)
+
+
+def _reserve_run_root(run_id: str, *, outputs_root: Path) -> Path:
+    """Create the run root atomically so two runs cannot share one ID."""
+
+    outputs_root.mkdir(parents=True, exist_ok=True)
+    run_root = outputs_root / run_id
+    try:
+        run_root.mkdir()
+    except FileExistsError as exc:
+        raise ValueError(f"run_id collision: {run_id}") from exc
+    return run_root
 
 
 def _resolve_tasks(selectors: Sequence[str], *, all_mode: bool) -> list[Any]:

@@ -6,10 +6,11 @@ import json
 import os
 import tempfile
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable, Literal
+from typing import Any, Literal
 
 from sol01.logging import get_logger
 from sol01.tasks import REPO_ROOT
@@ -123,7 +124,7 @@ def load_latest(*, outputs_root: Path = OUTPUTS_ROOT) -> dict[str, Any]:
     """Load latest.json, rebuilding it from history when needed."""
 
     paths = ensure_registry_paths(outputs_root=outputs_root)
-    if not paths.latest_path.exists():
+    if not paths.latest_path.exists() or _history_is_newer(paths):
         return rebuild_latest(outputs_root=outputs_root)
 
     try:
@@ -204,8 +205,21 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
-        rows.append(json.loads(line))
+        try:
+            rows.append(json.loads(line))
+        except json.JSONDecodeError:
+            logger.warning("skipping invalid registry jsonl row", path=str(path))
     return rows
+
+
+def _history_is_newer(paths: RegistryPaths) -> bool:
+    """Return True when append-only history may have outpaced latest.json."""
+
+    if not paths.task_results_path.exists():
+        return False
+    if not paths.latest_path.exists():
+        return True
+    return paths.task_results_path.stat().st_mtime_ns > paths.latest_path.stat().st_mtime_ns
 
 
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:

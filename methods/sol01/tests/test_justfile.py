@@ -43,6 +43,13 @@ def test_just_run_accepts_multiple_patterns_and_all_mode():
     assert "python -m sol01.run_mode --all" in _combined_output(all_mode)
 
 
+def test_just_run_requires_at_least_one_pattern():
+    completed = _run_just("run")
+
+    assert completed.returncode != 0
+    assert "takes at least 1" in _combined_output(completed)
+
+
 def test_just_smoke_remains_separate_from_persisted_run_mode():
     completed = _run_just("smoke", "sf_bq320")
 

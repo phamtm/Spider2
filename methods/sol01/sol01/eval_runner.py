@@ -7,8 +7,8 @@ import json
 import re
 import subprocess
 import sys
-from shutil import copy2
 from pathlib import Path
+from shutil import copy2
 from tempfile import TemporaryDirectory
 from typing import Any
 
@@ -107,8 +107,8 @@ def run_official_eval(
     )
     summary["returncode"] = completed.returncode
 
-    summary_path = run_paths.eval_dir / f"summary{suffix}.json"
-    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    summary_path = _summary_path_for(run_paths, artifact_tag=artifact_tag)
+    _write_eval_summary(summary_path, summary)
     logger.info(
         "evaluation complete",
         run_id=run_id,
@@ -163,23 +163,44 @@ def run_persisted_eval(
         )
         return summary
 
-    summary = run_official_eval(
-        run_id,
-        python_executable=python_executable,
-        outputs_root=outputs_root,
-        expected_instance_ids=expected_instance_ids,
-        artifact_tag=artifact_tag,
-        result_dir=persisted_result_dir,
-        credential_path=credential_path,
-        runner=runner,
-    )
+    eval_failed = False
+    try:
+        summary = run_official_eval(
+            run_id,
+            python_executable=python_executable,
+            outputs_root=outputs_root,
+            expected_instance_ids=expected_instance_ids,
+            artifact_tag=artifact_tag,
+            result_dir=persisted_result_dir,
+            credential_path=credential_path,
+            runner=runner,
+        )
+    except subprocess.CalledProcessError as exc:
+        eval_failed = True
+        summary = _load_failed_eval_summary(
+            run_id=run_id,
+            run_paths=run_paths,
+            result_dir=persisted_result_dir,
+            artifact_tag=artifact_tag,
+            error=exc,
+        )
     per_instance_rows = _per_instance_rows(
         expected_ids=expected_ids,
         instance_scores=summary.get("instance_scores", {}),
         result_dir=persisted_result_dir,
+        eval_failed=eval_failed,
     )
     summary["per_instance"] = per_instance_rows
+    summary["missing_csv_count"] = _missing_csv_count(
+        persisted_result_dir,
+        expected_ids=expected_ids,
+    )
+    summary["missing_instance_ids"] = _missing_instance_ids(
+        persisted_result_dir,
+        expected_ids=expected_ids,
+    )
     _write_per_instance_records(per_instance_eval_path_for(run_paths), per_instance_rows)
+    _write_eval_summary(_summary_path_for(run_paths, artifact_tag=artifact_tag), summary)
     return summary
 
 
@@ -279,6 +300,7 @@ def _per_instance_rows(
     expected_ids: set[str],
     instance_scores: dict[str, int],
     result_dir: Path,
+    eval_failed: bool = False,
 ) -> list[dict[str, Any]]:
     """Build stable per-task eval records with a failure reason when available."""
 
@@ -288,7 +310,9 @@ def _per_instance_rows(
         score = instance_scores.get(instance_id)
         csv_present = instance_id in present_ids
         if csv_present:
-            if score == 1:
+            if eval_failed:
+                failure_reason = "eval_failed"
+            elif score == 1:
                 failure_reason = None
             elif score is not None:
                 failure_reason = "official_fail"
@@ -306,6 +330,33 @@ def _per_instance_rows(
             }
         )
     return rows
+
+
+def _load_failed_eval_summary(
+    *,
+    run_id: str,
+    run_paths: RunPaths,
+    result_dir: Path,
+    artifact_tag: str | None,
+    error: subprocess.CalledProcessError,
+) -> dict[str, Any]:
+    """Load the summary written before a failed official eval raised."""
+
+    summary_path = _summary_path_for(run_paths, artifact_tag=artifact_tag)
+    if summary_path.exists():
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    else:
+        summary = parse_eval_stdout(error.output or "")
+        summary["run_id"] = run_id
+        summary["stdout_path"] = str(run_paths.eval_dir / "official_stdout.txt")
+        summary["stderr_path"] = str(run_paths.eval_dir / "official_stderr.txt")
+        if artifact_tag is None:
+            summary["result_dir"] = str(result_dir)
+    summary["returncode"] = error.returncode
+    summary["eval_error"] = "official_eval_failed"
+    if artifact_tag is None:
+        summary["result_dir"] = str(result_dir)
+    return summary
 
 
 def _missing_instance_ids(result_dir: Path, *, expected_ids: set[str]) -> list[str]:
@@ -369,8 +420,21 @@ def _build_no_csv_summary(
         "returncode": 0,
     }
     summary_path = run_paths.eval_dir / "summary.json"
-    summary_path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_eval_summary(summary_path, summary)
     return summary
+
+
+def _summary_path_for(run_paths: RunPaths, *, artifact_tag: str | None) -> Path:
+    """Return the saved eval summary path for one artifact tag."""
+
+    suffix = f".{artifact_tag}" if artifact_tag else ""
+    return run_paths.eval_dir / f"summary{suffix}.json"
+
+
+def _write_eval_summary(path: Path, summary: dict[str, Any]) -> None:
+    """Write an eval summary with stable formatting."""
+
+    path.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _write_per_instance_records(path: Path, rows: list[dict[str, Any]]) -> None:

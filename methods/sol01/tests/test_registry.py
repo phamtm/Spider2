@@ -125,6 +125,25 @@ def test_registry_updates_latest_on_pass_to_fail(tmp_path: Path):
     assert latest["task_results"][0]["run_id"] == "run-c"
 
 
+def test_registry_preserves_eval_failed_for_missing_scores_with_csv(tmp_path: Path):
+    record = _record(
+        run_id="run-parse-failed",
+        instance_id="sf_local011",
+        timestamp="2026-04-29T02:30:00+00:00",
+        score=None,
+        run_path=str(tmp_path / "run-parse-failed"),
+        csv_path=str(tmp_path / "run-parse-failed" / "csv" / "sf_local011.csv"),
+        trace_path=str(tmp_path / "run-parse-failed" / "traces" / "sf_local011.json"),
+        solver_status="success",
+        eval_status="failed",
+        eval_error="eval_failed",
+    )
+
+    latest = record_registry_batch([record], outputs_root=tmp_path)
+
+    assert latest["task_results"][0]["status"] == "eval_failed"
+
+
 def test_registry_updates_latest_on_fail_to_pass(tmp_path: Path):
     first = _record(
         run_id="run-d",
@@ -186,3 +205,41 @@ def test_registry_rebuilds_latest_from_history_when_missing(tmp_path: Path):
     assert latest_path.exists()
     assert rebuilt["task_results"][0]["status"] == "pass"
     assert rebuilt["task_results"][0]["run_id"] == "run-g"
+
+
+def test_registry_rebuilds_stale_latest_and_skips_invalid_history_rows(tmp_path: Path):
+    first = _record(
+        run_id="run-h",
+        instance_id="sf_local040",
+        timestamp="2026-04-29T07:00:00+00:00",
+        score=0.0,
+        run_path=str(tmp_path / "run-h"),
+        csv_path=str(tmp_path / "run-h" / "csv" / "sf_local040.csv"),
+        solver_status="success",
+    )
+    second = _record(
+        run_id="run-i",
+        instance_id="sf_local041",
+        timestamp="2026-04-29T08:00:00+00:00",
+        score=1.0,
+        run_path=str(tmp_path / "run-i"),
+        csv_path=str(tmp_path / "run-i" / "csv" / "sf_local041.csv"),
+        solver_status="success",
+    )
+
+    record_registry_batch([first], outputs_root=tmp_path)
+    paths = ensure_registry_paths(outputs_root=tmp_path)
+    stale_latest = load_latest(outputs_root=tmp_path)
+    second_row = record_registry_batch([second], outputs_root=tmp_path)["task_results"][1]
+    paths.latest_path.write_text(json.dumps(stale_latest, indent=2) + "\n", encoding="utf-8")
+    with paths.task_results_path.open("a", encoding="utf-8") as handle:
+        handle.write("{broken json\n")
+    paths.task_results_path.touch()
+
+    rebuilt = load_latest(outputs_root=tmp_path)
+
+    assert {row["instance_id"] for row in rebuilt["task_results"]} == {
+        "sf_local040",
+        "sf_local041",
+    }
+    assert second_row in rebuilt["task_results"]

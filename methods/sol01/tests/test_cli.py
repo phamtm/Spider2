@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import pytest
+import typer
 from typer.testing import CliRunner
 
 from sol01 import cli
@@ -163,8 +165,8 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
     assert result["eval_summary"]["correct_tasks"] == 1
 
 
-def test_handle_run_only_stages_csv_backed_results_for_eval(monkeypatch, tmp_path: Path):
-    """Post-run eval should only stage tasks that actually produced CSV files."""
+def test_handle_run_forwards_all_expected_ids_to_persisted_eval(monkeypatch, tmp_path: Path):
+    """Post-run eval should account for every selected task, even missing CSVs."""
 
     called: dict[str, Any] = {}
 
@@ -333,7 +335,7 @@ def test_handle_eval_rejects_missing_filtered_csv(monkeypatch, tmp_path: Path):
         lambda **kwargs: [Task(instance_id="local003", db="db", question="q")],
     )
 
-    try:
+    with pytest.raises(typer.BadParameter) as exc_info:
         cli.handle_eval(
             run_id="smoke-local003",
             instance_id="local003",
@@ -341,10 +343,8 @@ def test_handle_eval_rejects_missing_filtered_csv(monkeypatch, tmp_path: Path):
             question_contains=None,
             limit=None,
         )
-    except Exception as exc:
-        assert "Missing CSV for local003" in str(exc)
-    else:
-        raise AssertionError("Expected filtered eval to fail for a missing CSV")
+    assert "Missing CSV for local003" in str(exc_info.value)
+    assert exc_info.value.param_hint == "--run-id"
 
 
 def test_filtered_eval_tag_adds_a_disambiguating_hash():
