@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from time import perf_counter
+from pathlib import Path
 from typing import Any, Protocol
 
 from sol01.config import RuntimeConfig
@@ -21,6 +22,7 @@ from sol01.models import (
     Task,
 )
 from sol01.output import (
+    OUTPUTS_ROOT,
     RunPaths,
     csv_path_for,
     ensure_run_paths,
@@ -69,12 +71,13 @@ def run_tasks(
     run_id: str,
     config: RuntimeConfig,
     llm_client: StructuredLLM | None = None,
+    outputs_root: Path | None = None,
     force: bool = False,
     skip_failed: bool = False,
 ) -> list[FinalAnswer]:
     """Run a batch of tasks and write a manifest before processing them."""
 
-    run_paths = ensure_run_paths(run_id)
+    run_paths = ensure_run_paths(run_id, outputs_root=outputs_root or OUTPUTS_ROOT)
     write_manifest(
         run_paths,
         manifest={
