@@ -67,9 +67,46 @@ just smoke sf_bq320
 ```
 
 Use quotes around patterns so the shell does not expand them first.
-Run outputs live under `methods/sol01/outputs/<run_id>/`.
-The durable logs are in `logs/`, scored CSVs in `eval/scored_csv/`,
-per-instance eval rows in `eval/per_instance.jsonl`, and the local registry in
-`methods/sol01/outputs/registry/`.
+Bare `*` is rejected by the helper on purpose.
+
+## Output Layout
+
+`methods/sol01/outputs/` is gitignored.
+
+Each persisted run writes to `methods/sol01/outputs/<run_id>/`:
+
+- `logs/stdout.txt`
+- `logs/stderr.txt`
+- `logs/run.jsonl`
+- `sql/`
+- `csv/`
+- `traces/`
+- `eval/scored_csv/`
+- `eval/summary.json`
+- `eval/per_instance.jsonl`
+
+The local registry lives in `methods/sol01/outputs/registry/` with:
+
+- `runs.jsonl`
+- `task_results.jsonl`
+- `latest.json`
+
+## Statuses
+
+Pass/fail comes from the official evaluator:
+
+- `pass`: CSV scored 1 by the official evaluator
+- `official_fail`: CSV was present, but the official evaluator scored it 0
+- `solver_failed`: the solver task itself failed
+- `missing_csv`: the solver never produced a CSV
+- `eval_failed`: the evaluator failed before scoring finished
+
+## Debugging
+
+1. Read `logs/run.jsonl` for the run sequence.
+2. Check `logs/stdout.txt` and `logs/stderr.txt`.
+3. Inspect `sql/`, `csv/`, and `traces/` for the task-level artifacts.
+4. Open `eval/summary.json` and `eval/per_instance.jsonl`.
+5. Check `methods/sol01/outputs/registry/latest.json`.
 
 The implementation plan is tracked in `PLAN.md`.

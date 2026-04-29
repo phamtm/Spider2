@@ -6,9 +6,10 @@ import argparse
 import hashlib
 import json
 import sys
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 from sol01.config import DEFAULT_DOTENV_PATH, RuntimeConfig
 from sol01.coordinator import run_tasks
@@ -152,7 +153,9 @@ def run_persisted_mode(
                 "run_path": str(run_paths.root),
                 "task_count": len(tasks),
                 "passed_count": sum(1 for row in eval_summary["per_instance"] if row.get("passed")),
-                "failed_count": sum(1 for row in eval_summary["per_instance"] if not row.get("passed")),
+                "failed_count": sum(
+                    1 for row in eval_summary["per_instance"] if not row.get("passed")
+                ),
             },
         )
 
@@ -227,12 +230,14 @@ def _update_registry(
     """Build registry rows from solver outcomes and eval results."""
 
     per_instance = {
-        row["instance_id"]: row for row in eval_summary.get("per_instance", []) if row.get("instance_id")
+        row["instance_id"]: row
+        for row in eval_summary.get("per_instance", [])
+        if row.get("instance_id")
     }
     eval_status = "failed" if eval_summary.get("returncode", 0) != 0 else "success"
     records: list[RegistryTaskRecord] = []
     now = _utc_now()
-    for task, result in zip(tasks, results):
+    for task, result in zip(tasks, results, strict=True):
         row = per_instance.get(task.instance_id, {})
         failure_reason = row.get("failure_reason")
         records.append(
