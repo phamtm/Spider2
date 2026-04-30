@@ -46,12 +46,18 @@ def analyze_run(
     trace_index = {trace["instance_id"]: trace for trace in traces}
     category_records = load_category_metadata(dataset_path=dataset_path, batch_dir=batch_dir)
     category_map = {record.instance_id: record for record in category_records}
-    result_rows = _analysis_result_rows(run_paths, traces, trace_index, eval_summary)
+    result_rows, category_rows = _analysis_result_rows(
+        run_paths,
+        traces,
+        trace_index,
+        eval_summary,
+    )
     category_metadata = _category_metadata_snapshot(
         dataset_path=dataset_path,
         batch_dir=batch_dir,
         records=category_records,
     )
+    category_coverage = _category_result_coverage(result_rows, category_map)
 
     by_category = {category: [] for category in FAILURE_CATEGORIES}
     for trace in traces:
@@ -80,6 +86,8 @@ def analyze_run(
         "eval_summary": eval_summary,
         "category_counts": {category: len(records) for category, records in by_category.items()},
         "category_metadata": category_metadata,
+        "category_rows": category_rows,
+        "category_coverage": category_coverage,
         "by_category": by_category,
         "by_database": _database_summary(traces, by_category),
         "by_primary_tier": _category_result_summary(result_rows, category_map, kind="tier"),
@@ -300,13 +308,14 @@ def _analysis_result_rows(
     traces: list[dict[str, Any]],
     trace_index: dict[str, dict[str, Any]],
     eval_summary: dict[str, Any] | None,
-) -> list[dict[str, Any]]:
-    """Return one pass/fail row per expected task for category summaries."""
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Return category rows and the source they came from."""
 
     rows: list[dict[str, Any]] = []
     seen: set[str] = set()
     per_instance = eval_summary.get("per_instance") if isinstance(eval_summary, dict) else None
-    if isinstance(per_instance, list) and per_instance:
+    if isinstance(per_instance, list):
+        source = "eval_summary.per_instance"
         for row in per_instance:
             if not isinstance(row, dict):
                 continue
@@ -322,6 +331,7 @@ def _analysis_result_rows(
             )
             seen.add(instance_id)
     else:
+        source = "trace_fallback"
         for trace in traces:
             instance_id = str(trace.get("instance_id") or "")
             if not instance_id or instance_id in seen:
@@ -335,6 +345,7 @@ def _analysis_result_rows(
             )
             seen.add(instance_id)
 
+    source_row_count = len(rows)
     for instance_id in _missing_csv_ids(run_paths, trace_index, eval_summary):
         if instance_id in seen:
             continue
@@ -347,7 +358,16 @@ def _analysis_result_rows(
         )
         seen.add(instance_id)
 
-    return rows
+    source_detail = (
+        "eval summary per_instance"
+        if source == "eval_summary.per_instance"
+        else "trace fallback"
+    )
+    return rows, {
+        "source": source,
+        "source_detail": source_detail,
+        "source_row_count": source_row_count,
+    }
 
 
 def _category_metadata_snapshot(
@@ -411,6 +431,23 @@ def _category_result_summary(
             key=lambda item: (-item[1]["failed"], -item[1]["passed"], item[0]),
         )
     )
+
+
+def _category_result_coverage(
+    result_rows: list[dict[str, Any]],
+    category_map: dict[str, Any],
+) -> dict[str, int]:
+    """Count how many category rows are mapped versus unmapped."""
+
+    mapped = 0
+    unmapped = 0
+    for row in result_rows:
+        instance_id = str(row.get("instance_id") or "")
+        if instance_id and instance_id in category_map:
+            mapped += 1
+        else:
+            unmapped += 1
+    return {"mapped": mapped, "unmapped": unmapped, "total": mapped + unmapped}
 
 
 def _missing_csv_ids(
@@ -541,6 +578,18 @@ def _render_summary(report: dict[str, Any]) -> str:
             record["instance_id"] for record in records if record["instance_id"]
         )
         lines.append(f"- {category}: {len(records)} ({instance_ids})")
+
+    lines.append("")
+    lines.append("## Category Coverage")
+    rows = report["category_rows"]
+    coverage = report["category_coverage"]
+    lines.append(
+        f"- source: {rows['source_detail']} ({rows['source_row_count']} rows)"
+    )
+    lines.append(
+        f"- mapped: {coverage['mapped']}, "
+        f"unmapped: {coverage['unmapped']}, total {coverage['total']}"
+    )
 
     lines.append("")
     lines.append("## Category Metadata")

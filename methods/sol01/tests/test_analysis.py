@@ -561,3 +561,174 @@ def test_analyze_run_records_category_metadata_provenance(tmp_path: Path):
     summary_text = (run_paths.analysis_dir / "summary.md").read_text(encoding="utf-8")
     assert "## Category Metadata" in summary_text
     assert f"- batches: {batch_dir_two}" in summary_text
+
+
+def test_analyze_run_reports_unmapped_category_coverage(tmp_path: Path):
+    """Missing category rows should stay visible in coverage counts."""
+
+    dataset_path = tmp_path / "spider2-snow.jsonl"
+    _write_jsonl(
+        dataset_path,
+        [
+            {
+                "instance_id": "local001",
+                "instruction": "q",
+                "db_id": "DB",
+                "external_knowledge": None,
+            },
+            {
+                "instance_id": "local002",
+                "instruction": "q",
+                "db_id": "DB",
+                "external_knowledge": None,
+            },
+        ],
+    )
+    batch_dir = tmp_path / "batches"
+    batch_dir.mkdir()
+    _write_jsonl(
+        batch_dir / "batch_01.jsonl",
+        [{"instance_id": "local001", "primary_tier": 1, "tags": ["aggregation"]}],
+    )
+
+    run_paths = ensure_run_paths("category-coverage", outputs_root=tmp_path)
+    run_paths.eval_dir.mkdir(parents=True, exist_ok=True)
+    (run_paths.eval_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "attempted_tasks": 2,
+                "correct_tasks": 1,
+                "missing_csv_count": 0,
+                "per_instance": [
+                    {
+                        "instance_id": "local001",
+                        "score": 1,
+                        "passed": True,
+                        "csv_present": True,
+                        "failure_reason": None,
+                    },
+                    {
+                        "instance_id": "local002",
+                        "score": 0,
+                        "passed": False,
+                        "csv_present": True,
+                        "failure_reason": "official_fail",
+                    },
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    for instance_id in ("local001", "local002"):
+        csv_path = run_paths.csv_dir / f"{instance_id}.csv"
+        csv_path.write_text("answer\n1\n", encoding="utf-8")
+        write_trace(
+            run_paths,
+            instance_id=instance_id,
+            trace={
+                "instance_id": instance_id,
+                "db": "db_alpha",
+                "question": f"Question {instance_id}",
+                "status": "success" if instance_id == "local001" else "failed",
+                "csv_path": str(csv_path),
+                "final_execution": {"ok": True, "row_count": 1},
+                "attempts": [
+                    {
+                        "sql": "SELECT 1",
+                        "validation": {"ok": True, "errors": []},
+                        "execution_result": {"ok": True, "error": None},
+                    }
+                ],
+            },
+        )
+
+    report = analyze_run(
+        "category-coverage",
+        outputs_root=tmp_path,
+        dataset_path=dataset_path,
+        batch_dir=batch_dir,
+    )
+
+    assert report["category_coverage"] == {"mapped": 1, "unmapped": 1, "total": 2}
+    assert report["by_primary_tier"][1]["total"] == 1
+    assert "local002" not in report["by_primary_tier"][1]["instance_ids"]
+
+    summary_text = (run_paths.analysis_dir / "summary.md").read_text(encoding="utf-8")
+    assert "## Category Coverage" in summary_text
+    assert "- mapped: 1, unmapped: 1, total 2" in summary_text
+
+
+def test_analyze_run_keeps_empty_per_instance_as_source_of_truth(tmp_path: Path):
+    """An empty official eval row set should not fall back to trace status."""
+
+    dataset_path = tmp_path / "spider2-snow.jsonl"
+    _write_jsonl(
+        dataset_path,
+        [
+            {
+                "instance_id": "local101",
+                "instruction": "q",
+                "db_id": "DB",
+                "external_knowledge": None,
+            }
+        ],
+    )
+    batch_dir = tmp_path / "batches"
+    batch_dir.mkdir()
+    _write_jsonl(
+        batch_dir / "batch_01.jsonl",
+        [{"instance_id": "local101", "primary_tier": 2, "tags": ["temporal"]}],
+    )
+
+    run_paths = ensure_run_paths("empty-per-instance", outputs_root=tmp_path)
+    run_paths.eval_dir.mkdir(parents=True, exist_ok=True)
+    (run_paths.eval_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "attempted_tasks": 1,
+                "correct_tasks": 0,
+                "missing_csv_count": 0,
+                "per_instance": [],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    csv_path = run_paths.csv_dir / "local101.csv"
+    csv_path.write_text("answer\n1\n", encoding="utf-8")
+    write_trace(
+        run_paths,
+        instance_id="local101",
+        trace={
+            "instance_id": "local101",
+            "db": "db_beta",
+            "question": "Question local101",
+            "status": "success",
+            "csv_path": str(csv_path),
+            "final_execution": {"ok": True, "row_count": 1},
+            "attempts": [
+                {
+                    "sql": "SELECT 1",
+                    "validation": {"ok": True, "errors": []},
+                    "execution_result": {"ok": True, "error": None},
+                }
+            ],
+        },
+    )
+
+    report = analyze_run(
+        "empty-per-instance",
+        outputs_root=tmp_path,
+        dataset_path=dataset_path,
+        batch_dir=batch_dir,
+    )
+
+    assert report["category_rows"]["source"] == "eval_summary.per_instance"
+    assert report["category_rows"]["source_row_count"] == 0
+    assert report["by_primary_tier"] == {}
+    assert report["by_tag"] == {}
+
+    summary_text = (run_paths.analysis_dir / "summary.md").read_text(encoding="utf-8")
+    assert "source: eval summary per_instance (0 rows)" in summary_text
+    assert "- mapped: 0, unmapped: 0, total 0" in summary_text
