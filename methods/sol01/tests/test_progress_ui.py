@@ -6,6 +6,7 @@ from progress_ui import (
     Record,
     apply_frame_filters,
     build_status_frame,
+    format_tier_summary,
     make_progress_frame_for_ids,
 )
 
@@ -161,7 +162,9 @@ def test_make_progress_frame_filters_records_to_selected_questions():
         ),
     ]
 
-    progress = make_progress_frame_for_ids(records, total_questions=1, selected_instance_ids={"sf_keep"})
+    progress = make_progress_frame_for_ids(
+        records, total_questions=1, selected_instance_ids={"sf_keep"}
+    )
 
     assert list(progress["answered"]) == [1]
     assert list(progress["correct_pct"]) == [100.0]
@@ -171,3 +174,19 @@ def test_make_progress_frame_returns_empty_for_empty_slice():
     progress = make_progress_frame_for_ids([], total_questions=0, selected_instance_ids=set())
 
     assert progress.empty
+
+
+def test_format_tier_summary_describes_selected_tier_complexity():
+    summary = format_tier_summary([3])
+
+    assert summary == (
+        "Selected tier complexity: Tier 3: Multi-step reasoning. Common examples are ranking, "
+        "window functions, temporal rollups, cohort logic, or external notes."
+    )
+
+
+def test_format_tier_summary_falls_back_when_no_tier_selected():
+    assert (
+        format_tier_summary([])
+        == "Tier is the question complexity score. Higher tiers usually mean more reasoning steps, joins, or transformations."
+    )

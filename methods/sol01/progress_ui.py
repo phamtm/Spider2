@@ -51,6 +51,13 @@ TABLE_VISIBLE_ROWS = 50
 TABLE_HEIGHT = TABLE_VISIBLE_ROWS * TABLE_ROW_HEIGHT + 48
 SECTION_GAP = 24
 
+TIER_COMPLEXITY = {
+    1: "Simple lookup or single-step aggregate. Usually one table and one obvious filter.",
+    2: "Straightforward multi-step query. Usually one join, modest filtering, or a simple grouped result.",
+    3: "Multi-step reasoning. Common examples are ranking, window functions, temporal rollups, cohort logic, or external notes.",
+    4: "Hard query. Usually mixes several advanced patterns, such as nested aggregation, geospatial logic, multi-hop joins, or multiple time-based transformations.",
+}
+
 
 @dataclass(frozen=True)
 class Record:
@@ -456,12 +463,33 @@ def apply_frame_filters(
 
     if selected_tags:
         filtered = filtered[
-            filtered["tags"].apply(
-                lambda tags: all(tag in (tags or []) for tag in selected_tags)
-            )
+            filtered["tags"].apply(lambda tags: all(tag in (tags or []) for tag in selected_tags))
         ]
 
     return filtered
+
+
+def format_tier_summary(selected_tiers: list[int]) -> str:
+    if not selected_tiers:
+        return "Tier is the question complexity score. Higher tiers usually mean more reasoning steps, joins, or transformations."
+
+    selected = []
+    for tier in selected_tiers:
+        description = TIER_COMPLEXITY.get(tier)
+        if description:
+            selected.append(f"Tier {tier}: {description}")
+
+    if not selected:
+        return "Tier is the question complexity score. Higher tiers usually mean more reasoning steps, joins, or transformations."
+
+    return "Selected tier complexity: " + " ".join(selected)
+
+
+def render_tier_guide(selected_tiers: list[int]) -> None:
+    st.caption(format_tier_summary(selected_tiers))
+    with st.expander("Tier guide", expanded=bool(selected_tiers)):
+        for tier in sorted(TIER_COMPLEXITY):
+            st.markdown(f"- **Tier {tier}**: {TIER_COMPLEXITY[tier]}")
 
 
 def make_progress_frame(records: list[Record], total_questions: int) -> pd.DataFrame:
@@ -704,6 +732,7 @@ def main() -> None:
             default=[],
             help="Leave empty to include every tier.",
         )
+        render_tier_guide(selected_tiers)
         selected_tags = st.multiselect(
             "Tags",
             options=available_tags,
