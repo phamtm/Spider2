@@ -104,6 +104,39 @@ def test_apply_frame_filters_uses_and_tags_and_skips_uncategorized_only_when_nee
     assert list(filtered["instance_id"]) == ["sf_a", "sf_b", "sf_c"]
 
 
+def test_apply_frame_filters_excludes_missing_metadata_when_category_filters_are_active():
+    frame = pd.DataFrame(
+        [
+            {
+                "instance_id": "sf_a",
+                "status": "correct",
+                "primary_tier": 3,
+                "tags": ["aggregation"],
+                "category_available": True,
+                "db": "DB_A",
+                "instruction": "alpha",
+                "note": None,
+                "difficulty_notes": None,
+            },
+            {
+                "instance_id": "sf_missing",
+                "status": "correct",
+                "primary_tier": None,
+                "tags": [],
+                "category_available": False,
+                "db": "DB_B",
+                "instruction": "beta",
+                "note": None,
+                "difficulty_notes": None,
+            },
+        ]
+    )
+
+    filtered = apply_frame_filters(frame, selected_tiers=[3])
+
+    assert list(filtered["instance_id"]) == ["sf_a"]
+
+
 def test_make_progress_frame_filters_records_to_selected_questions():
     records = [
         Record(
