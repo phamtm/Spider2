@@ -11,6 +11,9 @@ def test_readme_documents_persisted_eval_runs():
     text = README.read_text(encoding="utf-8")
 
     assert "just run <selector>" in text
+    assert "task selectors are ORed" in text
+    assert "repeated `tag:` filters are ANDed" in text
+    assert "`all` must stand alone" in text
     assert "Category shortcuts are also available:" in text
     assert "just tiers tier:1 tier:2" in text
     assert "just spatial" in text

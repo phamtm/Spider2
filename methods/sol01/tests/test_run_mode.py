@@ -286,10 +286,22 @@ def test_run_mode_main_forwards_tier_and_tag_filters(monkeypatch: pytest.MonkeyP
     }
 
 
-def test_run_mode_main_rejects_all_with_category_filters():
+def test_run_mode_main_rejects_all_with_category_filters(capsys: pytest.CaptureFixture[str]):
     exit_code = run_mode.main(["--all", "--tier", "3"])
 
     assert exit_code == 2
+    assert "must stand alone" in capsys.readouterr().err
+
+
+def test_run_mode_main_help_mentions_selector_rules(capsys: pytest.CaptureFixture[str]):
+    with pytest.raises(SystemExit) as excinfo:
+        run_mode.main(["--help"])
+
+    assert excinfo.value.code == 0
+    output = capsys.readouterr().out
+    assert "Task selectors are ORed" in output
+    assert "repeated --tag values are ANDed" in output
+    assert "Must be used by itself." in output
 
 
 def test_run_persisted_mode_rejects_bare_star(

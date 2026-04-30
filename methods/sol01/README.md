@@ -62,6 +62,7 @@ Persisted solver mode uses `just run <selector>`:
 ```bash
 just run sf_bq320
 just run 'sf_bq3*' 'sf_bq4*'
+just run tier:3-5 tag:temporal
 just all
 just gold sf_bq320
 ```
@@ -72,6 +73,15 @@ Bare `*` is rejected by the helper on purpose.
 There is no smoke workflow.
 Gold runs reuse the same outputs root, but they do not populate
 `eval/scored_csv/` because the gold CSV is already the scored input.
+Selector rules:
+
+- task selectors are ORed
+- `tier:` filters are ORed
+- repeated `tag:` filters are ANDed
+- `all` must stand alone
+
+Category selectors can be passed directly to `just run`, or through the alias
+recipes below when you want a shorter command.
 
 Category shortcuts are also available:
 

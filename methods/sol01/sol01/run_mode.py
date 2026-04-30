@@ -211,25 +211,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         nargs="*",
         help=(
             "Task selectors such as sf_bq320, sf_bq3*, tier:3-5, or tag:temporal. "
-            "Category selectors can also be passed with --tier and --tag."
+            "Task selectors are ORed, repeated --tier values are ORed, repeated --tag "
+            "values are ANDed, and --all must be used by itself."
         ),
     )
     parser.add_argument(
         "--tier",
         action="append",
         dest="tiers",
-        help="Filter runs by primary tier or tier range, for example 3 or 3-5.",
+        help="Filter runs by primary tier or tier range, for example 3 or 3-5. Repeat to OR.",
     )
     parser.add_argument(
         "--tag",
         action="append",
         dest="tags",
-        help="Filter runs by category tag, and repeat the flag to require multiple tags.",
+        help="Filter runs by category tag. Repeat to require all listed tags.",
     )
     parser.add_argument(
         "--all",
         action="store_true",
-        help="Run the full Spider2-snow task set.",
+        help="Run the full Spider2-snow task set. Must be used by itself.",
     )
     args = parser.parse_args(argv)
 
@@ -333,7 +334,9 @@ def _normalize_selectors(
 
     if all_mode:
         if selectors is not None or tiers is not None or tags is not None:
-            raise ValueError("all mode cannot be combined with selectors")
+            raise ValueError(
+                "all selector must stand alone; do not combine it with tier/tag filters"
+            )
         return [ALL_TASK_SELECTOR]
     normalized: list[str] = []
     normalized.extend(_normalize_values(selectors))
