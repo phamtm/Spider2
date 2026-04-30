@@ -133,6 +133,16 @@ class ExecutionResult(BaseModel):
     error: str | None = None
 
 
+class FilterGroundingReport(BaseModel):
+    """Evidence gathered when exact string filters need value rewrites."""
+
+    exact_filters: list[str] = Field(default_factory=list)
+    probes: list[dict[str, object]] = Field(default_factory=list)
+    value_rewrites: list[dict[str, object]] = Field(default_factory=list)
+    zero_like_result: bool = False
+    reason: str
+
+
 class OutputShapeReport(BaseModel):
     """Shape analysis for one SQL candidate and its executed result."""
 

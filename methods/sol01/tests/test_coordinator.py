@@ -698,6 +698,8 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
             raise AssertionError(f"Unexpected database: {db}")
         if "country = 'Russia'" in sql:
             return pd.DataFrame([{"TOTAL_ROWS": 0}])
+        if "LIKE LOWER('%Russia%')" in sql and "COUNTRY" in sql.upper():
+            return pd.DataFrame([{"MATCHED_VALUE": "Russian Federation"}])
         if "country IN ('Russia', 'Russian Federation')" in sql:
             return pd.DataFrame([{"TOTAL_ROWS": 4}])
         raise AssertionError(f"Unexpected SQL: {sql}")
@@ -763,6 +765,18 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
             confidence=0.9,
         ),
     )
+    monkeypatch.setattr(
+        "sol01.coordinator.load_db_index",
+        lambda *args, **kwargs: {
+            "TEST_DB.PUBLIC.SALES": TableSchema(
+                name="SALES",
+                full_name="TEST_DB.PUBLIC.SALES",
+                ddl="create table SALES (COUNTRY text);",
+                columns=[ColumnSchema(name="COUNTRY", type="TEXT")],
+                searchable_text="sales country",
+            )
+        },
+    )
 
     answer = run_task(
         task,
@@ -776,6 +790,16 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
     trace = json.loads((run_paths.traces_dir / "sf_bq327.json").read_text(encoding="utf-8"))
     assert trace["aggregate_verification"]["reason"] == (
         "Aggregate query returned a single very small numeric result."
+    )
+    assert trace["attempts"][0]["filter_grounding_report"]["reason"] == (
+        "Empty result but probe values suggest a stored label variant."
+    )
+    assert trace["attempts"][0]["filter_grounding_report"]["value_rewrites"][0]["rewrite"] == (
+        "Russian Federation"
+    )
+    assert (
+        "LIKE LOWER('%Russia%')"
+        in trace["attempts"][0]["filter_grounding_report"]["probes"][0]["probe_sql"]
     )
     assert trace["attempts"][0]["aggregate_verification"]["should_repair"] is True
     assert trace["attempts"][1]["stage"] == "aggregate_repair"

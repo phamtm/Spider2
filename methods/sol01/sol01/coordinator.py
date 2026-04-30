@@ -25,6 +25,7 @@ from sol01.models import (
     CandidateComparisonReport,
     ConfidenceReport,
     ExecutionResult,
+    FilterGroundingReport,
     FinalAnswer,
     Intent,
     OutputShapeReport,
@@ -821,6 +822,14 @@ def _evaluate_candidate(
         execution=execution,
         result_profile=result_profile,
     )
+    filter_grounding_report = _infer_filter_grounding_report(
+        task=task,
+        candidate=candidate,
+        schema=schema,
+        table_schemas=table_schemas or {},
+        validation=validation,
+        execution=execution,
+    )
     logger.debug(
         "candidate processed",
         stage=stage,
@@ -837,6 +846,11 @@ def _evaluate_candidate(
         "candidate_confidence": candidate.confidence,
         "validation": validation.model_dump(mode="json"),
         "execution_result": execution.model_dump(mode="json"),
+        "filter_grounding_report": (
+            filter_grounding_report.model_dump(mode="json")
+            if filter_grounding_report is not None
+            else None
+        ),
         "shape_report": shape_report.model_dump(mode="json") if shape_report is not None else None,
         "score_breakdown": _attempt_score_breakdown(
             intent=intent,
@@ -846,6 +860,7 @@ def _evaluate_candidate(
             aggregate_grain=aggregate_grain,
             result_profile=result_profile,
             shape_report=shape_report,
+            filter_grounding_report=filter_grounding_report,
         ),
     }
     attempt["score"] = sum(attempt["score_breakdown"].values())
@@ -869,6 +884,7 @@ def _attempt_score(
     aggregate_grain: AggregateGrainReport | None = None,
     result_profile: dict[str, Any] | None = None,
     shape_report: OutputShapeReport | None = None,
+    filter_grounding_report: FilterGroundingReport | None = None,
 ) -> float:
     """Rank candidates by verification evidence first and confidence last."""
 
@@ -881,6 +897,7 @@ def _attempt_score(
             aggregate_grain=aggregate_grain,
             result_profile=result_profile,
             shape_report=shape_report,
+            filter_grounding_report=filter_grounding_report,
         ).values()
     )
 
@@ -894,6 +911,7 @@ def _attempt_score_breakdown(
     aggregate_grain: AggregateGrainReport | None = None,
     result_profile: dict[str, Any] | None = None,
     shape_report: OutputShapeReport | None = None,
+    filter_grounding_report: FilterGroundingReport | None = None,
 ) -> dict[str, float]:
     """Return the score contribution for each verification check."""
 
@@ -901,7 +919,12 @@ def _attempt_score_breakdown(
         "execution_status": _execution_status_adjustment(execution),
         "validation": _validation_adjustment(validation),
         "shape": _output_shape_adjustment(intent, execution, result_profile, shape_report),
-        "filter_grounding": _filter_grounding_adjustment(intent, validation, execution),
+        "filter_grounding": _filter_grounding_adjustment(
+            intent,
+            validation,
+            execution,
+            filter_grounding_report,
+        ),
         "aggregate_grain": _aggregate_grain_adjustment(aggregate_grain),
         "cardinality": _cardinality_plausibility_adjustment(execution, result_profile),
         "confidence_tiebreaker": candidate.confidence * 0.01,
@@ -927,6 +950,7 @@ def _comparison_attempt_summary(attempt: dict[str, Any]) -> dict[str, Any]:
         "score_breakdown": attempt.get("score_breakdown", {}),
         "validation": attempt["validation"],
         "execution_result": attempt["execution_result"],
+        "filter_grounding_report": attempt.get("filter_grounding_report"),
         "shape_report": attempt.get("shape_report"),
         "result_profile": attempt.get("result_profile", {}),
     }
@@ -1218,6 +1242,7 @@ def _filter_grounding_adjustment(
     intent: Intent | None,
     validation: ValidationReport,
     execution: ExecutionResult,
+    report: FilterGroundingReport | None,
 ) -> float:
     """Prefer candidates whose filters appear grounded in observed values."""
 
@@ -1225,13 +1250,17 @@ def _filter_grounding_adjustment(
         return 0.0
     if not execution.ok:
         return -30.0
-    if execution.row_count == 0:
+    if report is not None and report.zero_like_result:
+        if report is not None and report.value_rewrites:
+            return 16.0
         return -22.0
     score = 14.0
     if validation.errors:
         score -= 8.0
     if validation.warnings:
         score -= 3.0 * len(validation.warnings)
+    if report is not None and report.value_rewrites:
+        score += 6.0
     return score
 
 
@@ -1329,6 +1358,361 @@ def _infer_output_shape_report(
     )
 
 
+def _infer_filter_grounding_report(
+    *,
+    task: Task,
+    candidate: SQLCandidate,
+    schema: SchemaSelection,
+    table_schemas: dict[str, TableSchema],
+    validation: ValidationReport,
+    execution: ExecutionResult,
+) -> FilterGroundingReport | None:
+    """Probe exact string filters when the candidate returns no rows."""
+
+    if not _execution_is_zero_like(candidate, execution, result_profile=None):
+        return None
+
+    try:
+        statement = sqlglot.parse_one(candidate.sql, read="snowflake")
+    except ParseError:
+        return FilterGroundingReport(
+            exact_filters=[],
+            probes=[],
+            value_rewrites=[],
+            reason="SQL could not be parsed for filter grounding.",
+        )
+
+    exact_filters = _extract_exact_string_filters(statement)
+    if not exact_filters:
+        return None
+
+    selected_tables = validation.referenced_tables or schema.expanded_tables
+    probes: list[dict[str, object]] = []
+    value_rewrites: list[dict[str, object]] = []
+    seen_probe_keys: set[tuple[str, str, str]] = set()
+
+    for filter_match in exact_filters:
+        targets = _filter_probe_targets(
+            filter_match,
+            selected_tables=selected_tables,
+            table_schemas=table_schemas,
+        )
+        for target in targets:
+            probe_key = (target["table"], target["column"], target["literal"])
+            if probe_key in seen_probe_keys:
+                continue
+            seen_probe_keys.add(probe_key)
+
+            probe_sql = _string_filter_probe_sql(
+                table_name=target["table"],
+                column_name=target["column"],
+                literal=target["literal"],
+            )
+            try:
+                probe_frame = fetch_query_dataframe(probe_sql, db=task.db)
+            except Exception as exc:
+                probes.append(
+                    {
+                        **target,
+                        "probe_sql": probe_sql,
+                        "error": str(exc),
+                    }
+                )
+                continue
+
+            matched_values = [
+                str(value)
+                for value in (
+                    row.get("MATCHED_VALUE")
+                    or row.get("matched_value")
+                    or row.get(target["column"])
+                    for row in probe_frame.to_dict(orient="records")
+                )
+                if value not in {None, "", target["literal"]}
+            ]
+            probe_record: dict[str, object] = {
+                **target,
+                "probe_sql": probe_sql,
+                "matched_values": matched_values,
+            }
+            probes.append(probe_record)
+            if matched_values:
+                value_rewrites.append(
+                    {
+                        "filter": target["raw_filter"],
+                        "rewrite": matched_values[0],
+                        "table": target["table"],
+                        "column": target["column"],
+                        "probe_sql": probe_sql,
+                    }
+                )
+                break
+        if value_rewrites:
+            break
+
+    if not probes:
+        return FilterGroundingReport(
+            exact_filters=[filter_match["raw_filter"] for filter_match in exact_filters],
+            probes=[],
+            value_rewrites=[],
+            zero_like_result=True,
+            reason="No probe targets were available for the empty result.",
+        )
+
+    if value_rewrites:
+        reason = "Empty result but probe values suggest a stored label variant."
+    else:
+        reason = "Empty result and probes did not find a grounded label rewrite."
+
+    return FilterGroundingReport(
+        exact_filters=[filter_match["raw_filter"] for filter_match in exact_filters],
+        probes=probes,
+        value_rewrites=value_rewrites,
+        zero_like_result=True,
+        reason=reason,
+    )
+
+
+def _execution_is_zero_like(
+    candidate: SQLCandidate,
+    execution: ExecutionResult,
+    *,
+    result_profile: dict[str, Any] | None,
+) -> bool:
+    """Return True when one result row still represents an empty aggregate result."""
+
+    if not execution.ok:
+        return False
+    if execution.row_count == 0:
+        return True
+    if not _looks_aggregate_query(candidate.sql):
+        return False
+
+    profile = result_profile or {
+        "sample_rows": execution.sample_rows,
+    }
+    sample_rows = profile.get("sample_rows") or execution.sample_rows
+    numeric_values = [
+        value
+        for value in (_coerce_number(item) for row in sample_rows for item in row.values())
+        if value is not None
+    ]
+    return bool(numeric_values) and max(numeric_values) == 0
+
+
+def _extract_exact_string_filters(statement: exp.Expression) -> list[dict[str, str]]:
+    """Return exact string equality filters from one parsed query."""
+
+    filters: list[dict[str, str]] = []
+    for node in statement.walk():
+        if isinstance(node, exp.EQ):
+            comparison = _extract_string_equality(node)
+            if comparison is not None:
+                filters.append(comparison)
+        elif isinstance(node, exp.In):
+            comparison = _extract_string_membership(node)
+            if comparison is not None:
+                filters.extend(comparison)
+    return filters
+
+
+def _extract_string_equality(node: exp.EQ) -> dict[str, str] | None:
+    """Return one column-to-literal equality comparison when present."""
+
+    left = node.left
+    right = node.right
+    column, literal = _column_and_string_literal(left, right)
+    if column is None or literal is None:
+        return None
+    return {
+        "raw_filter": node.sql(dialect="snowflake"),
+        "column": column.sql(dialect="snowflake"),
+        "literal": literal,
+    }
+
+
+def _extract_string_membership(node: exp.In) -> list[dict[str, str]] | None:
+    """Return one column-to-literal IN comparison when present."""
+
+    column = node.this if isinstance(node.this, exp.Column) else None
+    if column is None:
+        return None
+
+    filters: list[dict[str, str]] = []
+    for expression in node.expressions:
+        if not isinstance(expression, exp.Literal) or not expression.is_string:
+            return None
+        filters.append(
+            {
+                "raw_filter": node.sql(dialect="snowflake"),
+                "column": column.sql(dialect="snowflake"),
+                "literal": expression.this,
+            }
+        )
+    return filters
+
+
+def _column_and_string_literal(
+    left: exp.Expression,
+    right: exp.Expression,
+) -> tuple[exp.Column | None, str | None]:
+    """Return a column and a string literal from one equality comparison."""
+
+    if isinstance(left, exp.Column) and isinstance(right, exp.Literal) and right.is_string:
+        return left, right.this
+    if isinstance(right, exp.Column) and isinstance(left, exp.Literal) and left.is_string:
+        return right, left.this
+    return None, None
+
+
+def _filter_probe_targets(
+    filter_match: dict[str, str],
+    *,
+    selected_tables: list[str],
+    table_schemas: dict[str, TableSchema],
+) -> list[dict[str, str]]:
+    """Return low-cost probe targets for one empty exact filter."""
+
+    column_name = filter_match["column"].split(".")[-1].strip('"')
+    literal = filter_match["literal"]
+    schema_lookup = {
+        table_name.lower(): table_schema for table_name, table_schema in table_schemas.items()
+    }
+    tables = [table_name for table_name in selected_tables if table_name.lower() in schema_lookup]
+    tables.sort(key=lambda name: _table_probe_rank(name, column_name))
+
+    targets: list[dict[str, str]] = []
+    for table_name in tables:
+        schema = schema_lookup[table_name.lower()]
+        column_candidates = _probe_columns_for_table(schema, column_name, literal)
+        for probe_column in column_candidates:
+            targets.append(
+                {
+                    "raw_filter": filter_match["raw_filter"],
+                    "table": table_name,
+                    "column": probe_column,
+                    "literal": literal,
+                }
+            )
+            if len(targets) >= 4:
+                return targets
+    return targets
+
+
+def _probe_columns_for_table(
+    table_schema: TableSchema,
+    filter_column: str,
+    literal: str,
+) -> list[str]:
+    """Return likely string columns to probe within one table."""
+
+    string_columns = [
+        column.name for column in table_schema.columns if _column_looks_string_like(column.type)
+    ]
+    if not string_columns:
+        return []
+
+    exact_matches = [
+        column.name
+        for column in table_schema.columns
+        if column.name.lower() == filter_column.lower()
+    ]
+    if exact_matches:
+        return exact_matches
+
+    if _table_looks_like_lookup(table_schema) or _literal_looks_label_like(literal):
+        preferred = [
+            column
+            for column in string_columns
+            if _column_looks_label_like(column) or _column_looks_key_like(column)
+        ]
+        if preferred:
+            return preferred
+
+    preferred = [column for column in string_columns if filter_column.lower() in column.lower()]
+    if preferred:
+        return preferred
+    return string_columns[:2]
+
+
+def _table_probe_rank(table_name: str, filter_column: str) -> tuple[int, str]:
+    """Rank tables so likely lookup tables are probed first."""
+
+    lowered = table_name.lower()
+    if filter_column.lower() in lowered:
+        return 0, lowered
+    if _table_looks_like_lookup_name(lowered):
+        return 1, lowered
+    return 2, lowered
+
+
+def _string_filter_probe_sql(*, table_name: str, column_name: str, literal: str) -> str:
+    """Build one low-cost LIKE probe for a string filter."""
+
+    escaped = literal.replace("'", "''")
+    return (
+        f'SELECT DISTINCT "{column_name}" AS MATCHED_VALUE '
+        f"FROM {table_name} "
+        f"WHERE LOWER(CAST(\"{column_name}\" AS VARCHAR)) LIKE LOWER('%{escaped}%') "
+        "LIMIT 5"
+    )
+
+
+def _column_looks_string_like(column_type: str | None) -> bool:
+    """Return True when a schema column looks like a text field."""
+
+    if column_type is None:
+        return True
+    lowered = column_type.lower()
+    return any(token in lowered for token in ("char", "text", "string", "varchar", "variant"))
+
+
+def _table_looks_like_lookup(table_schema: TableSchema) -> bool:
+    """Return True when a table name suggests a lookup or code table."""
+
+    return _table_looks_like_lookup_name((table_schema.full_name or table_schema.name).lower())
+
+
+def _table_looks_like_lookup_name(table_name: str) -> bool:
+    """Return True when a table name suggests a lookup or code table."""
+
+    return any(
+        token in table_name
+        for token in (
+            "summary",
+            "lookup",
+            "ref_",
+            "_ref",
+            "dim_",
+            "_dim",
+            "map",
+            "code",
+            "label",
+            "country",
+        )
+    )
+
+
+def _column_looks_label_like(column_name: str) -> bool:
+    """Return True when a column name looks like a human-readable label."""
+
+    lowered = column_name.lower()
+    return any(token in lowered for token in ("name", "label", "display", "title", "desc"))
+
+
+def _column_looks_key_like(column_name: str) -> bool:
+    """Return True when a column name looks like a stored key."""
+
+    lowered = column_name.lower()
+    return any(token in lowered for token in ("key", "code", "id"))
+
+
+def _literal_looks_label_like(literal: str) -> bool:
+    """Return True when a filter literal looks like a display label."""
+
+    return (any(part.isalpha() for part in literal) and " " in literal) or literal[:1].isupper()
+
+
 def _normalized_output_expectation(intent: Intent | None) -> str:
     """Normalize the intent's output expectation for shape heuristics."""
 
@@ -1423,7 +1807,7 @@ def _aggregate_verification_reason(attempt: dict[str, Any]) -> str | None:
 def _looks_aggregate_query(sql: str) -> bool:
     """Heuristically detect aggregate queries that deserve extra scrutiny."""
 
-    normalized = " ".join(sql.split())
+    normalized = " ".join(sql.lower().split())
     return any(
         keyword in normalized
         for keyword in (" count(", " sum(", " avg(", " min(", " max(", " group by ", " having ")
