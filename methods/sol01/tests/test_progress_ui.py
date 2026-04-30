@@ -6,6 +6,8 @@ import pytest
 
 from progress_ui import (
     Record,
+    _status_dot_label,
+    _status_dot_style,
     apply_frame_filters,
     build_run_command,
     build_status_frame,
@@ -22,8 +24,6 @@ from progress_ui import (
     recommend_focus,
     select_question_row,
     should_show_all_questions,
-    _status_dot_label,
-    _status_dot_style,
 )
 
 

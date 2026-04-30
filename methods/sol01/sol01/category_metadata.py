@@ -89,6 +89,7 @@ def tier_complexity_summary(selected_tiers: Iterable[int]) -> str:
 
     return "Selected tier complexity: " + " ".join(selected)
 
+
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 KNOWN_CATEGORY_TAGS = frozenset(
     {

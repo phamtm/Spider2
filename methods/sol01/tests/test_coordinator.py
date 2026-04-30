@@ -679,6 +679,110 @@ def test_run_task_failure_writes_trace_without_csv(
     assert len(trace["attempts"]) == 2
 
 
+def test_run_task_verifies_zero_aggregate_results_before_finalizing(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
+):
+    task = Task(
+        instance_id="sf_bq327",
+        db="TEST_DB",
+        question="Count rows for a country filter that might use a label variant.",
+    )
+    run_paths = ensure_run_paths("aggregate-verification-run", outputs_root=tmp_path)
+    captured_prompts: dict[str, list[str]] = {}
+
+    def fake_fetch_query_dataframe(sql: str, *, db: str) -> pd.DataFrame:
+        if db != "TEST_DB":
+            raise AssertionError(f"Unexpected database: {db}")
+        if "country = 'Russia'" in sql:
+            return pd.DataFrame([{"TOTAL_ROWS": 0}])
+        if "country IN ('Russia', 'Russian Federation')" in sql:
+            return pd.DataFrame([{"TOTAL_ROWS": 4}])
+        raise AssertionError(f"Unexpected SQL: {sql}")
+
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Count rows for the requested country bucket.",
+                    entities=["sales", "country"],
+                    metrics=["count rows"],
+                    filters=["country = 'Russia'"],
+                    time_constraints=[],
+                    output_expectation="one count",
+                    assumptions=["The label may need variant matching."],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql="SELECT COUNT(*) AS TOTAL_ROWS FROM SALES WHERE country = 'Russia'",
+                    explanation="A direct country filter.",
+                    assumptions=["country stores a single canonical label"],
+                    confidence=0.95,
+                )
+            ],
+            "aggregate_verification": [
+                ConfidenceReport(
+                    confidence=0.2,
+                    issues=["The zero count looks too small to trust."],
+                    should_repair=True,
+                    repair_focus="check country value variants and aggregation grain",
+                )
+            ],
+            "sql_repair": [
+                SQLCandidate(
+                    sql=(
+                        "SELECT COUNT(*) AS TOTAL_ROWS FROM SALES "
+                        "WHERE country IN ('Russia', 'Russian Federation')"
+                    ),
+                    explanation="Widen the filter to a known country variant.",
+                    assumptions=["country may be stored under a longer canonical label"],
+                    confidence=0.7,
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(confidence=0.9, issues=[], should_repair=False, repair_focus=None)
+            ],
+        },
+        prompts=captured_prompts,
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.fetch_query_dataframe",
+        fake_fetch_query_dataframe,
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="test_db",
+            selected_tables=["TEST_DB.PUBLIC.SALES"],
+            expanded_tables=["TEST_DB.PUBLIC.SALES"],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    assert answer.status == "success"
+    trace = json.loads((run_paths.traces_dir / "sf_bq327.json").read_text(encoding="utf-8"))
+    assert trace["aggregate_verification"]["reason"] == (
+        "Aggregate query returned a single very small numeric result."
+    )
+    assert trace["attempts"][0]["aggregate_verification"]["should_repair"] is True
+    assert trace["attempts"][1]["stage"] == "aggregate_repair"
+    assert trace["attempts"][1]["execution_result"]["ok"] is True
+    assert trace["final_sql"].endswith("country IN ('Russia', 'Russian Federation')")
+    assert "value variants" in captured_prompts["aggregate_verification"][0]
+    assert "grain" in captured_prompts["aggregate_verification"][0]
+    assert "Verification:" in captured_prompts["sql_repair"][0]
+
+
 def test_run_task_catches_execution_errors_and_writes_failed_trace(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
 ):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from numbers import Number
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Protocol
@@ -433,6 +434,7 @@ def run_task(
         best_attempt = _best_attempt(attempts)
 
     candidate_comparison_payload: dict[str, Any] | None = None
+    aggregate_verification_payload: dict[str, Any] | None = None
     executable_attempts = [attempt for attempt in attempts if attempt["execution_result"]["ok"]]
     if len(executable_attempts) > 1:
         logger.info(
@@ -478,6 +480,88 @@ def run_task(
             )
             if preferred_attempt is not None:
                 best_attempt = preferred_attempt
+
+    if (
+        best_attempt is not None
+        and best_attempt["execution_result"]["ok"]
+        and len(attempts) < max_attempts
+    ):
+        verification_reason = _aggregate_verification_reason(best_attempt)
+        if verification_reason is not None:
+            logger.info(
+                "aggregate verification requested",
+                instance_id=task.instance_id,
+                stage=best_attempt["stage"],
+                reason=verification_reason,
+            )
+            aggregate_verification = _run_prompt(
+                client,
+                prompt_hashes=prompt_hashes,
+                prompt_name="aggregate_verification",
+                output_type=ConfidenceReport,
+                user_prompt=_aggregate_verification_prompt(
+                    task,
+                    best_attempt,
+                    sql_reference_context,
+                    docs_context,
+                    reason=verification_reason,
+                ),
+            )
+            aggregate_verification_payload = {
+                "reason": verification_reason,
+                **aggregate_verification.model_dump(mode="json"),
+            }
+            best_attempt["aggregate_verification"] = aggregate_verification_payload
+            logger.info(
+                "aggregate verification reviewed",
+                instance_id=task.instance_id,
+                should_repair=aggregate_verification.should_repair,
+                confidence=aggregate_verification.confidence,
+                issues=aggregate_verification.issues,
+                repair_focus=aggregate_verification.repair_focus,
+            )
+            if aggregate_verification.should_repair:
+                logger.info(
+                    "aggregate repair requested",
+                    instance_id=task.instance_id,
+                    stage="aggregate_repair",
+                    focus=aggregate_verification.repair_focus,
+                )
+                repaired_candidate = _run_prompt(
+                    client,
+                    prompt_hashes=prompt_hashes,
+                    prompt_name="sql_repair",
+                    output_type=SQLCandidate,
+                    user_prompt=_aggregate_repair_prompt(
+                        task,
+                        best_attempt,
+                        aggregate_verification,
+                        sql_reference_context,
+                        docs_context,
+                    ),
+                )
+                attempt = _evaluate_candidate(
+                    task=task,
+                    candidate=repaired_candidate,
+                    schema=schema,
+                    table_schemas=table_schemas,
+                    stage="aggregate_repair",
+                )
+                attempts.append(attempt)
+                logger.info(
+                    "candidate evaluated",
+                    instance_id=task.instance_id,
+                    stage="aggregate_repair",
+                    validation_ok=attempt["validation"]["ok"],
+                    execution_ok=attempt["execution_result"]["ok"],
+                    score=attempt["score"],
+                    elapsed_seconds=attempt["elapsed_seconds"],
+                    row_count=attempt["execution_result"]["row_count"],
+                )
+                if attempt["execution_result"]["ok"]:
+                    best_attempt = attempt
+                else:
+                    best_attempt = _best_attempt(attempts)
 
     if (
         best_attempt is not None
@@ -559,6 +643,8 @@ def run_task(
     }
     if candidate_comparison_payload is not None:
         trace_payload["candidate_comparison"] = candidate_comparison_payload
+    if aggregate_verification_payload is not None:
+        trace_payload["aggregate_verification"] = aggregate_verification_payload
     if live_logging_enabled:
         trace_payload["llm_call_log_path"] = str(task_llm_log_path)
 
@@ -776,6 +862,63 @@ def _comparison_attempt_summary(attempt: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _aggregate_verification_reason(attempt: dict[str, Any]) -> str | None:
+    """Return a reason when an aggregate result looks suspiciously small."""
+
+    execution = attempt["execution_result"]
+    if not execution["ok"]:
+        return None
+    sql = str(attempt["sql"]).lower()
+    if not _looks_aggregate_query(sql):
+        return None
+
+    sample_rows = execution.get("sample_rows") or []
+    if not sample_rows:
+        return None
+
+    first_row = sample_rows[0]
+    numeric_values = [
+        value
+        for value in (_coerce_number(item) for item in first_row.values())
+        if value is not None
+    ]
+    if not numeric_values:
+        return None
+
+    row_count = int(execution.get("row_count") or 0)
+    max_value = max(numeric_values)
+    if row_count == 1 and max_value <= 1:
+        return "Aggregate query returned a single very small numeric result."
+    if row_count <= 2 and max_value <= 2:
+        return "Aggregate query returned only tiny numeric results."
+    return None
+
+
+def _looks_aggregate_query(sql: str) -> bool:
+    """Heuristically detect aggregate queries that deserve extra scrutiny."""
+
+    normalized = " ".join(sql.split())
+    return any(
+        keyword in normalized
+        for keyword in (" count(", " sum(", " avg(", " min(", " max(", " group by ", " having ")
+    )
+
+
+def _coerce_number(value: Any) -> float | None:
+    """Convert one value to a number when it looks numeric."""
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, Number):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
 def _trace_attempt(attempt: dict[str, Any]) -> dict[str, Any]:
     """Drop non-serializable internal fields before writing the trace."""
 
@@ -929,6 +1072,33 @@ def _critic_prompt(task: Task, attempt: dict[str, Any], sql_reference_context: s
     )
 
 
+def _aggregate_verification_prompt(
+    task: Task,
+    attempt: dict[str, Any],
+    sql_reference_context: str,
+    docs_context: str,
+    *,
+    reason: str,
+) -> str:
+    """Build the verification prompt for suspicious aggregate outputs."""
+
+    return (
+        f"{sql_reference_context}\n\n"
+        f"Document context:\n{docs_context}\n\n"
+        f"Question: {task.question}\n\n"
+        f"Suspicion: {reason}\n\n"
+        f"SQL:\n{attempt['sql']}\n\n"
+        "Execution result:\n"
+        f"{json.dumps(attempt['execution_result'], indent=2, sort_keys=True)}\n\n"
+        "Result profile:\n"
+        f"{json.dumps(attempt.get('result_profile', {}), indent=2, sort_keys=True)}\n\n"
+        "Check whether the aggregate output is plausible.\n"
+        "If the result looks too small, inspect nearby value variants, filter selectivity, "
+        "and the grain of the aggregation.\n"
+        "Recommend repair only when the result is not trustworthy."
+    )
+
+
 def _candidate_comparison_prompt(
     task: Task,
     intent: Intent,
@@ -951,6 +1121,29 @@ def _candidate_comparison_prompt(
         f"{json.dumps(comparison_candidates, indent=2, sort_keys=True)}\n\n"
         "Compare every executable candidate above and choose the one "
         "that best fits the answer contract."
+    )
+
+
+def _aggregate_repair_prompt(
+    task: Task,
+    attempt: dict[str, Any],
+    verification: ConfidenceReport,
+    sql_reference_context: str,
+    docs_context: str,
+) -> str:
+    """Build the repair prompt after aggregate verification fails."""
+
+    verification_json = json.dumps(verification.model_dump(mode="json"), indent=2, sort_keys=True)
+    execution_json = json.dumps(attempt["execution_result"], indent=2, sort_keys=True)
+    profile_json = json.dumps(attempt.get("result_profile", {}), indent=2, sort_keys=True)
+    return (
+        f"{sql_reference_context}\n\n"
+        f"Document context:\n{docs_context}\n\n"
+        f"Question: {task.question}\n\n"
+        f"Current SQL:\n{attempt['sql']}\n\n"
+        f"Verification:\n{verification_json}\n\n"
+        f"Execution result:\n{execution_json}\n\n"
+        f"Result profile:\n{profile_json}"
     )
 
 

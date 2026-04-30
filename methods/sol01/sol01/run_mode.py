@@ -342,10 +342,8 @@ def _run_stdout_lines(
     ]
     lines.extend(f"- ✅ {instance_id}" for instance_id in correct_ids)
     lines.extend(
-        (
-            f"- ❌ {instance_id} "
-            f"({_failure_category(per_instance.get(instance_id, {}), result_by_id.get(instance_id))})"
-        )
+        f"- ❌ {instance_id} "
+        f"({_failure_category(per_instance.get(instance_id, {}), result_by_id.get(instance_id))})"
         for instance_id in failed_ids
     )
     return lines

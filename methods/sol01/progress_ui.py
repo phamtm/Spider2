@@ -23,8 +23,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from sol01.category_metadata import (
-    CategoryMetadataValidationError,
     TIER_COMPLEXITY,
+    CategoryMetadataValidationError,
     load_category_metadata_map,
     tier_complexity_summary,
 )
@@ -402,7 +402,9 @@ def build_status_frame(
                 "score": _missing_to_na(record.score if record else pd.NA),
                 "timestamp": _missing_to_na(record.timestamp if record else pd.NA),
                 "run_id": _missing_to_na(record.run_id if record else pd.NA),
-                "db": _missing_to_na((record.db or info.get("db_id")) if record else info.get("db_id")),
+                "db": _missing_to_na(
+                    (record.db or info.get("db_id")) if record else info.get("db_id")
+                ),
                 "instruction": info.get("instruction", ""),
                 "note": _missing_to_na(record.note if record else pd.NA),
                 "source_path": _missing_to_na(record.source_path if record else pd.NA),
@@ -927,13 +929,17 @@ def select_question_row(frame: pd.DataFrame, instance_id: str | None) -> dict[st
     tier = row.get("primary_tier")
     row["primary_tier_label"] = _tier_display(tier)
     row["tags_label"] = ", ".join(_normalize_tag_values(row.get("tags"))) or "—"
-    row["instruction"] = "" if _is_missing_value(row.get("instruction")) else str(row.get("instruction"))
+    row["instruction"] = (
+        "" if _is_missing_value(row.get("instruction")) else str(row.get("instruction"))
+    )
     row["note"] = "" if _is_missing_value(row.get("note")) else str(row.get("note"))
     row["difficulty_notes"] = (
         "" if _is_missing_value(row.get("difficulty_notes")) else str(row.get("difficulty_notes"))
     )
     row["db"] = "" if _is_missing_value(row.get("db")) else str(row.get("db"))
-    row["source_path"] = "" if _is_missing_value(row.get("source_path")) else str(row.get("source_path"))
+    row["source_path"] = (
+        "" if _is_missing_value(row.get("source_path")) else str(row.get("source_path"))
+    )
     return row
 
 
