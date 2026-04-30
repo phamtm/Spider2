@@ -1192,7 +1192,6 @@ def main() -> None:
             default=[],
             help="Leave empty to include every tier.",
         )
-        render_tier_guide(selected_tiers)
         selected_tags = st.multiselect(
             "Tags",
             options=available_tags,
@@ -1212,7 +1211,6 @@ def main() -> None:
         selected_tiers=selected_tiers,
         selected_tags=selected_tags,
     )
-    selected_instance_ids = set(frame["instance_id"]) if not frame.empty else set()
 
     summary = compute_overall_summary(frame)
     total = summary["total"]
@@ -1222,18 +1220,22 @@ def main() -> None:
     answered_score = summary["coverage_pct"]
     correct_score = summary["accuracy_pct"]
 
-    st.title(f"{answered} of {total} questions answered, {correct} correct ({correct_score:.1f}%)")
     overview_tab, questions_tab = st.tabs(["Overview", "Questions"])
 
     with overview_tab:
+        st.header("Spider2-Snowflake Progress")
         st.caption(f"Dataset: `{dataset_path}`  |  Results: `{source_path}`")
 
-        cols = st.columns(5)
-        cols[0].metric("Questions", f"{total:,}")
-        cols[1].metric("Coverage", f"{answered_score:.1f}%", f"{answered:,} answered")
-        cols[2].metric("Accuracy", f"{correct_score:.1f}%", f"{correct:,} correct")
-        cols[3].metric("Incorrect", f"{incorrect:,}")
-        cols[4].metric("Unanswered", f"{summary['unanswered']:,}")
+        cols = st.columns(4)
+        cols[0].metric("Coverage", f"{answered_score:.1f}%", f"{answered:,} answered")
+        cols[1].metric("Accuracy", f"{correct_score:.1f}%", f"{correct:,} correct")
+        cols[2].metric("Total", f"{total:,}")
+        cols[3].metric("Answered", f"{answered:,}")
+
+        cols = st.columns(3)
+        cols[0].metric("Correct", f"{correct:,}")
+        cols[1].metric("Incorrect", f"{incorrect:,}")
+        cols[2].metric("Unanswered", f"{summary['unanswered']:,}")
 
         focus = recommend_focus(frame)
         focus_cols = st.columns([2, 1])
@@ -1245,23 +1247,50 @@ def main() -> None:
             st.metric("Coverage", f"{focus['coverage_pct']:.1f}%")
             st.metric("Accuracy", f"{focus['accuracy_pct']:.1f}%")
 
-        st.subheader("Progress chart")
-        chart_empty_message = (
-            "No questions match the current filters."
-            if frame.empty
-            else "No progress records found for the current slice."
-        )
-        render_chart(
-            make_progress_frame_for_ids(records, len(frame), selected_instance_ids),
-            empty_message=chart_empty_message,
-        )
+        tier_summary = compute_tier_summary(frame)
+        tag_summary = compute_tag_summary(frame)
 
-        with st.expander("Run context"):
-            st.write(f"Dataset: `{dataset_path}`")
-            st.write(f"Results source: `{source_path}`")
-            if not available_tiers or not available_tags:
-                st.caption("Category metadata is unavailable for the current dataset.")
-            render_tier_guide(selected_tiers)
+        st.subheader("Tier progress")
+        if tier_summary.empty:
+            st.info("No tier data available for the current slice.")
+        else:
+            st.dataframe(
+                tier_summary[
+                    [
+                        "tier_label",
+                        "total",
+                        "answered",
+                        "correct",
+                        "incorrect",
+                        "unanswered",
+                        "coverage_pct",
+                        "accuracy_pct",
+                    ]
+                ],
+                width="stretch",
+                hide_index=True,
+            )
+
+        st.subheader("Tag progress")
+        if tag_summary.empty:
+            st.info("No tag data available for the current slice.")
+        else:
+            st.dataframe(
+                tag_summary[
+                    [
+                        "tag_label",
+                        "total",
+                        "answered",
+                        "correct",
+                        "incorrect",
+                        "unanswered",
+                        "coverage_pct",
+                        "accuracy_pct",
+                    ]
+                ],
+                width="stretch",
+                hide_index=True,
+            )
 
     with questions_tab:
         render_status_legend()
