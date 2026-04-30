@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, TypeVar
@@ -14,6 +14,7 @@ from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from sol01.config import RuntimeConfig
@@ -241,13 +242,19 @@ def build_model_settings(config: RuntimeConfig) -> dict[str, Any]:
 def build_model(config: RuntimeConfig, *, model_name: str | None = None) -> OpenAIChatModel:
     """Create the OpenAI-compatible chat model that points at OpenRouter."""
 
+    resolved_model_name = model_name or config.model
     provider = OpenAIProvider(
         base_url=config.base_url,
         api_key=config.api_key,
     )
+    profile = replace(
+        OpenAIModelProfile.from_profile(provider.model_profile(resolved_model_name)),
+        openai_chat_send_back_thinking_parts="tags",
+    )
     return OpenAIChatModel(
-        model_name or config.model,
+        resolved_model_name,
         provider=provider,
+        profile=profile,
         settings=build_model_settings(config),
     )
 

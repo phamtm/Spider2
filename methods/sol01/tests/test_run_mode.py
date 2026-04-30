@@ -93,7 +93,9 @@ def test_run_persisted_mode_exact_selector_updates_registry_and_logs(
     assert (tmp_path / result["run_id"] / "logs" / "stderr.txt").exists()
     assert (tmp_path / result["run_id"] / "logs" / "run.jsonl").exists()
     output = capsys.readouterr().out
-    assert "Run ID: run-sf-local003-260429.1200" in output
+    assert f"Run path: {tmp_path / result['run_id']}" in output
+    assert "Summary: 1 / 1 correct" in output
+    assert "- ✅ sf_local003" in output
     assert "Exec time:" in output
     run_events = [
         json.loads(line)
@@ -397,6 +399,97 @@ def test_run_persisted_mode_marks_eval_failed_rows_in_registry(
     records = captured["records"]
     assert records[0].eval_status == "failed"
     assert records[0].eval_error == "eval_failed"
+
+
+def test_run_stdout_lines_sort_outcomes_and_show_failure_categories(tmp_path: Path):
+    timeout_trace = tmp_path / "sf_local002.json"
+    timeout_trace.write_text('{"error_type": "TimeoutError"}\n', encoding="utf-8")
+
+    tasks = [
+        Task(instance_id="sf_local004", db="DB", question="Question 4"),
+        Task(instance_id="sf_local002", db="DB", question="Question 2"),
+        Task(instance_id="sf_local001", db="DB", question="Question 1"),
+        Task(instance_id="sf_local003", db="DB", question="Question 3"),
+    ]
+    results = [
+        FinalAnswer(
+            instance_id="sf_local004",
+            status="success",
+            sql="SELECT 1",
+            csv_path=str(tmp_path / "sf_local004.csv"),
+            trace_path=str(tmp_path / "sf_local004.json"),
+        ),
+        FinalAnswer(
+            instance_id="sf_local002",
+            status="failed",
+            sql=None,
+            csv_path=None,
+            trace_path=str(timeout_trace),
+        ),
+        FinalAnswer(
+            instance_id="sf_local001",
+            status="success",
+            sql="SELECT 1",
+            csv_path=str(tmp_path / "sf_local001.csv"),
+            trace_path=str(tmp_path / "sf_local001.json"),
+        ),
+        FinalAnswer(
+            instance_id="sf_local003",
+            status="success",
+            sql="SELECT 1",
+            csv_path=str(tmp_path / "sf_local003.csv"),
+            trace_path=str(tmp_path / "sf_local003.json"),
+        ),
+    ]
+    eval_summary = {
+        "attempted_tasks": 3,
+        "correct_tasks": 2,
+        "per_instance": [
+            {
+                "instance_id": "sf_local004",
+                "score": 1,
+                "passed": True,
+                "csv_present": True,
+                "failure_reason": None,
+            },
+            {
+                "instance_id": "sf_local003",
+                "score": 0,
+                "passed": False,
+                "csv_present": True,
+                "failure_reason": "official_fail",
+            },
+            {
+                "instance_id": "sf_local001",
+                "score": 1,
+                "passed": True,
+                "csv_present": True,
+                "failure_reason": None,
+            },
+            {
+                "instance_id": "sf_local002",
+                "score": None,
+                "passed": False,
+                "csv_present": False,
+                "failure_reason": "missing_csv",
+            },
+        ],
+    }
+
+    assert run_mode._run_stdout_lines(
+        run_path=tmp_path / "run-tier-1",
+        tasks=tasks,
+        results=results,
+        eval_summary=eval_summary,
+    ) == [
+        f"Run path: {tmp_path / 'run-tier-1'}",
+        "Task count: 4",
+        "Summary: 2 / 4 correct",
+        "- ✅ sf_local001",
+        "- ✅ sf_local004",
+        "- ❌ sf_local002 (timeout)",
+        "- ❌ sf_local003 (incorrect)",
+    ]
 
 
 def test_run_persisted_mode_rejects_run_id_collisions(

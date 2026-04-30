@@ -6,9 +6,10 @@ import json
 from pathlib import Path
 
 from pydantic import BaseModel
-from pydantic_ai import PromptedOutput
+from pydantic_ai import ModelResponse, PromptedOutput, ThinkingPart
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.models.test import TestModel
+from pydantic_ai.profiles.openai import OpenAIModelProfile
 
 from sol01.config import RuntimeConfig
 from sol01.llm import LLMClient, build_model, build_model_settings, prompt_sha256
@@ -108,6 +109,9 @@ def test_build_model_uses_openrouter_wrapper_for_string_override():
     model = build_model(config, model_name="deepseek/custom-model")
 
     assert model.model_name == "deepseek/custom-model"
+    profile = OpenAIModelProfile.from_profile(model.profile)
+    assert profile.supports_json_object_output is True
+    assert profile.openai_chat_send_back_thinking_parts == "tags"
     assert model.settings == {
         "extra_body": {
             "provider": {
@@ -116,6 +120,27 @@ def test_build_model_uses_openrouter_wrapper_for_string_override():
             }
         }
     }
+
+
+def test_build_model_maps_reasoning_retries_to_text_content():
+    config = RuntimeConfig(api_key="test-key")
+    model = build_model(config)
+
+    context = model._MapModelResponseContext(model)
+    message = context.map_assistant_message(
+        ModelResponse(
+            parts=[
+                ThinkingPart(
+                    id="reasoning",
+                    content='{"value":"hello"}',
+                    provider_name=model.system,
+                )
+            ]
+        )
+    )
+
+    assert message["content"] == '<think>\n{"value":"hello"}\n</think>'
+    assert "reasoning" not in message
 
 
 def test_llm_client_uses_prompted_output_for_structured_calls(monkeypatch):

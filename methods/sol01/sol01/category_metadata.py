@@ -16,6 +16,79 @@ CATEGORY_BATCHES_DIR = REPO_ROOT / "methods" / "sol01" / "metadata" / "category_
 CATEGORY_METADATA_PATH = REPO_ROOT / "methods" / "sol01" / "metadata" / "category_metadata.jsonl"
 logger = get_logger(__name__)
 
+TIER_COMPLEXITY = {
+    1: "Simple lookup or single-step aggregate. Usually one table and one obvious filter.",
+    2: (
+        "Straightforward multi-step query. Usually one join, modest filtering, "
+        "or a simple grouped result."
+    ),
+    3: (
+        "Multi-step reasoning. Common examples are ranking, window functions, "
+        "temporal rollups, cohort logic, or external notes."
+    ),
+    4: (
+        "Hard query. Usually mixes several advanced patterns, such as nested "
+        "aggregation, geospatial logic, multi-hop joins, or multiple time-based "
+        "transformations."
+    ),
+    5: (
+        "Harder multi-step query. Usually combines joins, filtering, ranking, "
+        "or grouped comparisons."
+    ),
+    6: (
+        "Advanced reasoning. Usually adds deeper joins, temporal logic, or cross-table aggregation."
+    ),
+    7: (
+        "Advanced multi-step query. Often needs nested ranking, cohort-style "
+        "analysis, or multi-scale rollups."
+    ),
+    8: (
+        "Very hard query. Usually mixes multiple advanced patterns such as "
+        "joins, temporal windows, or nested aggregation."
+    ),
+    9: (
+        "Expert-level query. Often requires layered filters, ranking passes, "
+        "or compound grouping logic."
+    ),
+    10: (
+        "Expert-level reasoning. Usually adds time-series windows, moving "
+        "calculations, or external constraints."
+    ),
+    11: (
+        "Very complex query. Often involves hierarchical or recursive style "
+        "reasoning with several transformations."
+    ),
+    12: (
+        "Hardest queries in the current set. Usually combine several advanced "
+        "steps, such as nested state, cumulative allocation, or forecasting-style "
+        "logic."
+    ),
+}
+
+TIER_COMPLEXITY_FALLBACK = (
+    "Tier is the question complexity score. Higher tiers usually mean "
+    "more reasoning steps, joins, or transformations."
+)
+
+
+def tier_complexity_summary(selected_tiers: Iterable[int]) -> str:
+    """Render the selected tier descriptions from the shared tier map."""
+
+    selected: list[str] = []
+    for tier in selected_tiers:
+        try:
+            tier_number = int(tier)
+        except (TypeError, ValueError):
+            continue
+        description = TIER_COMPLEXITY.get(tier_number)
+        if description:
+            selected.append(f"Tier {tier_number}: {description}")
+
+    if not selected:
+        return TIER_COMPLEXITY_FALLBACK
+
+    return "Selected tier complexity: " + " ".join(selected)
+
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 KNOWN_CATEGORY_TAGS = frozenset(
     {

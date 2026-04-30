@@ -14,6 +14,7 @@ from progress_ui import (
     compute_tier_summary,
     format_question_option,
     format_tier_summary,
+    latest_records,
     make_progress_frame_for_ids,
     prepare_debug_frame,
     prepare_display_frame,
@@ -21,6 +22,8 @@ from progress_ui import (
     recommend_focus,
     select_question_row,
     should_show_all_questions,
+    _status_dot_label,
+    _status_dot_style,
 )
 
 
@@ -65,6 +68,23 @@ def test_build_status_frame_joins_category_metadata():
     assert row_b["tags"] == []
     assert pd.isna(row_b["difficulty_notes"])
     assert bool(row_b["category_available"]) is False
+
+
+def test_build_status_frame_uses_nullable_missing_values():
+    dataset = pd.DataFrame([{"instance_id": "sf_a", "instruction": "q1"}])
+
+    frame = build_status_frame(dataset, [], None)
+
+    row = frame.loc[frame["instance_id"] == "sf_a"].iloc[0]
+
+    assert pd.isna(row["score"])
+    assert pd.isna(row["timestamp"])
+    assert pd.isna(row["run_id"])
+    assert pd.isna(row["db"])
+    assert pd.isna(row["note"])
+    assert pd.isna(row["source_path"])
+    assert pd.isna(row["primary_tier"])
+    assert pd.isna(row["difficulty_notes"])
 
 
 def test_apply_frame_filters_uses_and_tags_and_skips_uncategorized_only_when_needed():
@@ -118,6 +138,46 @@ def test_apply_frame_filters_uses_and_tags_and_skips_uncategorized_only_when_nee
     assert list(filtered["instance_id"]) == ["sf_a", "sf_b", "sf_c"]
 
 
+def test_apply_frame_filters_supports_scoped_search():
+    frame = pd.DataFrame(
+        [
+            {
+                "instance_id": "sf_a",
+                "status": "correct",
+                "primary_tier": 3,
+                "tags": ["aggregation", "temporal"],
+                "category_available": True,
+                "db": "DB_A",
+                "instruction": "alpha",
+                "note": "first",
+                "difficulty_notes": "note",
+            },
+            {
+                "instance_id": "sf_b",
+                "status": "correct",
+                "primary_tier": 4,
+                "tags": ["comparison"],
+                "category_available": True,
+                "db": "DB_B",
+                "instruction": "beta",
+                "note": "second",
+                "difficulty_notes": None,
+            },
+        ]
+    )
+
+    filtered = apply_frame_filters(frame, search="id:sf_b")
+
+    assert list(filtered["instance_id"]) == ["sf_b"]
+
+
+def test_status_dot_helpers_render_colored_labels():
+    assert _status_dot_label("Correct") == "● Correct"
+    assert _status_dot_label("Incorrect") == "● Incorrect"
+    assert "color: #22c55e" in _status_dot_style("Correct")
+    assert "color: #ef4444" in _status_dot_style("Incorrect")
+
+
 def test_apply_frame_filters_excludes_missing_metadata_when_category_filters_are_active():
     frame = pd.DataFrame(
         [
@@ -149,6 +209,36 @@ def test_apply_frame_filters_excludes_missing_metadata_when_category_filters_are
     filtered = apply_frame_filters(frame, selected_tiers=[3])
 
     assert list(filtered["instance_id"]) == ["sf_a"]
+
+
+def test_latest_records_prefers_sorted_timestamp_order_over_input_order():
+    records = [
+        Record(
+            instance_id="sf_a",
+            status="incorrect",
+            score=0.0,
+            timestamp=datetime(2026, 4, 29, tzinfo=UTC),
+            run_id="run-1",
+            db="DB",
+            note=None,
+            source_path="/tmp/older.json",
+        ),
+        Record(
+            instance_id="sf_a",
+            status="correct",
+            score=1.0,
+            timestamp=datetime(2026, 4, 30, tzinfo=UTC),
+            run_id="run-2",
+            db="DB",
+            note=None,
+            source_path="/tmp/newer.json",
+        ),
+    ]
+
+    latest = latest_records(records)
+
+    assert latest["sf_a"].status == "correct"
+    assert latest["sf_a"].source_path == "/tmp/newer.json"
 
 
 def test_build_status_frame_handles_empty_results_and_missing_metadata():

@@ -16,6 +16,7 @@ from sol01.config import DEFAULT_DOTENV_PATH, RuntimeConfig
 from sol01.coordinator import run_tasks
 from sol01.eval_runner import run_persisted_eval
 from sol01.logging import get_logger
+from sol01.models import FinalAnswer, Task
 from sol01.output import (
     OUTPUTS_ROOT,
     ensure_run_paths,
@@ -143,17 +144,12 @@ def run_persisted_mode(
             },
         )
 
-        stdout_lines = [
-            f"Run ID: {effective_run_id}",
-            f"Run path: {run_paths.root}",
-            f"Task count: {len(tasks)}",
-            (
-                "Summary: "
-                f"{eval_summary['correct_tasks']}/{eval_summary['attempted_tasks']} correct, "
-                f"{sum(1 for row in eval_summary['per_instance'] if row.get('passed'))} passed, "
-                f"{sum(1 for row in eval_summary['per_instance'] if not row.get('passed'))} failed"
-            ),
-        ]
+        stdout_lines = _run_stdout_lines(
+            run_path=run_paths.root,
+            tasks=tasks,
+            results=results,
+            eval_summary=eval_summary,
+        )
         if len(tasks) == 1:
             stdout_lines.append(f"Exec time: {format_duration(perf_counter() - started_at)}")
         stdout_text = "\n".join(stdout_lines) + "\n"
@@ -316,6 +312,78 @@ def _update_registry(
             )
         )
     return record_registry_batch(records, outputs_root=outputs_root)
+
+
+def _run_stdout_lines(
+    *,
+    run_path: Path,
+    tasks: Sequence[Task],
+    results: Sequence[FinalAnswer],
+    eval_summary: dict[str, Any],
+) -> list[str]:
+    """Render the concise persisted-run stdout summary."""
+
+    task_ids = [task.instance_id for task in tasks]
+    per_instance = {
+        row["instance_id"]: row
+        for row in eval_summary.get("per_instance", [])
+        if row.get("instance_id")
+    }
+    result_by_id = {result.instance_id: result for result in results}
+    correct_ids = sorted(
+        instance_id for instance_id in task_ids if per_instance.get(instance_id, {}).get("passed")
+    )
+    failed_ids = sorted(instance_id for instance_id in task_ids if instance_id not in correct_ids)
+
+    lines = [
+        f"Run path: {run_path}",
+        f"Task count: {len(task_ids)}",
+        f"Summary: {len(correct_ids)} / {len(task_ids)} correct",
+    ]
+    lines.extend(f"- ✅ {instance_id}" for instance_id in correct_ids)
+    lines.extend(
+        (
+            f"- ❌ {instance_id} "
+            f"({_failure_category(per_instance.get(instance_id, {}), result_by_id.get(instance_id))})"
+        )
+        for instance_id in failed_ids
+    )
+    return lines
+
+
+def _failure_category(row: dict[str, Any], result: FinalAnswer | None) -> str:
+    """Return a short human-readable failure category for one task."""
+
+    if result is not None:
+        if result.status == "skipped":
+            return "skipped"
+        if result.status == "failed":
+            return _solver_failure_category(result)
+
+    failure_reason = str(row.get("failure_reason") or "")
+    if failure_reason == "eval_failed":
+        return "eval failed"
+    if failure_reason == "official_fail":
+        return "incorrect"
+    if failure_reason == "missing_csv":
+        return "missing csv"
+    if row.get("csv_present") is False:
+        return "missing csv"
+    if row.get("score") is not None:
+        return "incorrect"
+    return "failed"
+
+
+def _solver_failure_category(result: FinalAnswer) -> str:
+    """Classify solver failures from the saved trace when possible."""
+
+    try:
+        trace_text = Path(result.trace_path).read_text(encoding="utf-8").lower()
+    except OSError:
+        trace_text = ""
+    if "timeout" in trace_text or "timed out" in trace_text:
+        return "timeout"
+    return "crashed"
 
 
 def _reserve_run_root(run_id: str, *, outputs_root: Path) -> Path:

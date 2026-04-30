@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -122,6 +123,31 @@ def test_profile_dataframe_handles_duplicate_column_names():
     assert profile["distinct_counts"] == {"name": 3, "name__2": 3}
     assert profile["top_values"]["name"][0] == {"value": "alice", "count": 2}
     assert profile["top_values"]["name__2"][0] == {"value": "Sydney", "count": 2}
+
+
+def test_profile_dataframe_serializes_decimal_values():
+    dataframe = pd.DataFrame(
+        [
+            {"percentage": Decimal("78.15")},
+            {"percentage": Decimal("80.00")},
+            {"percentage": Decimal("78.15")},
+        ]
+    )
+
+    profile = profile_dataframe(dataframe, top_k=2)
+
+    assert profile["sample_rows"] == [
+        {"percentage": "78.15"},
+        {"percentage": "80.00"},
+        {"percentage": "78.15"},
+    ]
+    assert profile["min_values"] == {"percentage": "78.15"}
+    assert profile["max_values"] == {"percentage": "80.00"}
+    assert profile["top_values"]["percentage"] == [
+        {"value": "78.15", "count": 2},
+        {"value": "80.00", "count": 1},
+    ]
+    json.dumps(profile, sort_keys=True)
 
 
 def _write_credentials(path: Path, **extra: Any) -> Path:

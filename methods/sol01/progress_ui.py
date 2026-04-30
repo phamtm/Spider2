@@ -22,11 +22,18 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from sol01.category_metadata import CategoryMetadataValidationError, load_category_metadata_map
+from sol01.category_metadata import (
+    CategoryMetadataValidationError,
+    TIER_COMPLEXITY,
+    load_category_metadata_map,
+    tier_complexity_summary,
+)
+from sol01.logging import get_logger
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = ROOT / "spider2-snow" / "spider2-snow.jsonl"
 DEFAULT_SOURCE = ROOT / "methods" / "sol01" / "outputs" / "registry" / "latest.json"
+logger = get_logger(__name__)
 
 STATUS_ORDER = ("correct", "incorrect", "answered", "unanswered")
 STATUS_LABELS = {
@@ -52,55 +59,6 @@ TABLE_VISIBLE_ROWS = 50
 TABLE_HEIGHT = TABLE_VISIBLE_ROWS * TABLE_ROW_HEIGHT + 48
 SECTION_GAP = 24
 QUESTION_STATUS_ORDER = ("unanswered", "incorrect", "answered", "correct")
-
-TIER_COMPLEXITY = {
-    1: "Simple lookup or single-step aggregate. Usually one table and one obvious filter.",
-    2: (
-        "Straightforward multi-step query. Usually one join, modest filtering, "
-        "or a simple grouped result."
-    ),
-    3: (
-        "Multi-step reasoning. Common examples are ranking, window functions, "
-        "temporal rollups, cohort logic, or external notes."
-    ),
-    4: (
-        "Hard query. Usually mixes several advanced patterns, such as nested "
-        "aggregation, geospatial logic, multi-hop joins, or multiple time-based "
-        "transformations."
-    ),
-    5: (
-        "Harder multi-step query. Usually combines joins, filtering, ranking, "
-        "or grouped comparisons."
-    ),
-    6: (
-        "Advanced reasoning. Usually adds deeper joins, temporal logic, or cross-table aggregation."
-    ),
-    7: (
-        "Advanced multi-step query. Often needs nested ranking, cohort-style "
-        "analysis, or multi-scale rollups."
-    ),
-    8: (
-        "Very hard query. Usually mixes multiple advanced patterns such as "
-        "joins, temporal windows, or nested aggregation."
-    ),
-    9: (
-        "Expert-level query. Often requires layered filters, ranking passes, "
-        "or compound grouping logic."
-    ),
-    10: (
-        "Expert-level reasoning. Usually adds time-series windows, moving "
-        "calculations, or external constraints."
-    ),
-    11: (
-        "Very complex query. Often involves hierarchical or recursive style "
-        "reasoning with several transformations."
-    ),
-    12: (
-        "Hardest queries in the current set. Usually combine several advanced "
-        "steps, such as nested state, cumulative allocation, or forecasting-style "
-        "logic."
-    ),
-}
 
 
 @dataclass(frozen=True)
@@ -134,7 +92,10 @@ def read_json(path: Path) -> Any:
     try:
         with path.open("r", encoding="utf-8") as file:
             return json.load(file)
-    except (json.JSONDecodeError, FileNotFoundError):
+    except json.JSONDecodeError as exc:
+        logger.warning("skipping corrupted json result file", path=str(path), error=str(exc))
+        return {}
+    except FileNotFoundError:
         return {}
 
 
@@ -142,12 +103,18 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows = []
     try:
         with path.open("r", encoding="utf-8") as file:
-            for line in file:
+            for line_number, line in enumerate(file, start=1):
                 line = line.strip()
                 if line:
                     try:
                         rows.append(json.loads(line))
-                    except json.JSONDecodeError:
+                    except json.JSONDecodeError as exc:
+                        logger.warning(
+                            "skipping corrupted jsonl row",
+                            path=str(path),
+                            line_number=line_number,
+                            error=str(exc),
+                        )
                         continue
     except FileNotFoundError:
         pass
@@ -294,7 +261,8 @@ def records_from_json(path: Path) -> list[Record]:
 def records_from_csv(path: Path) -> list[Record]:
     try:
         frame = pd.read_csv(path)
-    except Exception:
+    except Exception as exc:
+        logger.warning("skipping corrupted csv result file", path=str(path), error=str(exc))
         return []
 
     if frame.empty:
@@ -395,13 +363,20 @@ def load_category_metadata_rows(dataset_path: str) -> dict[str, dict[str, Any]]:
 
 def latest_records(records: list[Record]) -> dict[str, Record]:
     latest: dict[str, Record] = {}
-    for index, record in enumerate(records):
-        current = latest.get(record.instance_id)
-        current_time = current.timestamp if current else None
-        record_time = record.timestamp or datetime.fromtimestamp(index, tz=UTC)
-        if current is None or current_time is None or record_time >= current_time:
-            latest[record.instance_id] = record
+    for _index, record in sorted(
+        enumerate(records),
+        key=lambda pair: (_record_timestamp_sort_key(pair[1].timestamp, pair[0]), pair[0]),
+    ):
+        latest[record.instance_id] = record
     return latest
+
+
+def _record_timestamp_sort_key(timestamp: datetime | None, fallback_index: int) -> datetime:
+    if timestamp is None:
+        return datetime.fromtimestamp(fallback_index, tz=UTC)
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=UTC)
+    return timestamp
 
 
 def build_status_frame(
@@ -424,16 +399,18 @@ def build_status_frame(
             {
                 "instance_id": instance_id,
                 "status": record.status if record else "unanswered",
-                "score": record.score if record else None,
-                "timestamp": record.timestamp if record else None,
-                "run_id": record.run_id if record else None,
-                "db": record.db or info.get("db_id") if record else info.get("db_id"),
+                "score": _missing_to_na(record.score if record else pd.NA),
+                "timestamp": _missing_to_na(record.timestamp if record else pd.NA),
+                "run_id": _missing_to_na(record.run_id if record else pd.NA),
+                "db": _missing_to_na((record.db or info.get("db_id")) if record else info.get("db_id")),
                 "instruction": info.get("instruction", ""),
-                "note": record.note if record else None,
-                "source_path": record.source_path if record else None,
-                "primary_tier": category["primary_tier"] if category else None,
+                "note": _missing_to_na(record.note if record else pd.NA),
+                "source_path": _missing_to_na(record.source_path if record else pd.NA),
+                "primary_tier": _missing_to_na(category["primary_tier"] if category else pd.NA),
                 "tags": list(category["tags"]) if category else [],
-                "difficulty_notes": category["difficulty_notes"] if category else None,
+                "difficulty_notes": _missing_to_na(
+                    category["difficulty_notes"] if category else pd.NA
+                ),
                 "category_available": category is not None,
             }
         )
@@ -446,16 +423,18 @@ def build_status_frame(
             {
                 "instance_id": instance_id,
                 "status": record.status,
-                "score": record.score,
-                "timestamp": record.timestamp,
-                "run_id": record.run_id,
-                "db": record.db,
+                "score": _missing_to_na(record.score),
+                "timestamp": _missing_to_na(record.timestamp),
+                "run_id": _missing_to_na(record.run_id),
+                "db": _missing_to_na(record.db),
                 "instruction": "",
-                "note": record.note,
-                "source_path": record.source_path,
-                "primary_tier": category["primary_tier"] if category else None,
+                "note": _missing_to_na(record.note),
+                "source_path": _missing_to_na(record.source_path),
+                "primary_tier": _missing_to_na(category["primary_tier"] if category else pd.NA),
                 "tags": list(category["tags"]) if category else [],
-                "difficulty_notes": category["difficulty_notes"] if category else None,
+                "difficulty_notes": _missing_to_na(
+                    category["difficulty_notes"] if category else pd.NA
+                ),
                 "category_available": category is not None,
             }
         )
@@ -496,6 +475,12 @@ def _is_missing_value(value: Any) -> bool:
         return value == ""
     missing = pd.isna(value)
     return bool(missing) if isinstance(missing, (bool, int)) else False
+
+
+def _missing_to_na(value: Any) -> Any:
+    if _is_missing_value(value):
+        return pd.NA
+    return value
 
 
 def compute_overall_summary(frame: pd.DataFrame) -> dict[str, Any]:
@@ -921,7 +906,7 @@ def format_question_option(row: pd.Series | dict[str, Any]) -> str:
     if not _is_missing_value(tier):
         parts.append(_tier_display(tier))
     db = data.get("db")
-    if db:
+    if not _is_missing_value(db):
         parts.append(str(db))
     instruction = _truncate_text(data.get("instruction"), 80)
     if instruction:
@@ -942,11 +927,13 @@ def select_question_row(frame: pd.DataFrame, instance_id: str | None) -> dict[st
     tier = row.get("primary_tier")
     row["primary_tier_label"] = _tier_display(tier)
     row["tags_label"] = ", ".join(_normalize_tag_values(row.get("tags"))) or "—"
-    row["instruction"] = str(row.get("instruction") or "")
-    row["note"] = str(row.get("note") or "")
-    row["difficulty_notes"] = str(row.get("difficulty_notes") or "")
-    row["db"] = str(row.get("db") or "")
-    row["source_path"] = str(row.get("source_path") or "")
+    row["instruction"] = "" if _is_missing_value(row.get("instruction")) else str(row.get("instruction"))
+    row["note"] = "" if _is_missing_value(row.get("note")) else str(row.get("note"))
+    row["difficulty_notes"] = (
+        "" if _is_missing_value(row.get("difficulty_notes")) else str(row.get("difficulty_notes"))
+    )
+    row["db"] = "" if _is_missing_value(row.get("db")) else str(row.get("db"))
+    row["source_path"] = "" if _is_missing_value(row.get("source_path")) else str(row.get("source_path"))
     return row
 
 
@@ -997,17 +984,38 @@ def render_question_detail(row: dict[str, Any] | None) -> None:
     detail_cols = st.columns(4)
     detail_cols[0].metric("Status", row["status_label"])
     detail_cols[1].metric("Tier", row["primary_tier_label"])
-    detail_cols[2].metric("DB", row["db"] or "—")
+    detail_cols[2].metric("DB", row["db"] if not _is_missing_value(row["db"]) else "—")
     detail_cols[3].metric("Score", "" if pd.isna(row.get("score")) else f"{row['score']}")
 
-    st.markdown(f"**Question**\n\n{row.get('instruction') or '—'}")
+    st.markdown(
+        f"**Question**\n\n"
+        f"{row.get('instruction') if not _is_missing_value(row.get('instruction')) else '—'}"
+    )
     st.markdown(f"**Tags**\n\n{row['tags_label']}")
 
     extra_cols = st.columns(2)
-    extra_cols[0].markdown(f"**Note**\n\n{row['note'] or '—'}")
-    extra_cols[1].markdown(f"**Difficulty notes**\n\n{row['difficulty_notes'] or '—'}")
+    extra_cols[0].markdown(
+        f"**Note**\n\n{row['note'] if not _is_missing_value(row['note']) else '—'}"
+    )
+    extra_cols[1].markdown(
+        f"**Difficulty notes**\n\n"
+        f"{row['difficulty_notes'] if not _is_missing_value(row['difficulty_notes']) else '—'}"
+    )
 
-    st.markdown(f"**Source**: `{row['source_path'] or '—'}`")
+    st.markdown(
+        f"**Source**: `{row['source_path'] if not _is_missing_value(row['source_path']) else '—'}`"
+    )
+
+
+def _status_dot_label(status: str) -> str:
+    label = STATUS_LABELS.get(str(status).lower(), str(status))
+    return f"● {label}" if label else label
+
+
+def _status_dot_style(status: object) -> str:
+    key = str(status).split(" ", 1)[-1].lower()
+    color = STATUS_COLORS.get(key, "#9ca3af")
+    return f"color: {color}; font-weight: 600;"
 
 
 def build_run_command(dataset_path: Path, source_path: Path) -> str:
@@ -1035,23 +1043,14 @@ def apply_frame_filters(
     filtered = frame
 
     if search:
-        search_columns = [
-            column
-            for column in (
-                "instance_id",
-                "db",
-                "instruction",
-                "note",
-                "primary_tier",
-                "tags",
-                "difficulty_notes",
-            )
-            if column in filtered.columns
-        ]
+        search_scope, search_term = _parse_search_scope(search)
+        search_columns = _search_columns_for_scope(filtered, search_scope)
+        if not search_columns:
+            return filtered.iloc[0:0]
         search_mask = (
             filtered[search_columns]
             .astype(str)
-            .apply(lambda col: col.str.contains(search, case=False, na=False))
+            .apply(lambda col: col.str.contains(search_term, case=False, na=False))
             .any(axis=1)
         )
         filtered = filtered[search_mask]
@@ -1074,26 +1073,56 @@ def apply_frame_filters(
     return filtered
 
 
+def _parse_search_scope(search: str) -> tuple[str | None, str]:
+    """Split an optional `scope:value` query into its parts."""
+
+    text = search.strip()
+    if ":" not in text:
+        return None, text
+
+    scope, term = text.split(":", 1)
+    scope = scope.strip().lower()
+    term = term.strip()
+    if scope in {"id", "db", "instruction", "note", "tier", "tags", "notes"} and term:
+        return scope, term
+    return None, text
+
+
+def _search_columns_for_scope(frame: pd.DataFrame, scope: str | None) -> list[str]:
+    """Return searchable columns for the current scope."""
+
+    if scope == "id":
+        return [column for column in ("instance_id",) if column in frame.columns]
+    if scope == "db":
+        return [column for column in ("db",) if column in frame.columns]
+    if scope == "instruction":
+        return [column for column in ("instruction",) if column in frame.columns]
+    if scope == "note":
+        return [column for column in ("note", "difficulty_notes") if column in frame.columns]
+    if scope == "notes":
+        return [column for column in ("note", "difficulty_notes") if column in frame.columns]
+    if scope == "tier":
+        return [column for column in ("primary_tier",) if column in frame.columns]
+    if scope == "tags":
+        return [column for column in ("tags",) if column in frame.columns]
+
+    return [
+        column
+        for column in (
+            "instance_id",
+            "db",
+            "instruction",
+            "note",
+            "primary_tier",
+            "tags",
+            "difficulty_notes",
+        )
+        if column in frame.columns
+    ]
+
+
 def format_tier_summary(selected_tiers: list[int]) -> str:
-    if not selected_tiers:
-        return (
-            "Tier is the question complexity score. Higher tiers usually mean "
-            "more reasoning steps, joins, or transformations."
-        )
-
-    selected = []
-    for tier in selected_tiers:
-        description = TIER_COMPLEXITY.get(tier)
-        if description:
-            selected.append(f"Tier {tier}: {description}")
-
-    if not selected:
-        return (
-            "Tier is the question complexity score. Higher tiers usually mean "
-            "more reasoning steps, joins, or transformations."
-        )
-
-    return "Selected tier complexity: " + " ".join(selected)
+    return tier_complexity_summary(selected_tiers)
 
 
 def render_tier_guide(selected_tiers: list[int]) -> None:
@@ -1101,10 +1130,6 @@ def render_tier_guide(selected_tiers: list[int]) -> None:
     with st.expander("Tier guide", expanded=bool(selected_tiers)):
         for tier in sorted(TIER_COMPLEXITY):
             st.markdown(f"- **Tier {tier}**: {TIER_COMPLEXITY[tier]}")
-
-
-def make_progress_frame(records: list[Record], total_questions: int) -> pd.DataFrame:
-    return make_progress_frame_for_ids(records, total_questions)
 
 
 def make_progress_frame_for_ids(
@@ -1229,11 +1254,11 @@ def render_grid(frame: pd.DataFrame) -> None:
     for row in frame.to_dict("records"):
         status = row["status"]
         title = f"{row['instance_id']} | {STATUS_LABELS[status]}"
-        if row.get("db"):
+        if not _is_missing_value(row.get("db")):
             title += f" | {row['db']}"
-        if row.get("note"):
+        if not _is_missing_value(row.get("note")):
             title += f" | {row['note']}"
-        if row.get("instruction"):
+        if not _is_missing_value(row.get("instruction")):
             title += f" | {row['instruction']}"
         tiles.append(
             '<div class="tile" '
@@ -1444,8 +1469,10 @@ def main() -> None:
             st.info("No questions match the current filters.")
         else:
             question_frame = prepare_question_table(frame)
+            question_display = question_frame[question_columns].copy()
+            question_display["status"] = question_display["status"].apply(_status_dot_label)
             st.dataframe(
-                question_frame[question_columns],
+                question_display.style.map(_status_dot_style, subset=["status"]),
                 width="stretch",
                 height=TABLE_HEIGHT,
                 row_height=TABLE_ROW_HEIGHT,
