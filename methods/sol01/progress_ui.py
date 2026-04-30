@@ -465,6 +465,16 @@ def apply_frame_filters(
 
 
 def make_progress_frame(records: list[Record], total_questions: int) -> pd.DataFrame:
+    return make_progress_frame_for_ids(records, total_questions)
+
+
+def make_progress_frame_for_ids(
+    records: list[Record],
+    total_questions: int,
+    selected_instance_ids: set[str] | None = None,
+) -> pd.DataFrame:
+    if selected_instance_ids is not None:
+        records = [record for record in records if record.instance_id in selected_instance_ids]
     if not records:
         return pd.DataFrame(
             columns=[
@@ -524,9 +534,9 @@ def make_progress_frame(records: list[Record], total_questions: int) -> pd.DataF
     return pd.DataFrame(rows)
 
 
-def render_chart(progress: pd.DataFrame) -> None:
+def render_chart(progress: pd.DataFrame, *, empty_message: str) -> None:
     if progress.empty:
-        st.info("No progress records found yet.")
+        st.info(empty_message)
         return
 
     fig = go.Figure()
@@ -716,6 +726,7 @@ def main() -> None:
         selected_tiers=selected_tiers,
         selected_tags=selected_tags,
     )
+    selected_instance_ids = set(frame["instance_id"]) if not frame.empty else set()
 
     totals = frame["status"].value_counts().to_dict()
     total = len(frame)
@@ -736,7 +747,15 @@ def main() -> None:
     cols[4].metric("Unanswered", f"{totals.get('unanswered', 0):,}")
 
     st.subheader("Progress Chart")
-    render_chart(make_progress_frame(records, len(dataset)))
+    chart_empty_message = (
+        "No questions match the current filters."
+        if frame.empty
+        else "No progress records found for the current slice."
+    )
+    render_chart(
+        make_progress_frame_for_ids(records, len(frame), selected_instance_ids),
+        empty_message=chart_empty_message,
+    )
 
     st.markdown('<div class="section-spacer"></div>', unsafe_allow_html=True)
 

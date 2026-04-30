@@ -2,7 +2,12 @@ from datetime import UTC, datetime
 
 import pandas as pd
 
-from progress_ui import Record, apply_frame_filters, build_status_frame
+from progress_ui import (
+    Record,
+    apply_frame_filters,
+    build_status_frame,
+    make_progress_frame_for_ids,
+)
 
 
 def test_build_status_frame_joins_category_metadata():
@@ -97,3 +102,39 @@ def test_apply_frame_filters_uses_and_tags_and_skips_uncategorized_only_when_nee
 
     filtered = apply_frame_filters(frame, selected_status=["correct"])
     assert list(filtered["instance_id"]) == ["sf_a", "sf_b", "sf_c"]
+
+
+def test_make_progress_frame_filters_records_to_selected_questions():
+    records = [
+        Record(
+            instance_id="sf_other",
+            status="correct",
+            score=1.0,
+            timestamp=datetime(2026, 4, 29, tzinfo=UTC),
+            run_id="run-0",
+            db="DB",
+            note=None,
+            source_path="/tmp/other.json",
+        ),
+        Record(
+            instance_id="sf_keep",
+            status="correct",
+            score=1.0,
+            timestamp=datetime(2026, 4, 30, tzinfo=UTC),
+            run_id="run-1",
+            db="DB",
+            note=None,
+            source_path="/tmp/keep.json",
+        ),
+    ]
+
+    progress = make_progress_frame_for_ids(records, total_questions=1, selected_instance_ids={"sf_keep"})
+
+    assert list(progress["answered"]) == [1]
+    assert list(progress["correct_pct"]) == [100.0]
+
+
+def test_make_progress_frame_returns_empty_for_empty_slice():
+    progress = make_progress_frame_for_ids([], total_questions=0, selected_instance_ids=set())
+
+    assert progress.empty
