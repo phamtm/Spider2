@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -265,12 +267,13 @@ def test_run_tasks_keeps_going_after_unexpected_task_exception(
         )
 
     monkeypatch.setattr("sol01.coordinator.ensure_run_paths", lambda *args, **kwargs: run_paths)
+    monkeypatch.setattr("sol01.coordinator.load_db_index", lambda *args, **kwargs: {})
     monkeypatch.setattr("sol01.coordinator.run_task", fake_run_task)
 
     results = run_tasks(
         tasks,
         run_id="batch-crash-run",
-        config=RuntimeConfig(api_key="test-key"),
+        config=RuntimeConfig(api_key="test-key", concurrency=1),
     )
 
     assert called == ["sf_local001", "sf_local002", "sf_local003"]
@@ -282,6 +285,177 @@ def test_run_tasks_keeps_going_after_unexpected_task_exception(
     assert trace["error"]["message"] == "unexpected task failure"
     assert trace["attempts"] == []
     assert trace["csv_path"] is None
+
+
+def test_run_tasks_bounded_executor_preserves_order(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    tasks = [
+        Task(instance_id="sf_local001", db="TEST_DB", question="First task."),
+        Task(instance_id="sf_local002", db="TEST_DB", question="Second task."),
+        Task(instance_id="sf_local003", db="TEST_DB", question="Third task."),
+    ]
+    run_paths = ensure_run_paths("bounded-run", outputs_root=tmp_path)
+    active = 0
+    max_active = 0
+    lock = threading.Lock()
+    release_pair = threading.Barrier(2)
+    prewarmed: list[str] = []
+
+    def fake_run_task(
+        task: Task,
+        *,
+        run_paths,
+        config,
+        llm_client=None,
+        force=False,
+        skip_failed=False,
+        initial_candidates=3,
+        max_attempts=4,
+        semantic_repairs=1,
+    ):
+        nonlocal active, max_active
+        with lock:
+            assert prewarmed == ["TEST_DB"]
+            active += 1
+            max_active = max(max_active, active)
+        try:
+            if task.instance_id in {"sf_local001", "sf_local002"}:
+                release_pair.wait(timeout=2)
+            time.sleep(0.05 if task.instance_id == "sf_local001" else 0.01)
+            return FinalAnswer(
+                instance_id=task.instance_id,
+                status="success",
+                sql=f"SELECT '{task.instance_id}'",
+                csv_path=f"/tmp/{task.instance_id}.csv",
+                trace_path=str(run_paths.traces_dir / f"{task.instance_id}.json"),
+            )
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr("sol01.coordinator.ensure_run_paths", lambda *args, **kwargs: run_paths)
+    monkeypatch.setattr(
+        "sol01.coordinator.load_db_index",
+        lambda db, *, cache_path=None: prewarmed.append(db) or {},
+    )
+    monkeypatch.setattr("sol01.coordinator.run_task", fake_run_task)
+
+    results = run_tasks(
+        tasks,
+        run_id="bounded-run",
+        config=RuntimeConfig(api_key="test-key", concurrency=2),
+    )
+
+    assert max_active == 2
+    assert [result.instance_id for result in results] == [task.instance_id for task in tasks]
+
+
+def test_run_tasks_prewarms_unique_databases_before_workers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    tasks = [
+        Task(instance_id="sf_local001", db="DB_ONE", question="First task."),
+        Task(instance_id="sf_local002", db="DB_TWO", question="Second task."),
+        Task(instance_id="sf_local003", db="DB_ONE", question="Third task."),
+    ]
+    run_paths = ensure_run_paths("prewarm-run", outputs_root=tmp_path)
+    prewarmed: list[str] = []
+
+    def fake_run_task(
+        task: Task,
+        *,
+        run_paths,
+        config,
+        llm_client=None,
+        force=False,
+        skip_failed=False,
+        initial_candidates=3,
+        max_attempts=4,
+        semantic_repairs=1,
+    ):
+        assert prewarmed == ["DB_ONE", "DB_TWO"]
+        return FinalAnswer(
+            instance_id=task.instance_id,
+            status="success",
+            sql=f"SELECT '{task.instance_id}'",
+            csv_path=f"/tmp/{task.instance_id}.csv",
+            trace_path=str(run_paths.traces_dir / f"{task.instance_id}.json"),
+        )
+
+    monkeypatch.setattr("sol01.coordinator.ensure_run_paths", lambda *args, **kwargs: run_paths)
+    monkeypatch.setattr(
+        "sol01.coordinator.load_db_index",
+        lambda db, *, cache_path=None: prewarmed.append(db) or {},
+    )
+    monkeypatch.setattr("sol01.coordinator.run_task", fake_run_task)
+
+    results = run_tasks(
+        tasks,
+        run_id="prewarm-run",
+        config=RuntimeConfig(api_key="test-key", concurrency=2),
+    )
+
+    assert prewarmed == ["DB_ONE", "DB_TWO"]
+    assert [result.instance_id for result in results] == [task.instance_id for task in tasks]
+
+
+def test_run_tasks_bounded_executor_keeps_running_after_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    tasks = [
+        Task(instance_id="sf_local001", db="TEST_DB", question="First task."),
+        Task(instance_id="sf_local002", db="TEST_DB", question="Second task."),
+        Task(instance_id="sf_local003", db="TEST_DB", question="Third task."),
+    ]
+    run_paths = ensure_run_paths("bounded-failure-run", outputs_root=tmp_path)
+    started: list[str] = []
+    prewarmed: list[str] = []
+
+    def fake_run_task(
+        task: Task,
+        *,
+        run_paths,
+        config,
+        llm_client=None,
+        force=False,
+        skip_failed=False,
+        initial_candidates=3,
+        max_attempts=4,
+        semantic_repairs=1,
+    ):
+        started.append(task.instance_id)
+        assert prewarmed == ["TEST_DB"]
+        if task.instance_id == "sf_local002":
+            raise RuntimeError("unexpected task failure")
+        return FinalAnswer(
+            instance_id=task.instance_id,
+            status="success",
+            sql=f"SELECT '{task.instance_id}'",
+            csv_path=f"/tmp/{task.instance_id}.csv",
+            trace_path=str(run_paths.traces_dir / f"{task.instance_id}.json"),
+        )
+
+    monkeypatch.setattr("sol01.coordinator.ensure_run_paths", lambda *args, **kwargs: run_paths)
+    monkeypatch.setattr(
+        "sol01.coordinator.load_db_index",
+        lambda db, *, cache_path=None: prewarmed.append(db) or {},
+    )
+    monkeypatch.setattr("sol01.coordinator.run_task", fake_run_task)
+
+    results = run_tasks(
+        tasks,
+        run_id="bounded-failure-run",
+        config=RuntimeConfig(api_key="test-key", concurrency=3),
+    )
+
+    assert set(started) == {"sf_local001", "sf_local002", "sf_local003"}
+    assert [result.status for result in results] == ["success", "failed", "success"]
+
+    trace = json.loads((run_paths.traces_dir / "sf_local002.json").read_text(encoding="utf-8"))
+    assert trace["status"] == "failed"
+    assert trace["error"]["type"] == "RuntimeError"
+    assert trace["error"]["message"] == "unexpected task failure"
 
 
 def test_run_task_repairs_validation_failure(

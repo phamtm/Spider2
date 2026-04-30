@@ -286,6 +286,22 @@ def test_run_mode_main_forwards_tier_and_tag_filters(monkeypatch: pytest.MonkeyP
     }
 
 
+def test_run_mode_main_forwards_explicit_concurrency(monkeypatch: pytest.MonkeyPatch):
+    called: dict[str, object] = {}
+
+    def fake_run_persisted_mode(selectors=None, **kwargs):
+        called["selectors"] = selectors
+        called.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(run_mode, "run_persisted_mode", fake_run_persisted_mode)
+
+    exit_code = run_mode.main(["sf_local*", "--concurrency", "6"])
+
+    assert exit_code == 0
+    assert called["concurrency"] == 6
+
+
 def test_run_mode_main_rejects_all_with_category_filters(capsys: pytest.CaptureFixture[str]):
     exit_code = run_mode.main(["--all", "--tier", "3"])
 
@@ -301,7 +317,7 @@ def test_run_mode_main_help_mentions_selector_rules(capsys: pytest.CaptureFixtur
     output = capsys.readouterr().out
     assert "Task selectors are ORed" in output
     assert "repeated --tag values are ANDed" in output
-    assert "Must be used by itself." in output
+    assert "must be used by itself." in output.lower()
 
 
 def test_mode_label_is_order_insensitive_for_equivalent_selectors():

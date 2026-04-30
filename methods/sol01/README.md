@@ -15,6 +15,10 @@ uv run python -c "import sol01"
 For local development, copy [`.env.example`](./.env.example) to `.env`.
 The `sol01` CLI loads `methods/sol01/.env` automatically, but real shell
 variables still win.
+Set `SOL01_CONCURRENCY` to control batch worker count. The default is `4`.
+Use `--concurrency` on `sol01 run` or `sol01.run_mode` to override the
+environment for one run. Concurrency is task-level per question batch, not per
+database.
 
 Create `methods/sol01/snowflake_credential.json` locally with a programmatic
 access token:
@@ -51,11 +55,14 @@ just check
 
 ```bash
 uv run sol01 index
-uv run sol01 run
+uv run sol01 run --concurrency 4
 uv run sol01 eval --run-id <run_id>
 uv run sol01 analyze --run-id <run_id>
 uv run sol01 ask --db E_COMMERCE "Which customers have the highest AOV?"
 ```
+
+`sol01 run` and `just run` accept `--concurrency <n>`. If omitted, the CLI
+uses `SOL01_CONCURRENCY` or the default value of `4`.
 
 Persisted solver mode uses `just run <selector>`:
 

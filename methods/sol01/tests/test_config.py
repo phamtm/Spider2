@@ -22,6 +22,7 @@ def test_default_config_uses_deepseek_openrouter_policy(monkeypatch):
     assert config.model == DEFAULT_MODEL
     assert config.provider_only == "deepseek"
     assert config.allow_fallbacks is False
+    assert config.concurrency == 4
     assert config.provider_routing == {"provider": {"only": ["deepseek"], "allow_fallbacks": False}}
 
 
@@ -149,6 +150,21 @@ def test_blank_shell_env_allows_dotenv_fallback(monkeypatch, tmp_path: Path):
     assert config.api_key == "dotenv-key"
     assert config.base_url == "https://dotenv.example/v1"
     assert config.model == "deepseek/dotenv"
+
+
+def test_sol01_concurrency_env_overrides_default(monkeypatch):
+    monkeypatch.setenv("SOL01_CONCURRENCY", "7")
+
+    config = RuntimeConfig.from_env()
+
+    assert config.concurrency == 7
+
+
+def test_sol01_concurrency_env_must_be_positive(monkeypatch):
+    monkeypatch.setenv("SOL01_CONCURRENCY", "0")
+
+    with pytest.raises(ValueError, match="positive integer"):
+        RuntimeConfig.from_env()
 
 
 def test_default_from_env_does_not_read_dotenv_implicitly(monkeypatch, tmp_path: Path):

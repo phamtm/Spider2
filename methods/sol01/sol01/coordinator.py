@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from time import perf_counter
 from typing import Any, Protocol
@@ -102,25 +103,15 @@ def run_tasks(
         skip_failed=skip_failed,
     )
 
-    results: list[FinalAnswer] = []
-    for task in tasks:
-        try:
-            result = run_task(
-                task,
-                run_paths=run_paths,
-                config=config,
-                llm_client=llm_client,
-                force=force,
-                skip_failed=skip_failed,
-            )
-        except Exception as exc:
-            result = _record_batch_task_failure(
-                task=task,
-                run_paths=run_paths,
-                live_logging_enabled=llm_client is None,
-                error=exc,
-            )
-        results.append(result)
+    _prewarm_schema_indexes(tasks)
+    results = _run_task_batch(
+        tasks,
+        run_paths=run_paths,
+        config=config,
+        llm_client=llm_client,
+        force=force,
+        skip_failed=skip_failed,
+    )
     logger.info(
         "run complete",
         run_id=run_id,
@@ -129,6 +120,90 @@ def run_tasks(
         skipped_count=sum(1 for result in results if result.status == "skipped"),
     )
     return results
+
+
+def _prewarm_schema_indexes(tasks: list[Task], *, cache_path: Path = CACHE_PATH) -> None:
+    """Load each selected database into the local schema cache before workers start."""
+
+    seen: set[str] = set()
+    for task in tasks:
+        if task.db in seen:
+            continue
+        seen.add(task.db)
+        load_db_index(task.db, cache_path=cache_path)
+
+
+def _run_task_batch(
+    tasks: list[Task],
+    *,
+    run_paths: RunPaths,
+    config: RuntimeConfig,
+    llm_client: StructuredLLM | None,
+    force: bool,
+    skip_failed: bool,
+) -> list[FinalAnswer]:
+    """Run tasks sequentially or with bounded concurrency, preserving input order."""
+
+    if config.concurrency <= 1 or llm_client is not None:
+        return [
+            _run_single_batch_task(
+                task,
+                run_paths=run_paths,
+                config=config,
+                llm_client=llm_client,
+                force=force,
+                skip_failed=skip_failed,
+            )
+            for task in tasks
+        ]
+
+    results: list[FinalAnswer | None] = [None] * len(tasks)
+    with ThreadPoolExecutor(max_workers=config.concurrency) as executor:
+        future_to_index = {
+            executor.submit(
+                _run_single_batch_task,
+                task,
+                run_paths=run_paths,
+                config=config,
+                llm_client=None,
+                force=force,
+                skip_failed=skip_failed,
+            ): index
+            for index, task in enumerate(tasks)
+        }
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
+            results[index] = future.result()
+    return [result for result in results if result is not None]
+
+
+def _run_single_batch_task(
+    task: Task,
+    *,
+    run_paths: RunPaths,
+    config: RuntimeConfig,
+    llm_client: StructuredLLM | None,
+    force: bool,
+    skip_failed: bool,
+) -> FinalAnswer:
+    """Run one task and convert unexpected exceptions into failed traces."""
+
+    try:
+        return run_task(
+            task,
+            run_paths=run_paths,
+            config=config,
+            llm_client=llm_client,
+            force=force,
+            skip_failed=skip_failed,
+        )
+    except Exception as exc:
+        return _record_batch_task_failure(
+            task=task,
+            run_paths=run_paths,
+            live_logging_enabled=llm_client is None,
+            error=exc,
+        )
 
 
 def _record_batch_task_failure(

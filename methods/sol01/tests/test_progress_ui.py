@@ -5,15 +5,15 @@ import pandas as pd
 import pytest
 
 from progress_ui import (
-    build_run_command,
     Record,
     apply_frame_filters,
+    build_run_command,
     build_status_frame,
     compute_overall_summary,
     compute_tag_summary,
     compute_tier_summary,
-    format_tier_summary,
     format_question_option,
+    format_tier_summary,
     make_progress_frame_for_ids,
     prepare_debug_frame,
     prepare_display_frame,
@@ -219,14 +219,16 @@ def test_format_tier_summary_covers_highest_supported_tier():
 
     assert summary == (
         "Selected tier complexity: Tier 12: Hardest queries in the current set. Usually combine "
-        "several advanced steps, such as nested state, cumulative allocation, or forecasting-style logic."
+        "several advanced steps, such as nested state, cumulative allocation, "
+        "or forecasting-style logic."
     )
 
 
 def test_format_tier_summary_falls_back_when_no_tier_selected():
     assert (
         format_tier_summary([])
-        == "Tier is the question complexity score. Higher tiers usually mean more reasoning steps, joins, or transformations."
+        == "Tier is the question complexity score. Higher tiers usually mean "
+        "more reasoning steps, joins, or transformations."
     )
 
 

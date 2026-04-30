@@ -36,6 +36,7 @@ def run_persisted_mode(
     tiers: Sequence[str] | str | None = None,
     tags: Sequence[str] | str | None = None,
     all_mode: bool = False,
+    concurrency: int | None = None,
     outputs_root: Path = OUTPUTS_ROOT,
     run_id: str | None = None,
     config: RuntimeConfig | None = None,
@@ -70,10 +71,16 @@ def run_persisted_mode(
         },
     )
 
-    runtime_config = config or RuntimeConfig.from_env(
-        require_api_key=True,
-        dotenv_path=DEFAULT_DOTENV_PATH,
-    )
+    if config is None:
+        runtime_config = RuntimeConfig.from_env(
+            require_api_key=True,
+            dotenv_path=DEFAULT_DOTENV_PATH,
+            **({"concurrency": concurrency} if concurrency is not None else {}),
+        )
+    elif concurrency is not None:
+        runtime_config = config.model_copy(update={"concurrency": concurrency})
+    else:
+        runtime_config = config
     logger.info(
         "persisted run start",
         run_id=effective_run_id,
@@ -233,15 +240,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Run the full Spider2-snow task set. Must be used by itself.",
     )
+    parser.add_argument(
+        "--concurrency",
+        type=_positive_int,
+        help="Maximum number of concurrent solver tasks.",
+    )
     args = parser.parse_args(argv)
 
     try:
-        run_persisted_mode(
-            args.patterns or None,
-            tiers=args.tiers or None,
-            tags=args.tags or None,
-            all_mode=args.all,
-        )
+        run_persisted_mode_kwargs = {
+            "tiers": args.tiers or None,
+            "tags": args.tags or None,
+            "all_mode": args.all,
+        }
+        if args.concurrency is not None:
+            run_persisted_mode_kwargs["concurrency"] = args.concurrency
+        run_persisted_mode(args.patterns or None, **run_persisted_mode_kwargs)
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
@@ -411,6 +425,18 @@ def _slug(value: str) -> str:
     """Turn a selector into a compact filesystem-friendly label."""
 
     return "".join(char if char.isalnum() else "-" for char in value).strip("-") or "value"
+
+
+def _positive_int(raw: str) -> int:
+    """Parse a positive CLI integer for argparse."""
+
+    try:
+        parsed = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
 
 
 if __name__ == "__main__":

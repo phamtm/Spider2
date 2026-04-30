@@ -55,17 +55,51 @@ QUESTION_STATUS_ORDER = ("unanswered", "incorrect", "answered", "correct")
 
 TIER_COMPLEXITY = {
     1: "Simple lookup or single-step aggregate. Usually one table and one obvious filter.",
-    2: "Straightforward multi-step query. Usually one join, modest filtering, or a simple grouped result.",
-    3: "Multi-step reasoning. Common examples are ranking, window functions, temporal rollups, cohort logic, or external notes.",
-    4: "Hard query. Usually mixes several advanced patterns, such as nested aggregation, geospatial logic, multi-hop joins, or multiple time-based transformations.",
-    5: "Harder multi-step query. Usually combines joins, filtering, ranking, or grouped comparisons.",
-    6: "Advanced reasoning. Usually adds deeper joins, temporal logic, or cross-table aggregation.",
-    7: "Advanced multi-step query. Often needs nested ranking, cohort-style analysis, or multi-scale rollups.",
-    8: "Very hard query. Usually mixes multiple advanced patterns such as joins, temporal windows, or nested aggregation.",
-    9: "Expert-level query. Often requires layered filters, ranking passes, or compound grouping logic.",
-    10: "Expert-level reasoning. Usually adds time-series windows, moving calculations, or external constraints.",
-    11: "Very complex query. Often involves hierarchical or recursive style reasoning with several transformations.",
-    12: "Hardest queries in the current set. Usually combine several advanced steps, such as nested state, cumulative allocation, or forecasting-style logic.",
+    2: (
+        "Straightforward multi-step query. Usually one join, modest filtering, "
+        "or a simple grouped result."
+    ),
+    3: (
+        "Multi-step reasoning. Common examples are ranking, window functions, "
+        "temporal rollups, cohort logic, or external notes."
+    ),
+    4: (
+        "Hard query. Usually mixes several advanced patterns, such as nested "
+        "aggregation, geospatial logic, multi-hop joins, or multiple time-based "
+        "transformations."
+    ),
+    5: (
+        "Harder multi-step query. Usually combines joins, filtering, ranking, "
+        "or grouped comparisons."
+    ),
+    6: (
+        "Advanced reasoning. Usually adds deeper joins, temporal logic, or cross-table aggregation."
+    ),
+    7: (
+        "Advanced multi-step query. Often needs nested ranking, cohort-style "
+        "analysis, or multi-scale rollups."
+    ),
+    8: (
+        "Very hard query. Usually mixes multiple advanced patterns such as "
+        "joins, temporal windows, or nested aggregation."
+    ),
+    9: (
+        "Expert-level query. Often requires layered filters, ranking passes, "
+        "or compound grouping logic."
+    ),
+    10: (
+        "Expert-level reasoning. Usually adds time-series windows, moving "
+        "calculations, or external constraints."
+    ),
+    11: (
+        "Very complex query. Often involves hierarchical or recursive style "
+        "reasoning with several transformations."
+    ),
+    12: (
+        "Hardest queries in the current set. Usually combine several advanced "
+        "steps, such as nested state, cumulative allocation, or forecasting-style "
+        "logic."
+    ),
 }
 
 
@@ -440,7 +474,9 @@ def _status_counts(frame: pd.DataFrame) -> dict[str, int]:
     return counts
 
 
-def _summary_rates(total: int, answered: int, correct: int, incorrect: int, unanswered: int) -> dict[str, float]:
+def _summary_rates(
+    total: int, answered: int, correct: int, incorrect: int, unanswered: int
+) -> dict[str, float]:
     coverage_pct = answered / total * 100 if total else 0.0
     accuracy_pct = correct / answered * 100 if answered else 0.0
     return {
@@ -534,21 +570,34 @@ def compute_tier_summary(frame: pd.DataFrame) -> pd.DataFrame:
     )
     for tier_value, group in frame.assign(_tier=tier_series).groupby("_tier", dropna=False):
         if pd.isna(tier_value):
-            rows.append({"primary_tier": pd.NA, **_build_summary_row("Uncategorized", "tier_label", group)})
+            rows.append(
+                {"primary_tier": pd.NA, **_build_summary_row("Uncategorized", "tier_label", group)}
+            )
             continue
 
         try:
             tier_number = int(tier_value)
         except (TypeError, ValueError):
             tier_number = tier_value
-        rows.append({"primary_tier": tier_number, **_build_summary_row(f"Tier {tier_number}", "tier_label", group)})
+        rows.append(
+            {
+                "primary_tier": tier_number,
+                **_build_summary_row(f"Tier {tier_number}", "tier_label", group),
+            }
+        )
 
     result = pd.DataFrame(rows, columns=_summary_columns("primary_tier", "tier_label"))
     if result.empty:
         return result
 
     sort_key = result["primary_tier"].apply(
-        lambda value: (1, 0, "") if pd.isna(value) else (0, 0, int(value)) if str(value).isdigit() else (0, 1, str(value))
+        lambda value: (
+            (1, 0, "")
+            if pd.isna(value)
+            else (0, 0, int(value))
+            if str(value).isdigit()
+            else (0, 1, str(value))
+        )
     )
     result = result.assign(_tier_sort=sort_key).sort_values(
         by=["_tier_sort", "tier_label"],
@@ -622,7 +671,8 @@ def recommend_focus(frame: pd.DataFrame) -> dict[str, Any]:
                 "kind": "unanswered",
                 "title": f"Clear tier {row['tier_label']}",
                 "detail": (
-                    f"{int(row['unanswered'])} questions in {row['tier_label']} are still unanswered."
+                    f"{int(row['unanswered'])} questions in {row['tier_label']} "
+                    "are still unanswered."
                 ),
                 "count": int(row["unanswered"]),
                 "primary_tier": tier_value,
@@ -704,10 +754,14 @@ def recommend_focus(frame: pd.DataFrame) -> dict[str, Any]:
 def prepare_display_frame(frame: pd.DataFrame) -> pd.DataFrame:
     display = frame.copy()
     if "timestamp" in display.columns:
-        display["timestamp"] = display["timestamp"].apply(lambda value: "" if _is_missing_value(value) else str(value))
+        display["timestamp"] = display["timestamp"].apply(
+            lambda value: "" if _is_missing_value(value) else str(value)
+        )
     if "tags" in display.columns:
         display["tags"] = display["tags"].apply(
-            lambda value: ", ".join(_normalize_tag_values(value)) if not _is_missing_value(value) else ""
+            lambda value: (
+                ", ".join(_normalize_tag_values(value)) if not _is_missing_value(value) else ""
+            )
         )
     if "primary_tier" in display.columns:
         display["primary_tier"] = display["primary_tier"].apply(
@@ -737,14 +791,20 @@ def prepare_debug_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
     debug = frame.copy()
     if "timestamp" in debug.columns:
-        debug["timestamp"] = debug["timestamp"].apply(lambda value: "" if _is_missing_value(value) else str(value))
+        debug["timestamp"] = debug["timestamp"].apply(
+            lambda value: "" if _is_missing_value(value) else str(value)
+        )
     if "primary_tier" in debug.columns:
         debug["primary_tier"] = debug["primary_tier"].apply(_tier_display)
     if "tags" in debug.columns:
-        debug["tags"] = debug["tags"].apply(lambda value: ", ".join(_normalize_tag_values(value)) or "—")
+        debug["tags"] = debug["tags"].apply(
+            lambda value: ", ".join(_normalize_tag_values(value)) or "—"
+        )
     for column in ("instruction", "note", "db", "source_path", "difficulty_notes"):
         if column in debug.columns:
-            debug[column] = debug[column].apply(lambda value: "" if _is_missing_value(value) else str(value))
+            debug[column] = debug[column].apply(
+                lambda value: "" if _is_missing_value(value) else str(value)
+            )
     if "category_available" not in debug.columns:
         debug["category_available"] = False
 
@@ -814,8 +874,11 @@ def prepare_question_table(frame: pd.DataFrame) -> pd.DataFrame:
     if "score" not in display.columns:
         display["score"] = pd.NA
 
-    display["status_sort"] = display["status"].astype(str).str.lower().map(
-        {status: index for index, status in enumerate(QUESTION_STATUS_ORDER)}
+    display["status_sort"] = (
+        display["status"]
+        .astype(str)
+        .str.lower()
+        .map({status: index for index, status in enumerate(QUESTION_STATUS_ORDER)})
     )
     display["status_sort"] = display["status_sort"].fillna(len(QUESTION_STATUS_ORDER))
     display["tier_sort"] = display["primary_tier"].apply(_tier_sort_value)
@@ -824,7 +887,9 @@ def prepare_question_table(frame: pd.DataFrame) -> pd.DataFrame:
     display["tags"] = display["tags"].apply(
         lambda value: ", ".join(_normalize_tag_values(value)) or "—"
     )
-    display["instruction"] = display["instruction"].apply(lambda value: _truncate_text(value, 120) or "—")
+    display["instruction"] = display["instruction"].apply(
+        lambda value: _truncate_text(value, 120) or "—"
+    )
     display["note"] = display["note"].apply(lambda value: _truncate_text(value, 80) or "—")
     display["db"] = display["db"].apply(lambda value: _truncate_text(value, 48) or "—")
 
@@ -871,7 +936,9 @@ def select_question_row(frame: pd.DataFrame, instance_id: str | None) -> dict[st
     if matches.empty:
         return None
     row = matches.iloc[0].to_dict()
-    row["status_label"] = STATUS_LABELS.get(str(row.get("status") or ""), str(row.get("status") or ""))
+    row["status_label"] = STATUS_LABELS.get(
+        str(row.get("status") or ""), str(row.get("status") or "")
+    )
     tier = row.get("primary_tier")
     row["primary_tier_label"] = _tier_display(tier)
     row["tags_label"] = ", ".join(_normalize_tag_values(row.get("tags"))) or "—"
@@ -951,7 +1018,9 @@ def build_run_command(dataset_path: Path, source_path: Path) -> str:
     )
 
 
-def should_show_all_questions(selected_tiers: list[int] | None, selected_tags: list[str] | None) -> bool:
+def should_show_all_questions(
+    selected_tiers: list[int] | None, selected_tags: list[str] | None
+) -> bool:
     return bool(selected_tiers or selected_tags)
 
 
@@ -1007,7 +1076,10 @@ def apply_frame_filters(
 
 def format_tier_summary(selected_tiers: list[int]) -> str:
     if not selected_tiers:
-        return "Tier is the question complexity score. Higher tiers usually mean more reasoning steps, joins, or transformations."
+        return (
+            "Tier is the question complexity score. Higher tiers usually mean "
+            "more reasoning steps, joins, or transformations."
+        )
 
     selected = []
     for tier in selected_tiers:
@@ -1016,7 +1088,10 @@ def format_tier_summary(selected_tiers: list[int]) -> str:
             selected.append(f"Tier {tier}: {description}")
 
     if not selected:
-        return "Tier is the question complexity score. Higher tiers usually mean more reasoning steps, joins, or transformations."
+        return (
+            "Tier is the question complexity score. Higher tiers usually mean "
+            "more reasoning steps, joins, or transformations."
+        )
 
     return "Selected tier complexity: " + " ".join(selected)
 

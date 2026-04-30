@@ -94,6 +94,53 @@ def test_run_command_dispatches_expected_filters(monkeypatch):
     assert "- local003: PASS | task success | Question text" in result.output
 
 
+def test_run_command_forwards_explicit_concurrency(monkeypatch):
+    """The run command should forward an explicit concurrency value."""
+
+    called: dict[str, Any] = {}
+
+    def fake_handle_run(**kwargs: Any) -> dict[str, Any]:
+        called.update(kwargs)
+        return {
+            "tasks": [Task(instance_id="local003", db="db", question="Question text")],
+            "results": [
+                FinalAnswer(
+                    instance_id="local003",
+                    status="success",
+                    sql="SELECT 1",
+                    csv_path="out.csv",
+                    trace_path="trace.json",
+                )
+            ],
+            "eval_summary": {
+                "correct_tasks": 1,
+                "attempted_tasks": 1,
+                "missing_csv_count": 0,
+                "per_instance": [
+                    {"instance_id": "local003", "passed": True, "score": 1, "csv_present": True}
+                ],
+            },
+        }
+
+    monkeypatch.setattr(cli, "handle_run", fake_handle_run)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "run",
+            "--instance-id",
+            "local003",
+            "--run-id",
+            "smoke-local003",
+            "--concurrency",
+            "8",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert called["concurrency"] == 8
+
+
 def test_handle_run_passes_default_dotenv_path(monkeypatch):
     """The run handler should opt into the method-local dotenv file."""
 
@@ -105,9 +152,10 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
         lambda **kwargs: [Task(instance_id="local003", db="db", question="q")],
     )
 
-    def fake_from_env(cls, require_api_key=False, dotenv_path=None):
+    def fake_from_env(cls, require_api_key=False, dotenv_path=None, concurrency=None):
         called["require_api_key"] = require_api_key
         called["dotenv_path"] = dotenv_path
+        called["concurrency"] = concurrency
         return RuntimeConfig(api_key="test-key")
 
     def fake_run_tasks(tasks, *, run_id, config, force, skip_failed):
@@ -148,6 +196,7 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
     monkeypatch.setattr(cli, "run_persisted_eval", fake_run_persisted_eval)
 
     result = cli.handle_run(
+        concurrency=None,
         run_id="smoke-local003",
         instance_id="local003",
         db=None,
@@ -159,6 +208,7 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
 
     assert called["require_api_key"] is True
     assert called["dotenv_path"] == cli.DEFAULT_DOTENV_PATH
+    assert called["concurrency"] is None
     assert called["task_ids"] == ["local003"]
     assert called["run_id"] == "smoke-local003"
     assert called["eval_run_id"] == "smoke-local003"
@@ -183,7 +233,9 @@ def test_handle_run_forwards_all_expected_ids_to_persisted_eval(monkeypatch, tmp
         cli.RuntimeConfig,
         "from_env",
         classmethod(
-            lambda cls, require_api_key=False, dotenv_path=None: RuntimeConfig(api_key="k")
+            lambda cls, require_api_key=False, dotenv_path=None, concurrency=None: RuntimeConfig(
+                api_key="k"
+            )
         ),
     )
     monkeypatch.setattr(
@@ -219,6 +271,7 @@ def test_handle_run_forwards_all_expected_ids_to_persisted_eval(monkeypatch, tmp
     monkeypatch.setattr(cli, "run_persisted_eval", fake_run_persisted_eval)
 
     cli.handle_run(
+        concurrency=None,
         run_id="smoke-local003",
         instance_id=None,
         db=None,
@@ -429,9 +482,10 @@ def test_handle_ask_uses_ask_layout(monkeypatch, tmp_path: Path):
     ask_paths.root.mkdir(parents=True, exist_ok=True)
     called: dict[str, Any] = {}
 
-    def fake_from_env(cls, require_api_key=False, dotenv_path=None):
+    def fake_from_env(cls, require_api_key=False, dotenv_path=None, concurrency=None):
         called["require_api_key"] = require_api_key
         called["dotenv_path"] = dotenv_path
+        called["concurrency"] = concurrency
         return object()
 
     monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
@@ -458,6 +512,7 @@ def test_handle_ask_uses_ask_layout(monkeypatch, tmp_path: Path):
 
     assert called["require_api_key"] is True
     assert called["dotenv_path"] == cli.DEFAULT_DOTENV_PATH
+    assert called["concurrency"] is None
     assert answer.status == "success"
     assert answer.csv_path == str(ask_paths.csv_path)
     assert answer.trace_path == str(ask_paths.trace_path)
@@ -478,9 +533,10 @@ def test_handle_ask_cleans_up_internal_dir_on_failure(monkeypatch, tmp_path: Pat
     ask_paths.root.mkdir(parents=True, exist_ok=True)
     called: dict[str, Any] = {}
 
-    def fake_from_env(cls, require_api_key=False, dotenv_path=None):
+    def fake_from_env(cls, require_api_key=False, dotenv_path=None, concurrency=None):
         called["require_api_key"] = require_api_key
         called["dotenv_path"] = dotenv_path
+        called["concurrency"] = concurrency
         return object()
 
     monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
@@ -501,4 +557,5 @@ def test_handle_ask_cleans_up_internal_dir_on_failure(monkeypatch, tmp_path: Pat
 
     assert called["require_api_key"] is True
     assert called["dotenv_path"] == cli.DEFAULT_DOTENV_PATH
+    assert called["concurrency"] is None
     assert not (ask_paths.root / "_internal").exists()

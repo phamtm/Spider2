@@ -47,6 +47,10 @@ def index() -> None:
 
 @app.command()
 def run(
+    concurrency: Annotated[
+        int | None,
+        typer.Option(min=1, help="Maximum number of concurrent solver tasks."),
+    ] = None,
     run_id: Annotated[
         str | None,
         typer.Option(help="Run ID used for outputs/<run_id>."),
@@ -89,15 +93,18 @@ def run(
         force=force,
         skip_failed=skip_failed,
     )
-    results = handle_run(
-        run_id=run_id,
-        instance_id=instance_id,
-        db=db,
-        question_contains=question_contains,
-        limit=limit,
-        force=force,
-        skip_failed=skip_failed,
-    )
+    handle_run_kwargs: dict[str, Any] = {
+        "run_id": run_id,
+        "instance_id": instance_id,
+        "db": db,
+        "question_contains": question_contains,
+        "limit": limit,
+        "force": force,
+        "skip_failed": skip_failed,
+    }
+    if concurrency is not None:
+        handle_run_kwargs["concurrency"] = concurrency
+    results = handle_run(**handle_run_kwargs)
     typer.echo(f"Completed {len(results['results'])} task(s).")
     typer.echo(
         "Eval summary: "
@@ -240,6 +247,7 @@ def handle_index() -> dict[str, Any]:
 
 def handle_run(
     *,
+    concurrency: int | None = None,
     run_id: str | None,
     instance_id: str | None,
     db: str | None,
@@ -263,6 +271,7 @@ def handle_run(
     config = RuntimeConfig.from_env(
         require_api_key=True,
         dotenv_path=DEFAULT_DOTENV_PATH,
+        **({"concurrency": concurrency} if concurrency is not None else {}),
     )
     effective_run_id = run_id or _default_run_id("run")
     logger.info(

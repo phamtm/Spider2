@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "deepseek/deepseek-v4-pro"
 DEFAULT_PROVIDER_ONLY = "deepseek"
+DEFAULT_CONCURRENCY = 4
 METHOD_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DOTENV_PATH = METHOD_ROOT / ".env"
 
@@ -22,7 +23,7 @@ class RuntimeConfig(BaseModel):
     model: str = DEFAULT_MODEL
     provider_only: str = DEFAULT_PROVIDER_ONLY
     allow_fallbacks: bool = False
-    concurrency: int = Field(default=2, ge=1)
+    concurrency: int = Field(default=DEFAULT_CONCURRENCY, ge=1)
 
     @classmethod
     def from_env(
@@ -30,6 +31,7 @@ class RuntimeConfig(BaseModel):
         *,
         require_api_key: bool = False,
         dotenv_path: Path | None = None,
+        concurrency: int | None = None,
     ) -> "RuntimeConfig":
         """Load settings from the shell, with optional local .env support."""
 
@@ -41,6 +43,11 @@ class RuntimeConfig(BaseModel):
             model=_env_first("OPENROUTER_MODEL", "LLM_MODEL") or DEFAULT_MODEL,
             provider_only=_env_first("OPENROUTER_PROVIDER_ONLY") or DEFAULT_PROVIDER_ONLY,
             allow_fallbacks=_env_bool("OPENROUTER_ALLOW_FALLBACKS", default=False),
+            concurrency=(
+                concurrency
+                if concurrency is not None
+                else _env_positive_int("SOL01_CONCURRENCY", default=DEFAULT_CONCURRENCY)
+            ),
         )
         if require_api_key and not config.api_key:
             raise ValueError("API key is required for live LLM runs")
@@ -104,3 +111,20 @@ def _env_bool(name: str, *, default: bool) -> bool:
     if normalized in {"1", "true", "t", "yes", "y", "on"}:
         return True
     raise ValueError(f"{name} must be a boolean value")
+
+
+def _env_positive_int(name: str, *, default: int) -> int:
+    """Parse a positive integer environment variable with a clear error."""
+
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return default
+
+    try:
+        parsed = int(value.strip())
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer") from exc
+
+    if parsed < 1:
+        raise ValueError(f"{name} must be a positive integer")
+    return parsed
