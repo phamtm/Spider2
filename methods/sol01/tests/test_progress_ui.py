@@ -185,6 +185,15 @@ def test_format_tier_summary_describes_selected_tier_complexity():
     )
 
 
+def test_format_tier_summary_covers_highest_supported_tier():
+    summary = format_tier_summary([12])
+
+    assert summary == (
+        "Selected tier complexity: Tier 12: Hardest queries in the current set. Usually combine "
+        "several advanced steps, such as nested state, cumulative allocation, or forecasting-style logic."
+    )
+
+
 def test_format_tier_summary_falls_back_when_no_tier_selected():
     assert (
         format_tier_summary([])

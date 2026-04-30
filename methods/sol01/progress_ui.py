@@ -56,6 +56,14 @@ TIER_COMPLEXITY = {
     2: "Straightforward multi-step query. Usually one join, modest filtering, or a simple grouped result.",
     3: "Multi-step reasoning. Common examples are ranking, window functions, temporal rollups, cohort logic, or external notes.",
     4: "Hard query. Usually mixes several advanced patterns, such as nested aggregation, geospatial logic, multi-hop joins, or multiple time-based transformations.",
+    5: "Harder multi-step query. Usually combines joins, filtering, ranking, or grouped comparisons.",
+    6: "Advanced reasoning. Usually adds deeper joins, temporal logic, or cross-table aggregation.",
+    7: "Advanced multi-step query. Often needs nested ranking, cohort-style analysis, or multi-scale rollups.",
+    8: "Very hard query. Usually mixes multiple advanced patterns such as joins, temporal windows, or nested aggregation.",
+    9: "Expert-level query. Often requires layered filters, ranking passes, or compound grouping logic.",
+    10: "Expert-level reasoning. Usually adds time-series windows, moving calculations, or external constraints.",
+    11: "Very complex query. Often involves hierarchical or recursive style reasoning with several transformations.",
+    12: "Hardest queries in the current set. Usually combine several advanced steps, such as nested state, cumulative allocation, or forecasting-style logic.",
 }
 
 
