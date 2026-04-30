@@ -783,6 +783,102 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
     assert "Verification:" in captured_prompts["sql_repair"][0]
 
 
+def test_run_task_prefers_row_count_over_distinct_entity_count(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
+):
+    task = Task(
+        instance_id="sf_local358",
+        db="TEST_DB",
+        question="How many users are in each age bucket?",
+    )
+    run_paths = ensure_run_paths("grain-run", outputs_root=tmp_path)
+    captured_prompts: dict[str, list[str]] = {}
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Count users by age bucket.",
+                    entities=["MST_USERS", "age bucket"],
+                    metrics=["count users"],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="age bucket and user count",
+                    assumptions=["MST_USERS is a master table of users."],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=(
+                        "SELECT age_bucket, COUNT(DISTINCT user_id) AS users "
+                        "FROM TEST_DB.PUBLIC.MST_USERS GROUP BY age_bucket"
+                    ),
+                    explanation="Count distinct users by bucket.",
+                    assumptions=["Distinct keeps duplicates out."],
+                    confidence=0.95,
+                ),
+                SQLCandidate(
+                    sql=(
+                        "SELECT age_bucket, COUNT(*) AS users "
+                        "FROM TEST_DB.PUBLIC.MST_USERS GROUP BY age_bucket"
+                    ),
+                    explanation="Count rows by bucket.",
+                    assumptions=["Each row is one user."],
+                    confidence=0.55,
+                ),
+            ],
+            "result_comparison": [
+                CandidateComparisonReport(
+                    baseline_stage="initial_1",
+                    preferred_stage="initial_2",
+                    compared_stages=["initial_1", "initial_2"],
+                    reasons=["COUNT(*) matches the single entity table grain better."],
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(confidence=0.9, issues=[], should_repair=False, repair_focus=None)
+            ],
+        },
+        prompts=captured_prompts,
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.fetch_query_dataframe",
+        lambda sql, *, db: pd.DataFrame(
+            [
+                {"age_bucket": "18-25", "users": 7},
+                {"age_bucket": "26-35", "users": 9},
+            ]
+        ),
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="test_db",
+            selected_tables=["TEST_DB.PUBLIC.MST_USERS"],
+            expanded_tables=["TEST_DB.PUBLIC.MST_USERS"],
+            rationale="MST_USERS is the user master table.",
+            confidence=0.9,
+        ),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=2,
+    )
+
+    assert answer.status == "success"
+    trace = json.loads((run_paths.traces_dir / "sf_local358.json").read_text(encoding="utf-8"))
+    assert trace["final_sql"].startswith("SELECT age_bucket, COUNT(*) AS users")
+    assert trace["attempts"][0]["aggregate_grain"]["inferred_grain"] == "row_count"
+    assert "unnecessary" in trace["attempts"][0]["aggregate_grain"]["distinct_reason"]
+    assert trace["attempts"][1]["aggregate_grain"]["inferred_grain"] == "row_count"
+    assert trace["attempts"][1]["aggregate_grain"].get("distinct_reason") is None
+    assert "COUNT(*)" in captured_prompts["result_comparison"][0]
+
+
 def test_run_task_catches_execution_errors_and_writes_failed_trace(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
 ):

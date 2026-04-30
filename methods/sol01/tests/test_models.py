@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from sol01.models import (
+    AggregateGrainReport,
     CandidateComparisonReport,
     CategoryMetadata,
     ColumnSchema,
@@ -128,6 +129,20 @@ def test_sql_validation_execution_and_critic_models_construct():
     assert validation.ok is True
     assert execution.error is None
     assert confidence.repair_focus is None
+
+
+def test_aggregate_grain_model_constructs():
+    grain = AggregateGrainReport(
+        inferred_grain="row_count",
+        reason="Single entity table with no joins usually counts rows.",
+        distinct_reason="DISTINCT is redundant on a single entity table.",
+        uses_distinct=True,
+        has_joins=False,
+        selected_tables=["TEST_DB.PUBLIC.MST_USERS"],
+    )
+
+    assert grain.inferred_grain == "row_count"
+    assert grain.uses_distinct is True
 
 
 def test_candidate_comparison_model_constructs():

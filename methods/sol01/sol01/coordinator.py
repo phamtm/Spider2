@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from numbers import Number
 from pathlib import Path
@@ -16,6 +17,7 @@ from sol01.llm import LLMClient
 from sol01.llm_logging import LLMCallLogger
 from sol01.logging import get_logger
 from sol01.models import (
+    AggregateGrainReport,
     CandidateComparisonReport,
     ConfidenceReport,
     ExecutionResult,
@@ -793,6 +795,14 @@ def _evaluate_candidate(
             error="Validation failed before execution.",
         )
 
+    aggregate_grain = _infer_aggregate_grain(
+        task=task,
+        candidate=candidate,
+        schema=schema,
+        table_schemas=table_schemas or {},
+        validation=validation,
+        execution=execution,
+    )
     logger.debug(
         "candidate processed",
         stage=stage,
@@ -809,12 +819,19 @@ def _evaluate_candidate(
         "candidate_confidence": candidate.confidence,
         "validation": validation.model_dump(mode="json"),
         "execution_result": execution.model_dump(mode="json"),
-        "score": _attempt_score(candidate=candidate, validation=validation, execution=execution),
+        "score": _attempt_score(
+            candidate=candidate,
+            validation=validation,
+            execution=execution,
+            aggregate_grain=aggregate_grain,
+        ),
     }
 
     if execution.ok:
         attempt["result_profile"] = profile_dataframe(dataframe)
         attempt["_dataframe"] = dataframe
+    if aggregate_grain is not None:
+        attempt["aggregate_grain"] = aggregate_grain.model_dump(mode="json")
     attempt["elapsed_seconds"] = round(perf_counter() - started_at, 3)
 
     return attempt
@@ -825,6 +842,7 @@ def _attempt_score(
     candidate: SQLCandidate,
     validation: Any,
     execution: Any,
+    aggregate_grain: AggregateGrainReport | None = None,
 ) -> float:
     """Prefer successfully executed candidates, then valid ones, then candidate confidence."""
 
@@ -837,6 +855,7 @@ def _attempt_score(
             score += 2.0
         if execution.row_count > 0:
             score += 1.0
+    score += _aggregate_grain_adjustment(aggregate_grain)
     return score
 
 
@@ -860,6 +879,145 @@ def _comparison_attempt_summary(attempt: dict[str, Any]) -> dict[str, Any]:
         "execution_result": attempt["execution_result"],
         "result_profile": attempt.get("result_profile", {}),
     }
+
+
+def _infer_aggregate_grain(
+    *,
+    task: Task,
+    candidate: SQLCandidate,
+    schema: SchemaSelection,
+    table_schemas: dict[str, TableSchema],
+    validation: Any,
+    execution: Any,
+) -> AggregateGrainReport | None:
+    """Infer the intended aggregate grain for one candidate."""
+
+    sql = str(candidate.sql)
+    normalized_sql = " ".join(sql.lower().split())
+    if not _looks_aggregate_query(normalized_sql):
+        return None
+
+    uses_distinct = "count(distinct" in normalized_sql
+    has_joins = " join " in normalized_sql
+    selected_tables = [
+        table_schemas.get(table_name)
+        or TableSchema(name=table_name, ddl="", searchable_text="")
+        for table_name in schema.expanded_tables
+    ]
+    entity_like_tables = [table for table in selected_tables if _table_is_entity_like(table)]
+    question_text = task.question.lower()
+    wants_unique = any(
+        keyword in question_text
+        for keyword in ("unique", "distinct", "dedupe", "dedup", "without duplicates")
+    )
+    target = _count_distinct_target(sql)
+
+    if uses_distinct:
+        if entity_like_tables and not has_joins and not wants_unique:
+            table_name = entity_like_tables[0].full_name or entity_like_tables[0].name
+            reason = (
+                f"Single entity table {table_name} has no joins, so DISTINCT is likely redundant."
+            )
+            distinct_reason = (
+                f"DISTINCT on {target or 'the counted column'} is probably unnecessary."
+            )
+            return AggregateGrainReport(
+                inferred_grain="row_count",
+                reason=reason,
+                distinct_reason=distinct_reason,
+                uses_distinct=True,
+                has_joins=has_joins,
+                selected_tables=[table.full_name or table.name for table in selected_tables],
+            )
+
+        if has_joins or wants_unique:
+            reason = "Joins or unique-count wording suggest deduping entity rows."
+            distinct_reason = f"DISTINCT on {target or 'the counted column'} is justified here."
+            return AggregateGrainReport(
+                inferred_grain="distinct_entity_count",
+                reason=reason,
+                distinct_reason=distinct_reason,
+                uses_distinct=True,
+                has_joins=has_joins,
+                selected_tables=[table.full_name or table.name for table in selected_tables],
+            )
+
+        reason = "DISTINCT appears to be a cautious choice, but the target grain is unclear."
+        distinct_reason = f"DISTINCT on {target or 'the counted column'} may be unnecessary."
+        return AggregateGrainReport(
+            inferred_grain="unknown",
+            reason=reason,
+            distinct_reason=distinct_reason,
+            uses_distinct=True,
+            has_joins=has_joins,
+            selected_tables=[table.full_name or table.name for table in selected_tables],
+        )
+
+    if entity_like_tables and not has_joins:
+        table_name = entity_like_tables[0].full_name or entity_like_tables[0].name
+        return AggregateGrainReport(
+            inferred_grain="row_count",
+            reason=f"Single entity table {table_name} with no joins usually counts rows.",
+            uses_distinct=False,
+            has_joins=has_joins,
+            selected_tables=[table.full_name or table.name for table in selected_tables],
+        )
+
+    if has_joins:
+        return AggregateGrainReport(
+            inferred_grain="value_count",
+            reason=(
+                "Join multiplicity suggests the result may count joined rows rather than entities."
+            ),
+            uses_distinct=False,
+            has_joins=has_joins,
+            selected_tables=[table.full_name or table.name for table in selected_tables],
+        )
+
+    return AggregateGrainReport(
+        inferred_grain="unknown",
+        reason="Aggregate query does not clearly indicate a unique entity grain.",
+        uses_distinct=False,
+        has_joins=has_joins,
+        selected_tables=[table.full_name or table.name for table in selected_tables],
+    )
+
+
+def _aggregate_grain_adjustment(report: AggregateGrainReport | None) -> float:
+    """Score candidate aggregates according to the inferred grain."""
+
+    if report is None:
+        return 0.0
+    if report.inferred_grain == "row_count":
+        return -2.5 if report.uses_distinct else 0.75
+    if report.inferred_grain == "distinct_entity_count":
+        return 0.75 if report.uses_distinct else -1.5
+    if report.inferred_grain == "value_count":
+        return 0.25
+    return 0.0
+
+
+def _table_is_entity_like(table: TableSchema) -> bool:
+    """Return True when a table looks like a master/entity table."""
+
+    table_name = (table.full_name or table.name).split(".")[-1].lower()
+    return (
+        table_name.startswith(("mst_", "dim_", "ref_", "lkp_"))
+        or table_name.endswith(("_users", "_user"))
+        or "master" in table_name
+        or "entity" in table_name
+    )
+
+
+def _count_distinct_target(sql: str) -> str | None:
+    """Extract the DISTINCT target column from a COUNT aggregate."""
+
+    match = re.search(r"count\s*\(\s*distinct\s+([^)]+)\)", sql, flags=re.IGNORECASE)
+    if match is None:
+        return None
+    target = match.group(1).strip()
+    target = re.sub(r"\s+as\s+\w+$", "", target, flags=re.IGNORECASE)
+    return target.strip(' "\'`')
 
 
 def _aggregate_verification_reason(attempt: dict[str, Any]) -> str | None:

@@ -142,6 +142,17 @@ class ConfidenceReport(BaseModel):
     repair_focus: str | None = None
 
 
+class AggregateGrainReport(BaseModel):
+    """Heuristic grain analysis used to rank aggregate candidates."""
+
+    inferred_grain: Literal["row_count", "distinct_entity_count", "value_count", "unknown"]
+    reason: str
+    distinct_reason: str | None = None
+    uses_distinct: bool = False
+    has_joins: bool = False
+    selected_tables: list[str] = Field(default_factory=list)
+
+
 class CandidateComparisonReport(BaseModel):
     """Comparator output that picks the executable candidate to inspect next."""
 
