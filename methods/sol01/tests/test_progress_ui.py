@@ -1,9 +1,11 @@
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from progress_ui import (
+    build_run_command,
     Record,
     apply_frame_filters,
     build_status_frame,
@@ -13,6 +15,7 @@ from progress_ui import (
     format_tier_summary,
     format_question_option,
     make_progress_frame_for_ids,
+    prepare_debug_frame,
     prepare_display_frame,
     prepare_question_table,
     recommend_focus,
@@ -449,3 +452,66 @@ def test_format_question_option_builds_readable_label():
     label = format_question_option(row)
 
     assert label == "sf_1 | Unanswered | Tier 2 | DB_A | find the top seller among regions"
+
+
+def test_prepare_debug_frame_keeps_operational_fields_visible():
+    frame = pd.DataFrame(
+        [
+            {
+                "instance_id": "sf_1",
+                "status": "correct",
+                "score": 1.0,
+                "timestamp": datetime(2026, 4, 30, tzinfo=UTC),
+                "run_id": "run-1",
+                "db": "DB_A",
+                "instruction": "question text",
+                "note": "note text",
+                "source_path": "/tmp/result.json",
+                "primary_tier": 3,
+                "tags": ["aggregation", "temporal"],
+                "difficulty_notes": "needs a time window",
+                "category_available": True,
+            }
+        ]
+    )
+
+    debug = prepare_debug_frame(frame)
+
+    assert list(debug.columns) == [
+        "instance_id",
+        "status",
+        "score",
+        "timestamp",
+        "run_id",
+        "db",
+        "instruction",
+        "note",
+        "source_path",
+        "primary_tier",
+        "tags",
+        "difficulty_notes",
+        "category_available",
+    ]
+    assert debug.loc[0, "timestamp"].startswith("2026-04-30")
+    assert debug.loc[0, "primary_tier"] == "Tier 3"
+    assert debug.loc[0, "tags"] == "aggregation, temporal"
+
+
+def test_prepare_debug_frame_returns_empty_schema_for_missing_results():
+    debug = prepare_debug_frame(pd.DataFrame())
+
+    assert debug.empty
+    assert "instance_id" in debug.columns
+
+
+def test_build_run_command_includes_dataset_and_source_paths():
+    command = build_run_command(
+        Path("/tmp/dataset.jsonl"),
+        Path("/tmp/results/latest.json"),
+    )
+
+    assert command == (
+        "uv run streamlit run progress_ui.py -- "
+        "--dataset /tmp/dataset.jsonl "
+        "--source /tmp/results/latest.json"
+    )

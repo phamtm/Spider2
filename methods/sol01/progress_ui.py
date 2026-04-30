@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import shlex
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -691,6 +692,45 @@ def prepare_display_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return display
 
 
+def prepare_debug_frame(frame: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "instance_id",
+        "status",
+        "score",
+        "timestamp",
+        "run_id",
+        "db",
+        "instruction",
+        "note",
+        "source_path",
+        "primary_tier",
+        "tags",
+        "difficulty_notes",
+        "category_available",
+    ]
+    if frame.empty:
+        return pd.DataFrame(columns=columns)
+
+    debug = frame.copy()
+    if "timestamp" in debug.columns:
+        debug["timestamp"] = debug["timestamp"].apply(lambda value: "" if _is_missing_value(value) else str(value))
+    if "primary_tier" in debug.columns:
+        debug["primary_tier"] = debug["primary_tier"].apply(_tier_display)
+    if "tags" in debug.columns:
+        debug["tags"] = debug["tags"].apply(lambda value: ", ".join(_normalize_tag_values(value)) or "—")
+    for column in ("instruction", "note", "db", "source_path", "difficulty_notes"):
+        if column in debug.columns:
+            debug[column] = debug[column].apply(lambda value: "" if _is_missing_value(value) else str(value))
+    if "category_available" not in debug.columns:
+        debug["category_available"] = False
+
+    for column in columns:
+        if column not in debug.columns:
+            debug[column] = "" if column != "category_available" else False
+
+    return debug[columns]
+
+
 def _truncate_text(value: Any, limit: int) -> str:
     if _is_missing_value(value):
         return ""
@@ -877,6 +917,14 @@ def render_question_detail(row: dict[str, Any] | None) -> None:
     extra_cols[1].markdown(f"**Difficulty notes**\n\n{row['difficulty_notes'] or '—'}")
 
     st.markdown(f"**Source**: `{row['source_path'] or '—'}`")
+
+
+def build_run_command(dataset_path: Path, source_path: Path) -> str:
+    return (
+        "uv run streamlit run progress_ui.py -- "
+        f"--dataset {shlex.quote(str(dataset_path))} "
+        f"--source {shlex.quote(str(source_path))}"
+    )
 
 
 def apply_frame_filters(
@@ -1156,26 +1204,10 @@ def main() -> None:
     st.set_page_config(page_title="Spider Progress", layout="wide")
     apply_page_style()
 
-    source_default = args.source if resolve_path(args.source).exists() else ""
+    dataset_path = resolve_path(args.dataset)
+    source_path = resolve_path(args.source)
     with st.sidebar:
         st.title("Progress UI")
-        dataset_path = resolve_path(
-            st.text_input(
-                "Dataset JSONL",
-                value=args.dataset,
-                help="Used for the full question list.",
-            )
-        )
-        source_path = resolve_path(
-            st.text_input(
-                "Results source",
-                value=source_default,
-                help=(
-                    "File or directory: latest.json, task_results.jsonl, "
-                    "summary.json, per_instance.jsonl, CSV, SQL dir."
-                ),
-            )
-        )
         metadata_rows = load_category_metadata_rows(str(dataset_path))
         available_tiers = sorted({row["primary_tier"] for row in metadata_rows.values()})
         available_tags = sorted({tag for row in metadata_rows.values() for tag in row["tags"]})
@@ -1202,10 +1234,10 @@ def main() -> None:
     # Pass strings to the cached functions, as Streamlit handles string hashing perfectly
     dataset = read_dataset(str(dataset_path))
     records = load_records(str(source_path))
-    frame = build_status_frame(dataset, records, metadata_rows)
+    full_frame = build_status_frame(dataset, records, metadata_rows)
 
     frame = apply_frame_filters(
-        frame,
+        full_frame,
         search=search,
         selected_status=selected,
         selected_tiers=selected_tiers,
@@ -1220,7 +1252,7 @@ def main() -> None:
     answered_score = summary["coverage_pct"]
     correct_score = summary["accuracy_pct"]
 
-    overview_tab, questions_tab = st.tabs(["Overview", "Questions"])
+    overview_tab, questions_tab, debug_tab = st.tabs(["Overview", "Questions", "Debug"])
 
     with overview_tab:
         st.header("Spider2-Snowflake Progress")
@@ -1330,6 +1362,36 @@ def main() -> None:
                 )
             with detail_col:
                 render_question_detail(select_question_row(frame, selected_instance_id))
+
+    with debug_tab:
+        st.header("Debug")
+        st.caption("Operational details for triage and empty-state debugging.")
+
+        run_command = build_run_command(dataset_path, source_path)
+        debug_cols = st.columns(4)
+        debug_cols[0].metric("Loaded records", f"{len(records):,}")
+        debug_cols[1].metric("Raw rows", f"{len(full_frame):,}")
+        debug_cols[2].metric("Metadata tiers", f"{len(available_tiers):,}")
+        debug_cols[3].metric("Metadata tags", f"{len(available_tags):,}")
+
+        detail_cols = st.columns(2)
+        with detail_cols[0]:
+            st.markdown("**Dataset path**")
+            st.code(str(dataset_path))
+            st.markdown("**Results source**")
+            st.code(str(source_path))
+        with detail_cols[1]:
+            st.markdown("**Run command**")
+            st.code(run_command, language="bash")
+            st.markdown("**Metadata state**")
+            if metadata_rows:
+                st.success(f"Category metadata available for {len(metadata_rows):,} questions.")
+            else:
+                st.warning("Category metadata is missing for this dataset.")
+
+        st.subheader("Raw rows")
+        debug_frame = prepare_debug_frame(full_frame)
+        st.dataframe(debug_frame, width="stretch", height=TABLE_HEIGHT, hide_index=True)
 
 
 if __name__ == "__main__":
