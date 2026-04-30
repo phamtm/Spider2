@@ -688,7 +688,7 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
     task = Task(
         instance_id="sf_bq327",
         db="TEST_DB",
-        question="Count rows for a country filter that might use a label variant.",
+        question="Count distinct indicators for a country filter that might use a label variant.",
     )
     run_paths = ensure_run_paths("aggregate-verification-run", outputs_root=tmp_path)
     captured_prompts: dict[str, list[str]] = {}
@@ -696,31 +696,35 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
     def fake_fetch_query_dataframe(sql: str, *, db: str) -> pd.DataFrame:
         if db != "TEST_DB":
             raise AssertionError(f"Unexpected database: {db}")
-        if "country = 'Russia'" in sql:
-            return pd.DataFrame([{"TOTAL_ROWS": 0}])
-        if "LIKE LOWER('%Russia%')" in sql and "COUNTRY" in sql.upper():
+        if "\"country_name\" = 'Russia'" in sql:
+            return pd.DataFrame([{"INDICATOR_COUNT": 0}])
+        if "LIKE LOWER('%Russia%')" in sql and "MATCHED_VALUE" in sql:
             return pd.DataFrame([{"MATCHED_VALUE": "Russian Federation"}])
-        if "country IN ('Russia', 'Russian Federation')" in sql:
-            return pd.DataFrame([{"TOTAL_ROWS": 4}])
+        if "\"country_name\" IN ('Russia', 'Russian Federation')" in sql:
+            return pd.DataFrame([{"INDICATOR_COUNT": 4}])
         raise AssertionError(f"Unexpected SQL: {sql}")
 
     llm = FakeLLMClient(
         outputs={
             "intent": [
                 Intent(
-                    summary="Count rows for the requested country bucket.",
-                    entities=["sales", "country"],
-                    metrics=["count rows"],
-                    filters=["country = 'Russia'"],
+                    summary="Count distinct indicators for the requested country bucket.",
+                    entities=["international debt", "country"],
+                    metrics=["count distinct indicators"],
+                    filters=["country_name = 'Russia'"],
                     time_constraints=[],
-                    output_expectation="one count",
+                    output_expectation="one distinct indicator count",
                     assumptions=["The label may need variant matching."],
                 )
             ],
             "sql_generation": [
                 SQLCandidate(
-                    sql="SELECT COUNT(*) AS TOTAL_ROWS FROM SALES WHERE country = 'Russia'",
-                    explanation="A direct country filter.",
+                    sql=(
+                        'SELECT COUNT(DISTINCT "indicator_code") AS indicator_count '
+                        "FROM WORLD_BANK.WORLD_BANK_INTL_DEBT.INTERNATIONAL_DEBT "
+                        'WHERE "country_name" = \'Russia\' AND "value" = 0'
+                    ),
+                    explanation="A direct country filter over distinct indicator codes.",
                     assumptions=["country stores a single canonical label"],
                     confidence=0.95,
                 )
@@ -736,8 +740,10 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
             "sql_repair": [
                 SQLCandidate(
                     sql=(
-                        "SELECT COUNT(*) AS TOTAL_ROWS FROM SALES "
-                        "WHERE country IN ('Russia', 'Russian Federation')"
+                        'SELECT COUNT(DISTINCT "indicator_code") AS indicator_count '
+                        "FROM WORLD_BANK.WORLD_BANK_INTL_DEBT.INTERNATIONAL_DEBT "
+                        "WHERE \"country_name\" IN ('Russia', 'Russian Federation') "
+                        'AND "value" = 0'
                     ),
                     explanation="Widen the filter to a known country variant.",
                     assumptions=["country may be stored under a longer canonical label"],
@@ -759,21 +765,29 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
         "sol01.coordinator.retrieve_schema",
         lambda *args, **kwargs: SchemaSelection(
             db="test_db",
-            selected_tables=["TEST_DB.PUBLIC.SALES"],
-            expanded_tables=["TEST_DB.PUBLIC.SALES"],
-            rationale="sales is enough",
+            selected_tables=["WORLD_BANK.WORLD_BANK_INTL_DEBT.INTERNATIONAL_DEBT"],
+            expanded_tables=["WORLD_BANK.WORLD_BANK_INTL_DEBT.INTERNATIONAL_DEBT"],
+            rationale="international debt is enough",
             confidence=0.9,
         ),
     )
     monkeypatch.setattr(
         "sol01.coordinator.load_db_index",
         lambda *args, **kwargs: {
-            "TEST_DB.PUBLIC.SALES": TableSchema(
-                name="SALES",
-                full_name="TEST_DB.PUBLIC.SALES",
-                ddl="create table SALES (COUNTRY text);",
-                columns=[ColumnSchema(name="COUNTRY", type="TEXT")],
-                searchable_text="sales country",
+            "WORLD_BANK.WORLD_BANK_INTL_DEBT.INTERNATIONAL_DEBT": TableSchema(
+                name="INTERNATIONAL_DEBT",
+                full_name="WORLD_BANK.WORLD_BANK_INTL_DEBT.INTERNATIONAL_DEBT",
+                ddl=(
+                    'create table INTERNATIONAL_DEBT ("country_name" text, '
+                    '"indicator_code" text, "indicator_name" text, "value" number);'
+                ),
+                columns=[
+                    ColumnSchema(name="country_name", type="TEXT"),
+                    ColumnSchema(name="indicator_code", type="TEXT"),
+                    ColumnSchema(name="indicator_name", type="TEXT"),
+                    ColumnSchema(name="value", type="NUMBER"),
+                ],
+                searchable_text="international debt country indicator",
             )
         },
     )
@@ -801,10 +815,16 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
         "LIKE LOWER('%Russia%')"
         in trace["attempts"][0]["filter_grounding_report"]["probes"][0]["probe_sql"]
     )
+    assert 'COUNT(DISTINCT "indicator_code")' in trace["attempts"][0]["sql"]
     assert trace["attempts"][0]["aggregate_verification"]["should_repair"] is True
     assert trace["attempts"][1]["stage"] == "aggregate_repair"
     assert trace["attempts"][1]["execution_result"]["ok"] is True
-    assert trace["final_sql"].endswith("country IN ('Russia', 'Russian Federation')")
+    assert trace["final_sql"].startswith(
+        'SELECT COUNT(DISTINCT "indicator_code") AS indicator_count'
+    )
+    assert trace["final_sql"].endswith(
+        "WHERE \"country_name\" IN ('Russia', 'Russian Federation') AND \"value\" = 0"
+    )
     assert "value variants" in captured_prompts["aggregate_verification"][0]
     assert "grain" in captured_prompts["aggregate_verification"][0]
     assert "Verification:" in captured_prompts["sql_repair"][0]
