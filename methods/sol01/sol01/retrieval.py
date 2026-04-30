@@ -193,16 +193,19 @@ def _sanitize_llm_tables(
     """Keep valid unique table names and surface an empty selection when none survive."""
 
     valid_tables = {table_name.lower(): table_name for table_name in db_index}
-    short_name_lookup: dict[str, list[str]] = {}
-    for table_identity, table in db_index.items():
-        short_name_lookup.setdefault(table.name.lower(), []).append(table_identity)
+    suffix_lookup: dict[str, list[str]] = {}
+    for table_identity in db_index:
+        parts = table_identity.lower().split(".")
+        for start in range(len(parts)):
+            suffix = ".".join(parts[start:])
+            suffix_lookup.setdefault(suffix, []).append(table_identity)
 
     selected_tables: list[str] = []
     for table_name in requested_tables:
         normalized = table_name.strip().lower()
         canonical = valid_tables.get(normalized)
         if canonical is None:
-            matches = short_name_lookup.get(normalized, [])
+            matches = suffix_lookup.get(normalized, [])
             if len(matches) == 1:
                 canonical = matches[0]
         if canonical is None or canonical in selected_tables:

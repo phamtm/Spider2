@@ -103,6 +103,18 @@ def test_default_prompt_directory_contains_packaged_prompts():
     assert prompt.text.startswith("# Intent Extraction")
 
 
+def test_default_sql_prompts_keep_grouped_identifiers():
+    client = LLMClient(RuntimeConfig(api_key="test-key"))
+
+    generation_prompt = client.load_prompt("sql_generation")
+    repair_prompt = client.load_prompt("sql_repair")
+    comparison_prompt = client.load_prompt("result_comparison")
+
+    assert "stable identifier and a display label" in generation_prompt.text
+    assert "stable identifier and a display label" in repair_prompt.text
+    assert "preserves a stable grouping identifier" in comparison_prompt.text
+
+
 def test_build_model_uses_openrouter_wrapper_for_string_override():
     config = RuntimeConfig(api_key="test-key")
 

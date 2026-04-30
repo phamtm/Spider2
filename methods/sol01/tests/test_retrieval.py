@@ -122,3 +122,22 @@ def test_retrieve_schema_llm_only_surfaces_empty_valid_selection():
     assert selection.expanded_tables == []
     assert selection.confidence == 0.0
     assert "No valid tables matched the schema summary." in selection.rationale
+
+
+def test_retrieve_schema_llm_only_accepts_suffix_matches():
+    llm = FakeSelectorLLM(
+        TableSelectionDecision(
+            selected_tables=["E_COMMERCE.ORDERS", "E_COMMERCE.CUSTOMERS"],
+            rationale="Orders and customers are the core business entities here.",
+            confidence=0.82,
+        )
+    )
+
+    selection = retrieve_schema(
+        "Which customers placed the highest value orders?",
+        "E_COMMERCE",
+        llm_client=llm,
+    )
+
+    assert selection.selected_tables == [ORDERS, CUSTOMERS]
+    assert selection.expanded_tables == selection.selected_tables
