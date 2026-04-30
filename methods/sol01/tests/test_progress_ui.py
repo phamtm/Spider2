@@ -17,6 +17,7 @@ from progress_ui import (
     format_question_option,
     format_tier_summary,
     latest_records,
+    load_records,
     make_progress_frame_for_ids,
     prepare_debug_frame,
     prepare_display_frame,
@@ -523,6 +524,7 @@ def test_prepare_question_table_orders_unanswered_first_and_truncates_text():
                 "db": "DB_B",
                 "instruction": "short prompt",
                 "note": "done",
+                "diagnostics": "validation: ok",
                 "score": 1.0,
             },
             {
@@ -545,6 +547,7 @@ def test_prepare_question_table_orders_unanswered_first_and_truncates_text():
     assert table.loc[0, "primary_tier"] == "Tier 1"
     assert table.loc[0, "instruction"].endswith("…")
     assert table.loc[1, "note"] == "done"
+    assert table.loc[1, "diagnostics"] == "validation: ok"
 
 
 def test_should_show_all_questions_turns_on_for_tier_or_tag_filters():
@@ -578,6 +581,7 @@ def test_select_question_row_returns_full_detail_fields():
                 "db": "DB_A",
                 "instruction": "find the top seller",
                 "note": "missing join",
+                "diagnostics": "ranking: validation=-180.0",
                 "difficulty_notes": "needs ranking",
                 "source_path": "/tmp/result.json",
                 "score": 0.0,
@@ -592,6 +596,7 @@ def test_select_question_row_returns_full_detail_fields():
     assert row["primary_tier_label"] == "Tier 4"
     assert row["tags_label"] == "ranking, joins"
     assert row["source_path"] == "/tmp/result.json"
+    assert row["diagnostics"] == "ranking: validation=-180.0"
 
 
 def test_format_question_option_builds_readable_label():
@@ -620,6 +625,7 @@ def test_prepare_debug_frame_keeps_operational_fields_visible():
                 "db": "DB_A",
                 "instruction": "question text",
                 "note": "note text",
+                "diagnostics": "validation: missing table",
                 "source_path": "/tmp/result.json",
                 "primary_tier": 3,
                 "tags": ["aggregation", "temporal"],
@@ -640,6 +646,7 @@ def test_prepare_debug_frame_keeps_operational_fields_visible():
         "db",
         "instruction",
         "note",
+        "diagnostics",
         "source_path",
         "primary_tier",
         "tags",
@@ -649,6 +656,7 @@ def test_prepare_debug_frame_keeps_operational_fields_visible():
     assert debug.loc[0, "timestamp"].startswith("2026-04-30")
     assert debug.loc[0, "primary_tier"] == "Tier 3"
     assert debug.loc[0, "tags"] == "aggregation, temporal"
+    assert debug.loc[0, "diagnostics"] == "validation: missing table"
 
 
 def test_prepare_debug_frame_returns_empty_schema_for_missing_results():
@@ -668,4 +676,63 @@ def test_build_run_command_includes_dataset_and_source_paths():
         "uv run streamlit run progress_ui.py -- "
         "--dataset /tmp/dataset.jsonl "
         "--source /tmp/results/latest.json"
+    )
+
+
+def test_load_records_extracts_trace_diagnostics_from_trace_json(tmp_path: Path):
+    trace_dir = tmp_path / "run"
+    trace_dir.mkdir()
+    (trace_dir / "trace.json").write_text(
+        """
+        {
+          "instance_id": "sf_1",
+          "status": "failed",
+          "db": "DB_A",
+          "question": "Find a customer.",
+          "attempts": [
+            {
+              "validation": {"ok": false, "errors": ["missing grouped key StyleID"]},
+              "execution_result": {"ok": false, "error": "Validation failed before execution."},
+              "shape_report": {"violations": ["missing grouped key StyleID"]},
+              "filter_grounding_report": {
+                "reason": "Empty result but probe values suggest a stored label variant.",
+                "exact_filters": ["country = 'Russia'"],
+                "value_rewrites": [
+                  {
+                    "filter": "country = 'Russia'",
+                    "rewrite": "Russian Federation"
+                  }
+                ]
+              },
+              "critic": {
+                "should_repair": true,
+                "repair_focus": "add the grouped key",
+                "issues": ["Result is missing the customer breakdown."]
+              },
+              "score_breakdown": {
+                "execution_status": -1000.0,
+                "validation": -180.0,
+                "shape": -28.0,
+                "filter_grounding": 16.0,
+                "confidence_tiebreaker": 0.01
+              }
+            }
+          ]
+        }
+        """.strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    records = load_records(str(trace_dir))
+
+    assert len(records) == 1
+    assert records[0].diagnostics == (
+        "validation: missing grouped key StyleID | "
+        "execution: Validation failed before execution. | "
+        "shape: missing grouped key StyleID | "
+        "filter grounding: country = 'Russia' -> Russian Federation | "
+        "filters: country = 'Russia' | "
+        "critic: Result is missing the customer breakdown. | "
+        "ranking: execution_status=-1000, validation=-180, shape=-28"
     )

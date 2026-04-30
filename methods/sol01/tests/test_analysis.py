@@ -732,3 +732,85 @@ def test_analyze_run_keeps_empty_per_instance_as_source_of_truth(tmp_path: Path)
     summary_text = (run_paths.analysis_dir / "summary.md").read_text(encoding="utf-8")
     assert "source: eval summary per_instance (0 rows)" in summary_text
     assert "- mapped: 0, unmapped: 0, total 0" in summary_text
+
+
+def test_analyze_run_surfaces_failed_question_diagnostics(tmp_path: Path):
+    """Failed questions should expose verification, repair, and ranking context."""
+
+    run_paths = ensure_run_paths("failed-question-diagnostics", outputs_root=tmp_path)
+    write_trace(
+        run_paths,
+        instance_id="local401",
+        trace={
+            "instance_id": "local401",
+            "db": "db_alpha",
+            "question": "Find the matching country label.",
+            "status": "failed",
+            "csv_path": None,
+            "attempts": [
+                {
+                    "sql": "SELECT country FROM sales WHERE country = 'Russia'",
+                    "validation": {
+                        "ok": False,
+                        "errors": ["missing grouped key StyleID"],
+                    },
+                    "execution_result": {
+                        "ok": False,
+                        "error": "Validation failed before execution.",
+                    },
+                    "shape_report": {
+                        "violations": ["missing grouped key StyleID"],
+                    },
+                    "filter_grounding_report": {
+                        "reason": "Empty result but probe values suggest a stored label variant.",
+                        "exact_filters": ["country = 'Russia'"],
+                        "value_rewrites": [
+                            {
+                                "filter": "country = 'Russia'",
+                                "rewrite": "Russian Federation",
+                            }
+                        ],
+                    },
+                    "critic": {
+                        "should_repair": True,
+                        "repair_focus": "add the grouped key",
+                        "issues": ["Result is missing the customer breakdown."],
+                    },
+                    "score_breakdown": {
+                        "execution_status": -1000.0,
+                        "validation": -180.0,
+                        "shape": -28.0,
+                        "filter_grounding": 16.0,
+                        "confidence_tiebreaker": 0.01,
+                    },
+                }
+            ],
+        },
+    )
+
+    report = analyze_run("failed-question-diagnostics", outputs_root=tmp_path)
+
+    failed = report["failed_questions"]
+    assert len(failed) == 1
+    assert failed[0]["instance_id"] == "local401"
+    assert failed[0]["verification_checks"] == [
+        "validation",
+        "execution",
+        "shape",
+        "filter_grounding",
+        "critic",
+    ]
+    assert failed[0]["failed_checks"] == [
+        "validation",
+        "execution",
+        "shape",
+        "filter_grounding",
+        "critic",
+    ]
+    assert failed[0]["repair_triggers"] == ["critic repair: add the grouped key"]
+    assert failed[0]["ranking_reasons"][0] == "execution_status=-1000"
+
+    summary_text = (run_paths.analysis_dir / "summary.md").read_text(encoding="utf-8")
+    assert "## Failed Questions" in summary_text
+    assert "local401" in summary_text
+    assert "ranking: execution_status=-1000" in summary_text

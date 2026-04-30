@@ -29,6 +29,7 @@ from sol01.category_metadata import (
     tier_complexity_summary,
 )
 from sol01.logging import get_logger
+from sol01.trace_diagnostics import summarize_trace_diagnostics
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = ROOT / "spider2-snow" / "spider2-snow.jsonl"
@@ -71,6 +72,7 @@ class Record:
     db: str | None
     note: str | None
     source_path: str | None
+    diagnostics: str | None = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -220,6 +222,7 @@ def normalize_item(
     status, score = classify(item)
     timestamp = parse_timestamp(item.get("timestamp") or item.get("generated_at"))
     note = item.get("failure_reason") or item.get("eval_error") or item.get("solver_status")
+    diagnostics = summarize_trace_diagnostics(item)
     return Record(
         instance_id=instance_id,
         status=status,
@@ -229,6 +232,7 @@ def normalize_item(
         db=item.get("db") or item.get("db_id"),
         note=str(note) if note else None,
         source_path=str(source_path),
+        diagnostics=diagnostics,
     )
 
 
@@ -295,6 +299,7 @@ def records_from_file(path: Path) -> list[Record]:
                 db=None,
                 note="SQL present, not evaluated",
                 source_path=str(path),
+                diagnostics=None,
             )
         ]
     return []
@@ -408,6 +413,7 @@ def build_status_frame(
                 "instruction": info.get("instruction", ""),
                 "note": _missing_to_na(record.note if record else pd.NA),
                 "source_path": _missing_to_na(record.source_path if record else pd.NA),
+                "diagnostics": _missing_to_na(record.diagnostics if record else pd.NA),
                 "primary_tier": _missing_to_na(category["primary_tier"] if category else pd.NA),
                 "tags": list(category["tags"]) if category else [],
                 "difficulty_notes": _missing_to_na(
@@ -432,6 +438,7 @@ def build_status_frame(
                 "instruction": "",
                 "note": _missing_to_na(record.note),
                 "source_path": _missing_to_na(record.source_path),
+                "diagnostics": _missing_to_na(record.diagnostics),
                 "primary_tier": _missing_to_na(category["primary_tier"] if category else pd.NA),
                 "tags": list(category["tags"]) if category else [],
                 "difficulty_notes": _missing_to_na(
@@ -767,6 +774,7 @@ def prepare_debug_frame(frame: pd.DataFrame) -> pd.DataFrame:
         "db",
         "instruction",
         "note",
+        "diagnostics",
         "source_path",
         "primary_tier",
         "tags",
@@ -792,6 +800,10 @@ def prepare_debug_frame(frame: pd.DataFrame) -> pd.DataFrame:
             debug[column] = debug[column].apply(
                 lambda value: "" if _is_missing_value(value) else str(value)
             )
+    if "diagnostics" in debug.columns:
+        debug["diagnostics"] = debug["diagnostics"].apply(
+            lambda value: "" if _is_missing_value(value) else _truncate_text(value, 120)
+        )
     if "category_available" not in debug.columns:
         debug["category_available"] = False
 
@@ -841,6 +853,7 @@ def prepare_question_table(frame: pd.DataFrame) -> pd.DataFrame:
                 "db",
                 "instruction",
                 "note",
+                "diagnostics",
                 "score",
             ]
         )
@@ -858,6 +871,8 @@ def prepare_question_table(frame: pd.DataFrame) -> pd.DataFrame:
         display["instruction"] = ""
     if "note" not in display.columns:
         display["note"] = ""
+    if "diagnostics" not in display.columns:
+        display["diagnostics"] = ""
     if "score" not in display.columns:
         display["score"] = pd.NA
 
@@ -878,6 +893,9 @@ def prepare_question_table(frame: pd.DataFrame) -> pd.DataFrame:
         lambda value: _truncate_text(value, 120) or "—"
     )
     display["note"] = display["note"].apply(lambda value: _truncate_text(value, 80) or "—")
+    display["diagnostics"] = display["diagnostics"].apply(
+        lambda value: _truncate_text(value, 120) or "—"
+    )
     display["db"] = display["db"].apply(lambda value: _truncate_text(value, 48) or "—")
 
     display = display.sort_values(
@@ -893,6 +911,7 @@ def prepare_question_table(frame: pd.DataFrame) -> pd.DataFrame:
             "db",
             "instruction",
             "note",
+            "diagnostics",
             "score",
         ]
     ]
@@ -933,6 +952,9 @@ def select_question_row(frame: pd.DataFrame, instance_id: str | None) -> dict[st
         "" if _is_missing_value(row.get("instruction")) else str(row.get("instruction"))
     )
     row["note"] = "" if _is_missing_value(row.get("note")) else str(row.get("note"))
+    row["diagnostics"] = (
+        "" if _is_missing_value(row.get("diagnostics")) else str(row.get("diagnostics"))
+    )
     row["difficulty_notes"] = (
         "" if _is_missing_value(row.get("difficulty_notes")) else str(row.get("difficulty_notes"))
     )
@@ -1007,6 +1029,9 @@ def render_question_detail(row: dict[str, Any] | None) -> None:
         f"**Difficulty notes**\n\n"
         f"{row['difficulty_notes'] if not _is_missing_value(row['difficulty_notes']) else '—'}"
     )
+
+    if not _is_missing_value(row.get("diagnostics")):
+        st.markdown(f"**Diagnostics**\n\n{row['diagnostics']}")
 
     st.markdown(
         f"**Source**: `{row['source_path'] if not _is_missing_value(row['source_path']) else '—'}`"
@@ -1468,6 +1493,7 @@ def main() -> None:
             "db",
             "instruction",
             "note",
+            "diagnostics",
         ]
 
         st.subheader("Filtered questions")

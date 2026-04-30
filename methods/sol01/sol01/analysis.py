@@ -16,6 +16,7 @@ from sol01.category_metadata import (
 from sol01.logging import get_logger
 from sol01.output import RunPaths, ensure_run_paths
 from sol01.tasks import REPO_ROOT
+from sol01.trace_diagnostics import summarize_failed_question
 
 OUTPUTS_ROOT = REPO_ROOT / "methods" / "sol01" / "outputs"
 FAILURE_CATEGORIES = (
@@ -79,6 +80,12 @@ def analyze_run(
     for records in by_category.values():
         records.sort(key=lambda record: record["instance_id"])
 
+    failed_questions = [
+        _failed_question_record(trace)
+        for trace in traces
+        if str(trace.get("status") or "") == "failed"
+    ]
+
     report = {
         "run_id": run_id,
         "trace_count": len(traces),
@@ -92,6 +99,7 @@ def analyze_run(
         "by_database": _database_summary(traces, by_category),
         "by_primary_tier": _category_result_summary(result_rows, category_map, kind="tier"),
         "by_tag": _category_result_summary(result_rows, category_map, kind="tag"),
+        "failed_questions": failed_questions,
     }
 
     failures_path = run_paths.analysis_dir / "failures.json"
@@ -283,6 +291,23 @@ def _trace_hints(trace: dict[str, Any]) -> list[str]:
     ):
         hints.append("possible_date_filter_issue")
     return [hint for hint in FAILURE_HINTS if hint in hints]
+
+
+def _failed_question_record(trace: dict[str, Any]) -> dict[str, Any]:
+    """Summarize the verification signals for one failed question."""
+
+    summary = summarize_failed_question(trace)
+    return {
+        "instance_id": summary.get("instance_id"),
+        "db": trace.get("db"),
+        "question": trace.get("question"),
+        "status": summary.get("status"),
+        "verification_checks": summary.get("verification_checks", []),
+        "failed_checks": summary.get("failed_checks", []),
+        "repair_triggers": summary.get("repair_triggers", []),
+        "ranking_reasons": summary.get("ranking_reasons", []),
+        "diagnostics": summary.get("diagnostics"),
+    }
 
 
 def _analysis_text(trace: dict[str, Any], final_attempt: dict[str, Any]) -> str:
@@ -576,6 +601,27 @@ def _render_summary(report: dict[str, Any]) -> str:
             record["instance_id"] for record in records if record["instance_id"]
         )
         lines.append(f"- {category}: {len(records)} ({instance_ids})")
+
+    failed_questions = report.get("failed_questions") or []
+    if failed_questions:
+        lines.append("")
+        lines.append("## Failed Questions")
+        for row in failed_questions:
+            summary_bits = []
+            if row.get("verification_checks"):
+                summary_bits.append(f"checks: {', '.join(row['verification_checks'])}")
+            if row.get("failed_checks"):
+                summary_bits.append(f"failed: {', '.join(row['failed_checks'])}")
+            if row.get("repair_triggers"):
+                summary_bits.append(f"repair: {', '.join(row['repair_triggers'])}")
+            if row.get("ranking_reasons"):
+                summary_bits.append(f"ranking: {', '.join(row['ranking_reasons'])}")
+            if row.get("diagnostics"):
+                summary_bits.append(str(row["diagnostics"]))
+            lines.append(
+                f"- {row['instance_id']}: "
+                + "; ".join(summary_bits if summary_bits else ["no diagnostics available"])
+            )
 
     lines.append("")
     lines.append("## Category Coverage")
