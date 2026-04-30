@@ -7,6 +7,13 @@ import json
 from collections.abc import Sequence
 from pathlib import Path
 
+from sol01.category_metadata import (  # noqa: F401
+    CATEGORY_BATCHES_DIR,
+    CategoryMetadata,
+    CategoryMetadataValidationError,
+    load_category_metadata,
+    load_category_metadata_map,
+)
 from sol01.logging import get_logger
 from sol01.models import Task
 

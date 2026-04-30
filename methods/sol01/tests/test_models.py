@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from sol01.models import (
+    CategoryMetadata,
     ColumnSchema,
     ConfidenceReport,
     ExecutionResult,
@@ -36,6 +37,18 @@ def test_task_and_intent_models_construct_from_expected_fields():
     assert task.instance_id == "local003"
     assert task.external_knowledge is None
     assert intent.metrics == ["average order value"]
+
+
+def test_category_metadata_model_constructs():
+    metadata = CategoryMetadata(
+        instance_id="sf_bq011",
+        primary_tier=6,
+        tags=["aggregation", "temporal"],
+        difficulty_notes=None,
+    )
+
+    assert metadata.instance_id == "sf_bq011"
+    assert metadata.primary_tier == 6
 
 
 def test_schema_models_use_independent_default_lists():
