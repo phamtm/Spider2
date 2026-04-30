@@ -21,6 +21,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from sol01.category_metadata import CategoryMetadataValidationError, load_category_metadata_map
+
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = ROOT / "spider2-snow" / "spider2-snow.jsonl"
 DEFAULT_SOURCE = ROOT / "methods" / "sol01" / "outputs" / "registry" / "latest.json"
@@ -319,6 +321,27 @@ def load_records(source_str: str) -> list[Record]:
     return records_from_file(source)
 
 
+@st.cache_data(ttl=3600)  # Cache metadata alongside the dataset for a stable sidebar
+def load_category_metadata_rows(dataset_path: str) -> dict[str, dict[str, Any]]:
+    path = Path(dataset_path)
+    if not path.exists():
+        return {}
+
+    try:
+        metadata_map = load_category_metadata_map(dataset_path=path)
+    except (CategoryMetadataValidationError, FileNotFoundError, OSError, ValueError):
+        return {}
+
+    return {
+        instance_id: {
+            "primary_tier": record.primary_tier,
+            "tags": list(record.tags),
+            "difficulty_notes": record.difficulty_notes,
+        }
+        for instance_id, record in metadata_map.items()
+    }
+
+
 def latest_records(records: list[Record]) -> dict[str, Record]:
     latest: dict[str, Record] = {}
     for index, record in enumerate(records):
@@ -330,15 +353,22 @@ def latest_records(records: list[Record]) -> dict[str, Record]:
     return latest
 
 
-def build_status_frame(dataset: pd.DataFrame, records: list[Record]) -> pd.DataFrame:
+def build_status_frame(
+    dataset: pd.DataFrame,
+    records: list[Record],
+    category_rows: dict[str, dict[str, Any]] | None = None,
+) -> pd.DataFrame:
     latest = latest_records(records)
     ids = list(dataset["instance_id"]) if not dataset.empty else sorted(latest)
+    id_set = set(ids)
     rows = []
     metadata = dataset.set_index("instance_id").to_dict("index") if not dataset.empty else {}
+    category_rows = category_rows or {}
 
     for instance_id in ids:
         record = latest.get(instance_id)
         info = metadata.get(instance_id, {})
+        category = category_rows.get(instance_id)
         rows.append(
             {
                 "instance_id": instance_id,
@@ -350,12 +380,17 @@ def build_status_frame(dataset: pd.DataFrame, records: list[Record]) -> pd.DataF
                 "instruction": info.get("instruction", ""),
                 "note": record.note if record else None,
                 "source_path": record.source_path if record else None,
+                "primary_tier": category["primary_tier"] if category else None,
+                "tags": list(category["tags"]) if category else [],
+                "difficulty_notes": category["difficulty_notes"] if category else None,
+                "category_available": category is not None,
             }
         )
 
-    extras = [instance_id for instance_id in latest if instance_id not in set(ids)]
+    extras = [instance_id for instance_id in latest if instance_id not in id_set]
     for instance_id in sorted(extras):
         record = latest[instance_id]
+        category = category_rows.get(instance_id)
         rows.append(
             {
                 "instance_id": instance_id,
@@ -367,10 +402,66 @@ def build_status_frame(dataset: pd.DataFrame, records: list[Record]) -> pd.DataF
                 "instruction": "",
                 "note": record.note,
                 "source_path": record.source_path,
+                "primary_tier": category["primary_tier"] if category else None,
+                "tags": list(category["tags"]) if category else [],
+                "difficulty_notes": category["difficulty_notes"] if category else None,
+                "category_available": category is not None,
             }
         )
 
     return pd.DataFrame(rows)
+
+
+def apply_frame_filters(
+    frame: pd.DataFrame,
+    *,
+    search: str = "",
+    selected_status: list[str] | None = None,
+    selected_tiers: list[int] | None = None,
+    selected_tags: list[str] | None = None,
+) -> pd.DataFrame:
+    filtered = frame
+
+    if search:
+        search_columns = [
+            column
+            for column in (
+                "instance_id",
+                "db",
+                "instruction",
+                "note",
+                "primary_tier",
+                "tags",
+                "difficulty_notes",
+            )
+            if column in filtered.columns
+        ]
+        search_mask = (
+            filtered[search_columns]
+            .astype(str)
+            .apply(lambda col: col.str.contains(search, case=False, na=False))
+            .any(axis=1)
+        )
+        filtered = filtered[search_mask]
+
+    if selected_status:
+        filtered = filtered[filtered["status"].isin(selected_status)]
+
+    category_filters_active = bool(selected_tiers or selected_tags)
+    if category_filters_active and "category_available" in filtered.columns:
+        filtered = filtered[filtered["category_available"]]
+
+    if selected_tiers:
+        filtered = filtered[filtered["primary_tier"].isin(selected_tiers)]
+
+    if selected_tags:
+        filtered = filtered[
+            filtered["tags"].apply(
+                lambda tags: all(tag in (tags or []) for tag in selected_tags)
+            )
+        ]
+
+    return filtered
 
 
 def make_progress_frame(records: list[Record], total_questions: int) -> pd.DataFrame:
@@ -587,6 +678,9 @@ def main() -> None:
                 ),
             )
         )
+        metadata_rows = load_category_metadata_rows(str(dataset_path))
+        available_tiers = sorted({row["primary_tier"] for row in metadata_rows.values()})
+        available_tags = sorted({tag for row in metadata_rows.values() for tag in row["tags"]})
         search = st.text_input("Search", value="")
         selected = st.multiselect(
             "Status",
@@ -594,26 +688,34 @@ def main() -> None:
             default=list(STATUS_ORDER),
             format_func=lambda value: STATUS_LABELS[value],
         )
+        selected_tiers = st.multiselect(
+            "Tier",
+            options=available_tiers,
+            default=[],
+            help="Leave empty to include every tier.",
+        )
+        selected_tags = st.multiselect(
+            "Tags",
+            options=available_tags,
+            default=[],
+            help="Multiple tags use AND semantics.",
+        )
+        if not available_tiers or not available_tags:
+            st.caption("Category metadata is unavailable for the current dataset.")
         st.caption("Run: `uv run streamlit run progress_ui.py`")
 
     # Pass strings to the cached functions, as Streamlit handles string hashing perfectly
     dataset = read_dataset(str(dataset_path))
     records = load_records(str(source_path))
-    frame = build_status_frame(dataset, records)
+    frame = build_status_frame(dataset, records, metadata_rows)
 
-    # Filter logic: Vectorized operations for significant speedup
-    if search:
-        # Check all string representations across the targeted columns simultaneously
-        search_mask = (
-            frame[["instance_id", "db", "instruction", "note"]]
-            .astype(str)
-            .apply(lambda col: col.str.contains(search, case=False, na=False))
-            .any(axis=1)
-        )
-        frame = frame[search_mask]
-
-    if selected:
-        frame = frame[frame["status"].isin(selected)]
+    frame = apply_frame_filters(
+        frame,
+        search=search,
+        selected_status=selected,
+        selected_tiers=selected_tiers,
+        selected_tags=selected_tags,
+    )
 
     totals = frame["status"].value_counts().to_dict()
     total = len(frame)
@@ -652,6 +754,9 @@ def main() -> None:
                     "instance_id",
                     "status",
                     "score",
+                    "primary_tier",
+                    "tags",
+                    "difficulty_notes",
                     "db",
                     "timestamp",
                     "run_id",
