@@ -43,6 +43,50 @@ def test_just_run_accepts_multiple_patterns_and_all_mode():
     assert "python -m sol01.run_mode --all" in _combined_output(all_mode)
 
 
+def test_category_shortcuts_dispatch_to_persisted_run_mode():
+    tiers = _run_just("tiers", "tier:1", "tier:2")
+    tags = _run_just("tags", "tag:spatial", "tag:spatial_join")
+    easy = _run_just("easy")
+    hard = _run_just("hard")
+    spatial = _run_just("spatial")
+    nested_events = _run_just("nested_events")
+    anti_join = _run_just("anti_join")
+    external_formula = _run_just("external_formula")
+
+    assert tiers.returncode == 0
+    assert "python -m sol01.run_mode" in _combined_output(tiers)
+    assert "tier:1" in _combined_output(tiers)
+    assert "tier:2" in _combined_output(tiers)
+
+    assert tags.returncode == 0
+    assert "tag:spatial" in _combined_output(tags)
+    assert "tag:spatial_join" in _combined_output(tags)
+
+    assert easy.returncode == 0
+    assert "tier:1" in _combined_output(easy)
+    assert "tier:2" in _combined_output(easy)
+
+    assert hard.returncode == 0
+    assert "tier:6-12" in _combined_output(hard)
+
+    assert spatial.returncode == 0
+    assert "tag:spatial" in _combined_output(spatial)
+    assert "tag:spatial_join" in _combined_output(spatial)
+    assert "tag:spatial_adjustment" in _combined_output(spatial)
+
+    assert nested_events.returncode == 0
+    assert "tag:event_sequence" in _combined_output(nested_events)
+    assert "tag:event_parsing" in _combined_output(nested_events)
+    assert "tag:event_classification" in _combined_output(nested_events)
+
+    assert anti_join.returncode == 0
+    assert "tag:anti_join" in _combined_output(anti_join)
+
+    assert external_formula.returncode == 0
+    assert "tag:formula" in _combined_output(external_formula)
+    assert "tag:external_knowledge" in _combined_output(external_formula)
+
+
 def test_just_run_requires_at_least_one_pattern():
     completed = _run_just("run")
 

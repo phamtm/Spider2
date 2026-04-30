@@ -73,6 +73,30 @@ There is no smoke workflow.
 Gold runs reuse the same outputs root, but they do not populate
 `eval/scored_csv/` because the gold CSV is already the scored input.
 
+Category shortcuts are also available:
+
+```bash
+just tiers tier:1 tier:2
+just tiers tier:3-5
+just tags tag:spatial tag:spatial_join
+just easy
+just hard
+just spatial
+just nested_events
+just anti_join
+just external_formula
+```
+
+Use `just tiers` and `just tags` when you want to mix category selectors with exact IDs or globs.
+The named shortcuts are convenience presets for common batches:
+
+- `easy`: tiers 1-2
+- `hard`: tiers 6-12
+- `spatial`: spatial-related tags
+- `nested_events`: event-sequence tags
+- `anti_join`: anti-join tasks
+- `external_formula`: formula-heavy tasks with external knowledge
+
 ## Output Layout
 
 `methods/sol01/outputs/` is gitignored.

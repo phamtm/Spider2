@@ -11,6 +11,10 @@ def test_readme_documents_persisted_eval_runs():
     text = README.read_text(encoding="utf-8")
 
     assert "just run <selector>" in text
+    assert "Category shortcuts are also available:" in text
+    assert "just tiers tier:1 tier:2" in text
+    assert "just spatial" in text
+    assert "external_formula" in text
     assert "eval/runs/default/" in text
     assert "eval/runs/<filtered-tag>/" in text
     assert "command.json" in text

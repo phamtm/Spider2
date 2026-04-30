@@ -20,6 +20,38 @@ test:
 run +patterns:
     uv run python -m sol01.run_mode {{patterns}}
 
+# Run persisted solver mode with category selectors.
+tiers +patterns:
+    uv run python -m sol01.run_mode {{patterns}}
+
+# Run persisted solver mode with tag selectors.
+tags +patterns:
+    uv run python -m sol01.run_mode {{patterns}}
+
+# Run the easiest Spider2-snow tasks.
+easy:
+    just tiers tier:1 tier:2
+
+# Run the harder Spider2-snow tasks.
+hard:
+    just tiers tier:6-12
+
+# Run spatial-capability tasks.
+spatial:
+    just tags tag:spatial tag:spatial_join tag:spatial_adjustment
+
+# Run event-sequence and nested-event tasks.
+nested_events:
+    just tags tag:event_sequence tag:event_parsing tag:event_classification
+
+# Run anti-join tasks.
+anti_join:
+    just tags tag:anti_join
+
+# Run formula-heavy tasks that also rely on external knowledge.
+external_formula:
+    just tags tag:formula tag:external_knowledge
+
 # Run persisted solver mode over the full Spider2-snow task set.
 all:
     uv run python -m sol01.run_mode --all
