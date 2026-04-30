@@ -1,0 +1,69 @@
+{"instance_id":"sf_bq011","primary_tier":6,"tags":["temporal","set_difference","count","filter"],"difficulty_notes":"Overlap of the 7-day and 2-day windows drives the exclusion."}
+{"instance_id":"sf_bq010","primary_tier":5,"tags":["join","ranking","filter","product_analysis"]}
+{"instance_id":"sf_bq009","primary_tier":6,"tags":["ranking","aggregation","time_series","comparison"],"difficulty_notes":"Need monthly revenue extremes after picking the top annual source."}
+{"instance_id":"sf_bq001","primary_tier":6,"tags":["join","temporal","aggregation","comparison"],"difficulty_notes":"First visit and first transaction are separate event dates per visitor."}
+{"instance_id":"sf_bq002","primary_tier":7,"tags":["time_series","ranking","aggregation","multi_scale"],"difficulty_notes":"Requires daily, weekly, and monthly rollups off the same source."}
+{"instance_id":"sf_bq003","primary_tier":6,"tags":["temporal","classification","aggregation","comparison"]}
+{"instance_id":"sf_bq004","primary_tier":5,"tags":["join","filter","ranking","product_analysis"]}
+{"instance_id":"sf_bq008","primary_tier":6,"tags":["path_sequence","ranking","temporal","filter"],"difficulty_notes":"Must follow the home-page path and keep the max dwell time."}
+{"instance_id":"sf_bq269","primary_tier":7,"tags":["nested_aggregation","temporal","classification","comparison"],"difficulty_notes":"Visitor totals are re-aggregated by month and purchase state."}
+{"instance_id":"sf_bq268","primary_tier":6,"tags":["temporal","window","filter","comparison"],"difficulty_notes":"The last event can be a visit or transaction, so the endpoint logic matters."}
+{"instance_id":"sf_bq270","primary_tier":5,"tags":["time_series","ratio","aggregation","comparison"]}
+{"instance_id":"sf_bq275","primary_tier":5,"tags":["join","filter","temporal","device_filter"]}
+{"instance_id":"sf_bq374","primary_tier":7,"tags":["cohort","temporal","percentage","join"],"difficulty_notes":"This is a cohort filter with a delayed purchase check."}
+{"instance_id":"sf_bq029","primary_tier":4,"tags":["group_by","aggregation","time_bucket","comparison"]}
+{"instance_id":"sf_bq026","primary_tier":6,"tags":["ranking","join","aggregation","geo"],"difficulty_notes":"Find the busiest assignee first, then rank jurisdictions within that year."}
+{"instance_id":"sf_bq091","primary_tier":4,"tags":["ranking","aggregation","temporal"]}
+{"instance_id":"sf_bq099","primary_tier":7,"tags":["ranking","multi_step","aggregation","geo"],"difficulty_notes":"Need nested ranking for assignees, years, and country codes."}
+{"instance_id":"sf_bq033","primary_tier":5,"tags":["time_series","count","text_search","date_range"]}
+{"instance_id":"sf_bq209","primary_tier":7,"tags":["citation","window","aggregation","filter"],"difficulty_notes":"Forward citations are constrained by filing-date windows."}
+{"instance_id":"sf_bq027","primary_tier":6,"tags":["citation","join","aggregation","filter"]}
+{"instance_id":"sf_bq210","primary_tier":3,"tags":["text_search","count","filter"]}
+{"instance_id":"sf_bq211","primary_tier":5,"tags":["family_aggregation","filter","count","join"]}
+{"instance_id":"sf_bq213","primary_tier":4,"tags":["ranking","aggregation","code_frequency"]}
+{"instance_id":"sf_bq212","primary_tier":7,"tags":["ranking","aggregation","filter","code_frequency"],"difficulty_notes":"One code per patent, then keep only patents where the code repeats 10+ times."}
+{"instance_id":"sf_bq214","primary_tier":8,"tags":["citation","similarity","ranking","multi_step"],"difficulty_notes":"Combines citation windows with a similarity lookup across the same filing year."}
+{"instance_id":"sf_bq216","primary_tier":8,"tags":["similarity","ranking","join","temporal"],"difficulty_notes":"Ranking similar patents needs the filing-year constraint preserved."}
+{"instance_id":"sf_bq247","primary_tier":8,"tags":["ranking","join","aggregation","text_join"],"difficulty_notes":"Top families are chosen before joining back to abstracts."}
+{"instance_id":"sf_bq127","primary_tier":9,"tags":["aggregation","distinct_lists","citation","join"],"difficulty_notes":"This mixes distinct list extraction with citation-family relationships."}
+{"instance_id":"sf_bq215","primary_tier":8,"tags":["formula","citation","ranking","aggregation"],"difficulty_notes":"Originality score is a derived formula over backward-citation IPC counts."}
+{"instance_id":"sf_bq222","primary_tier":10,"tags":["time_series","moving_average","ranking","cpc"],"difficulty_notes":"Exponential moving average is computed per CPC group and then compared by year."}
+{"instance_id":"sf_bq221","primary_tier":10,"tags":["time_series","moving_average","ranking","cpc"],"difficulty_notes":"Need the best EMA year per CPC group after filtering invalid records."}
+{"instance_id":"sf_bq223","primary_tier":8,"tags":["join","citation","ranking","aggregation"],"difficulty_notes":"Filter out DENSO as the citing assignee and group by first CPC subclass."}
+{"instance_id":"sf_bq420","primary_tier":8,"tags":["join","filter","ranking","claims"],"difficulty_notes":"Section 101 rejections need to be paired with grant and claim-length fields."}
+{"instance_id":"sf_bq207","primary_tier":9,"tags":["join","ranking","claims","aggregation"],"difficulty_notes":"Independent-claim ranking depends on earliest-publication deduping per application."}
+{"instance_id":"sf_bq128","primary_tier":8,"tags":["citation","window","join","temporal"],"difficulty_notes":"Backward and forward citations use different date anchors."}
+{"instance_id":"sf_bq246","primary_tier":9,"tags":["citation","window","filter","ranking"],"difficulty_notes":"Both citation windows and CPC filters apply before the final top-1 sort."}
+{"instance_id":"sf_bq052","primary_tier":8,"tags":["citation","window","filter","ranking"],"difficulty_notes":"Citation counts are bounded around the application date."}
+{"instance_id":"sf_bq036","primary_tier":3,"tags":["time_series","aggregation","count"]}
+{"instance_id":"sf_bq100","primary_tier":5,"tags":["text_parse","ranking","count","regex"]}
+{"instance_id":"sf_bq101","primary_tier":4,"tags":["text_parse","ranking","count","regex"]}
+{"instance_id":"sf_bq182","primary_tier":6,"tags":["join","aggregation","filter","ranking"]}
+{"instance_id":"sf_bq217","primary_tier":4,"tags":["join","count","date_filter"]}
+{"instance_id":"sf_bq191","primary_tier":6,"tags":["join","ranking","aggregation","threshold"]}
+{"instance_id":"sf_bq224","primary_tier":5,"tags":["ranking","aggregation","license_filter"]}
+{"instance_id":"sf_bq192","primary_tier":7,"tags":["join","ranking","aggregation","license_filter"],"difficulty_notes":"The license, file, watcher, issue, and fork filters all need to line up."}
+{"instance_id":"sf_bq225","primary_tier":4,"tags":["classification","count","file_extension"]}
+{"instance_id":"sf_bq180","primary_tier":5,"tags":["text_parse","aggregation","language_filter","count"]}
+{"instance_id":"sf_bq233","primary_tier":6,"tags":["join","text_parse","aggregation","language_filter"]}
+{"instance_id":"sf_bq248","primary_tier":5,"tags":["filter","proportion","repository_filter","text_match"]}
+{"instance_id":"sf_bq193","primary_tier":6,"tags":["text_extract","aggregation","language_list","filter"],"difficulty_notes":"README lines must be cleaned before language aggregation."}
+{"instance_id":"sf_bq295","primary_tier":7,"tags":["join","ranking","filter","github_events"],"difficulty_notes":"The Python file condition is nested inside the watch-event ranking."}
+{"instance_id":"sf_bq249","primary_tier":3,"tags":["classification","count","text_match"]}
+{"instance_id":"sf_bq375","primary_tier":4,"tags":["classification","ranking","depth_filter"]}
+{"instance_id":"sf_bq255","primary_tier":4,"tags":["filter","count","license_filter"]}
+{"instance_id":"sf_bq194","primary_tier":5,"tags":["text_parse","ranking","language_mix","count"]}
+{"instance_id":"sf_bq377","primary_tier":4,"tags":["text_parse","count","json"]}
+{"instance_id":"sf_bq359","primary_tier":4,"tags":["ranking","aggregation","language_filter"]}
+{"instance_id":"sf_bq252","primary_tier":5,"tags":["ranking","file_filter","binary_filter"]}
+{"instance_id":"sf_bq251","primary_tier":7,"tags":["join","url_cleaning","ranking","filter"],"difficulty_notes":"Clean GitHub URLs after selecting the most downloaded package version."}
+{"instance_id":"sf_bq019","primary_tier":6,"tags":["ranking","aggregation","group_by","weighted_average"]}
+{"instance_id":"sf_bq234","primary_tier":4,"tags":["group_by","ranking","aggregation"]}
+{"instance_id":"sf_bq235","primary_tier":4,"tags":["aggregation","ranking","comparison"]}
+{"instance_id":"sf_bq172","primary_tier":5,"tags":["ranking","join","aggregation","state_filter"]}
+{"instance_id":"sf_bq177","primary_tier":7,"tags":["multi_year","aggregation","ranking","join"],"difficulty_notes":"Need the provider's annual cost profile after identifying the top cumulative spender."}
+{"instance_id":"sf_bq354","primary_tier":6,"tags":["concept_hierarchy","percentage","join","cohort"]}
+{"instance_id":"sf_bq355","primary_tier":3,"tags":["percentage","filter","cohort"]}
+{"instance_id":"sf_bq032","primary_tier":4,"tags":["ranking","temporal","coordinate"]}
+{"instance_id":"sf_bq119","primary_tier":7,"tags":["ranking","time_series","coordinate","aggregation"],"difficulty_notes":"Return the per-point track, not just the final distance ranking."}
+{"instance_id":"sf_bq117","primary_tier":5,"tags":["ranking","temporal","aggregation","threshold"]}
