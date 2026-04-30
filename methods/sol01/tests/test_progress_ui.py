@@ -1,13 +1,19 @@
 from datetime import UTC, datetime
 
 import pandas as pd
+import pytest
 
 from progress_ui import (
     Record,
     apply_frame_filters,
     build_status_frame,
+    compute_overall_summary,
+    compute_tag_summary,
+    compute_tier_summary,
     format_tier_summary,
     make_progress_frame_for_ids,
+    prepare_display_frame,
+    recommend_focus,
 )
 
 
@@ -199,3 +205,168 @@ def test_format_tier_summary_falls_back_when_no_tier_selected():
         format_tier_summary([])
         == "Tier is the question complexity score. Higher tiers usually mean more reasoning steps, joins, or transformations."
     )
+
+
+def test_compute_overall_summary_reports_coverage_and_answered_accuracy():
+    frame = pd.DataFrame(
+        [
+            {"status": "correct"},
+            {"status": "incorrect"},
+            {"status": "answered"},
+            {"status": "unanswered"},
+        ]
+    )
+
+    summary = compute_overall_summary(frame)
+
+    assert summary["total"] == 4
+    assert summary["answered"] == 3
+    assert summary["correct"] == 1
+    assert summary["incorrect"] == 1
+    assert summary["unanswered"] == 1
+    assert summary["coverage_pct"] == 75.0
+    assert summary["accuracy_pct"] == pytest.approx(33.3333333333)
+
+
+def test_compute_tier_summary_groups_tiers_and_missing_metadata():
+    frame = pd.DataFrame(
+        [
+            {"primary_tier": 1, "status": "correct"},
+            {"primary_tier": 1, "status": "incorrect"},
+            {"primary_tier": 2, "status": "unanswered"},
+            {"primary_tier": None, "status": "correct"},
+        ]
+    )
+
+    summary = compute_tier_summary(frame)
+
+    assert list(summary["tier_label"]) == ["Tier 1", "Tier 2", "Uncategorized"]
+
+    tier_one = summary.loc[summary["tier_label"] == "Tier 1"].iloc[0]
+    tier_two = summary.loc[summary["tier_label"] == "Tier 2"].iloc[0]
+    missing = summary.loc[summary["tier_label"] == "Uncategorized"].iloc[0]
+
+    assert tier_one["total"] == 2
+    assert tier_one["answered"] == 2
+    assert tier_one["correct"] == 1
+    assert tier_one["incorrect"] == 1
+    assert tier_one["unanswered"] == 0
+    assert tier_one["accuracy_pct"] == 50.0
+
+    assert tier_two["total"] == 1
+    assert tier_two["answered"] == 0
+    assert tier_two["unanswered"] == 1
+
+    assert pd.isna(missing["primary_tier"])
+    assert missing["total"] == 1
+    assert missing["answered"] == 1
+
+
+def test_compute_tag_summary_explodes_multiple_tags_and_keeps_empty_bucket():
+    frame = pd.DataFrame(
+        [
+            {"tags": ["aggregation", "temporal"], "status": "correct"},
+            {"tags": ["aggregation"], "status": "incorrect"},
+            {"tags": [], "status": "unanswered"},
+        ]
+    )
+
+    summary = compute_tag_summary(frame)
+
+    assert list(summary["tag_label"]) == ["(no tags)", "aggregation", "temporal"]
+
+    aggregation = summary.loc[summary["tag_label"] == "aggregation"].iloc[0]
+    no_tags = summary.loc[summary["tag_label"] == "(no tags)"].iloc[0]
+
+    assert aggregation["total"] == 2
+    assert aggregation["answered"] == 2
+    assert aggregation["correct"] == 1
+    assert aggregation["incorrect"] == 1
+    assert no_tags["total"] == 1
+    assert no_tags["unanswered"] == 1
+
+
+def test_recommend_focus_prioritizes_low_answered_count():
+    frame = pd.DataFrame(
+        [
+            {"status": "correct", "primary_tier": 1},
+            {"status": "incorrect", "primary_tier": 2},
+            {"status": "unanswered", "primary_tier": 2},
+            {"status": "unanswered", "primary_tier": 3},
+        ]
+    )
+
+    focus = recommend_focus(frame)
+
+    assert focus["kind"] == "baseline"
+    assert focus["count"] == 2
+
+
+def test_recommend_focus_prioritizes_incorrect_tiers_before_unanswered_ones():
+    frame = pd.DataFrame(
+        [
+            {"status": "correct", "primary_tier": 1},
+            {"status": "correct", "primary_tier": 1},
+            {"status": "incorrect", "primary_tier": 2},
+            {"status": "incorrect", "primary_tier": 2},
+            {"status": "incorrect", "primary_tier": 2},
+            {"status": "correct", "primary_tier": 3},
+            {"status": "correct", "primary_tier": 3},
+            {"status": "correct", "primary_tier": 3},
+            {"status": "correct", "primary_tier": 3},
+            {"status": "correct", "primary_tier": 3},
+            {"status": "correct", "primary_tier": 4},
+            {"status": "correct", "primary_tier": 4},
+        ]
+    )
+
+    focus = recommend_focus(frame)
+
+    assert focus["kind"] == "incorrect"
+    assert focus["primary_tier"] == 2
+    assert "Tier 2" in focus["title"]
+
+
+def test_recommend_focus_prioritizes_remaining_unanswered_tiers():
+    frame = pd.DataFrame(
+        [
+            {"status": "correct", "primary_tier": 1},
+            {"status": "unanswered", "primary_tier": 1},
+            {"status": "correct", "primary_tier": 2},
+            {"status": "correct", "primary_tier": 2},
+            {"status": "correct", "primary_tier": 3},
+            {"status": "correct", "primary_tier": 3},
+            {"status": "correct", "primary_tier": 4},
+            {"status": "correct", "primary_tier": 4},
+            {"status": "correct", "primary_tier": 5},
+            {"status": "correct", "primary_tier": 5},
+            {"status": "correct", "primary_tier": 6},
+            {"status": "correct", "primary_tier": 6},
+        ]
+    )
+
+    focus = recommend_focus(frame)
+
+    assert focus["kind"] == "unanswered"
+    assert focus["primary_tier"] == 1
+    assert "Tier 1" in focus["title"]
+
+
+def test_prepare_display_frame_formats_display_fields_without_mutating_source():
+    frame = pd.DataFrame(
+        [
+            {
+                "instance_id": "sf_1",
+                "timestamp": datetime(2026, 4, 30, tzinfo=UTC),
+                "tags": ["aggregation", "temporal"],
+                "primary_tier": 2,
+            }
+        ]
+    )
+
+    display = prepare_display_frame(frame)
+
+    assert frame.loc[0, "timestamp"] == datetime(2026, 4, 30, tzinfo=UTC)
+    assert display.loc[0, "timestamp"].startswith("2026-04-30")
+    assert display.loc[0, "tags"] == "aggregation, temporal"
+    assert display.loc[0, "primary_tier"] == "Tier 2"
