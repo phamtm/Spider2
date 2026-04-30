@@ -9,8 +9,8 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Protocol
 from time import perf_counter
+from typing import Protocol
 from uuid import uuid4
 
 from sol01.eval_runner import GOLD_DIR, run_official_eval
