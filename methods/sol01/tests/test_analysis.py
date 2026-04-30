@@ -463,3 +463,101 @@ def test_analyze_run_groups_results_by_primary_tier_and_tag(tmp_path: Path):
     assert "## By Primary Tier" in summary_text
     assert "- tier 3: passed 0, failed 2, total 2" in summary_text
     assert "## By Tag" in summary_text
+
+
+def test_analyze_run_records_category_metadata_provenance(tmp_path: Path):
+    """Category analysis should expose the exact metadata snapshot it used."""
+
+    dataset_path = tmp_path / "spider2-snow.jsonl"
+    _write_jsonl(
+        dataset_path,
+        [
+            {
+                "instance_id": "local001",
+                "instruction": "q",
+                "db_id": "DB",
+                "external_knowledge": None,
+            }
+        ],
+    )
+    run_paths = ensure_run_paths("category-provenance", outputs_root=tmp_path)
+    run_paths.eval_dir.mkdir(parents=True, exist_ok=True)
+    (run_paths.eval_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "attempted_tasks": 1,
+                "correct_tasks": 1,
+                "missing_csv_count": 0,
+                "per_instance": [
+                    {
+                        "instance_id": "local001",
+                        "score": 1,
+                        "passed": True,
+                        "csv_present": True,
+                        "failure_reason": None,
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    csv_path = run_paths.csv_dir / "local001.csv"
+    csv_path.write_text("answer\n1\n", encoding="utf-8")
+    write_trace(
+        run_paths,
+        instance_id="local001",
+        trace={
+            "instance_id": "local001",
+            "db": "db_alpha",
+            "question": "Question local001",
+            "status": "success",
+            "csv_path": str(csv_path),
+            "final_execution": {"ok": True, "row_count": 1},
+            "attempts": [
+                {
+                    "sql": "SELECT 1",
+                    "validation": {"ok": True, "errors": []},
+                    "execution_result": {"ok": True, "error": None},
+                }
+            ],
+        },
+    )
+
+    batch_dir_one = tmp_path / "batches_one"
+    batch_dir_one.mkdir()
+    _write_jsonl(
+        batch_dir_one / "batch_01.jsonl",
+        [{"instance_id": "local001", "primary_tier": 1, "tags": ["aggregation"]}],
+    )
+    first_report = analyze_run(
+        "category-provenance",
+        outputs_root=tmp_path,
+        dataset_path=dataset_path,
+        batch_dir=batch_dir_one,
+    )
+
+    batch_dir_two = tmp_path / "batches_two"
+    batch_dir_two.mkdir()
+    _write_jsonl(
+        batch_dir_two / "batch_01.jsonl",
+        [{"instance_id": "local001", "primary_tier": 1, "tags": ["comparison"]}],
+    )
+    second_report = analyze_run(
+        "category-provenance",
+        outputs_root=tmp_path,
+        dataset_path=dataset_path,
+        batch_dir=batch_dir_two,
+    )
+
+    first_metadata = first_report["category_metadata"]
+    second_metadata = second_report["category_metadata"]
+    assert first_metadata["dataset_path"] == str(dataset_path)
+    assert first_metadata["batch_dir"] == str(batch_dir_one)
+    assert first_metadata["record_count"] == 1
+    assert first_metadata["sha256"] != second_metadata["sha256"]
+    assert second_metadata["batch_dir"] == str(batch_dir_two)
+
+    summary_text = (run_paths.analysis_dir / "summary.md").read_text(encoding="utf-8")
+    assert "## Category Metadata" in summary_text
+    assert f"- batches: {batch_dir_two}" in summary_text

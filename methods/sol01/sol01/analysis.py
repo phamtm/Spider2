@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -9,7 +10,8 @@ from typing import Any
 from sol01.category_metadata import (
     CATEGORY_BATCHES_DIR,
     SPIDER2_SNOW_PATH,
-    load_category_metadata_map,
+    CategoryMetadata,
+    load_category_metadata,
 )
 from sol01.logging import get_logger
 from sol01.output import RunPaths, ensure_run_paths
@@ -42,8 +44,14 @@ def analyze_run(
     traces = _load_traces(run_paths)
     eval_summary = _load_optional_json(run_paths.eval_dir / "summary.json")
     trace_index = {trace["instance_id"]: trace for trace in traces}
-    category_map = load_category_metadata_map(dataset_path=dataset_path, batch_dir=batch_dir)
+    category_records = load_category_metadata(dataset_path=dataset_path, batch_dir=batch_dir)
+    category_map = {record.instance_id: record for record in category_records}
     result_rows = _analysis_result_rows(run_paths, traces, trace_index, eval_summary)
+    category_metadata = _category_metadata_snapshot(
+        dataset_path=dataset_path,
+        batch_dir=batch_dir,
+        records=category_records,
+    )
 
     by_category = {category: [] for category in FAILURE_CATEGORIES}
     for trace in traces:
@@ -71,6 +79,7 @@ def analyze_run(
         "status_counts": _status_counts(traces),
         "eval_summary": eval_summary,
         "category_counts": {category: len(records) for category, records in by_category.items()},
+        "category_metadata": category_metadata,
         "by_category": by_category,
         "by_database": _database_summary(traces, by_category),
         "by_primary_tier": _category_result_summary(result_rows, category_map, kind="tier"),
@@ -341,6 +350,26 @@ def _analysis_result_rows(
     return rows
 
 
+def _category_metadata_snapshot(
+    *,
+    dataset_path: Path,
+    batch_dir: Path,
+    records: list[CategoryMetadata],
+) -> dict[str, Any]:
+    """Summarize the exact category metadata used for one analysis run."""
+
+    payload = [record.model_dump(exclude_none=True) for record in records]
+    fingerprint = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return {
+        "dataset_path": str(dataset_path),
+        "batch_dir": str(batch_dir),
+        "record_count": len(records),
+        "sha256": fingerprint,
+    }
+
+
 def _category_result_summary(
     result_rows: list[dict[str, Any]],
     category_map: dict[str, Any],
@@ -512,6 +541,14 @@ def _render_summary(report: dict[str, Any]) -> str:
             record["instance_id"] for record in records if record["instance_id"]
         )
         lines.append(f"- {category}: {len(records)} ({instance_ids})")
+
+    lines.append("")
+    lines.append("## Category Metadata")
+    metadata = report["category_metadata"]
+    lines.append(f"- dataset: {metadata['dataset_path']}")
+    lines.append(f"- batches: {metadata['batch_dir']}")
+    lines.append(f"- records: {metadata['record_count']}")
+    lines.append(f"- sha256: {metadata['sha256']}")
 
     lines.append("")
     lines.append("## By Database")
