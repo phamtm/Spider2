@@ -33,6 +33,8 @@ logger = get_logger(__name__)
 def run_persisted_mode(
     selectors: Sequence[str] | str | None = None,
     *,
+    tiers: Sequence[str] | str | None = None,
+    tags: Sequence[str] | str | None = None,
     all_mode: bool = False,
     outputs_root: Path = OUTPUTS_ROOT,
     run_id: str | None = None,
@@ -41,7 +43,12 @@ def run_persisted_mode(
     """Run the solver and evaluator with durable local artifacts."""
 
     started_at = perf_counter()
-    normalized_selectors = _normalize_selectors(selectors, all_mode=all_mode)
+    normalized_selectors = _normalize_selectors(
+        selectors,
+        tiers=tiers,
+        tags=tags,
+        all_mode=all_mode,
+    )
     tasks = _resolve_tasks(normalized_selectors, all_mode=all_mode)
     mode_label = _mode_label(normalized_selectors, all_mode=all_mode)
     effective_run_id = run_id or _build_run_id(mode_label)
@@ -202,7 +209,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "patterns",
         nargs="*",
-        help="Task selectors such as sf_bq320, sf_bq3*, or sf_bq3* sf_bq4*.",
+        help=(
+            "Task selectors such as sf_bq320, sf_bq3*, tier:3-5, or tag:temporal. "
+            "Category selectors can also be passed with --tier and --tag."
+        ),
+    )
+    parser.add_argument(
+        "--tier",
+        action="append",
+        dest="tiers",
+        help="Filter runs by primary tier or tier range, for example 3 or 3-5.",
+    )
+    parser.add_argument(
+        "--tag",
+        action="append",
+        dest="tags",
+        help="Filter runs by category tag, and repeat the flag to require multiple tags.",
     )
     parser.add_argument(
         "--all",
@@ -212,7 +234,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        run_persisted_mode(args.patterns or None, all_mode=args.all)
+        run_persisted_mode(
+            args.patterns or None,
+            tiers=args.tiers or None,
+            tags=args.tags or None,
+            all_mode=args.all,
+        )
     except ValueError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 2
@@ -298,19 +325,23 @@ def _resolve_tasks(selectors: Sequence[str], *, all_mode: bool) -> list[Any]:
 def _normalize_selectors(
     selectors: Sequence[str] | str | None,
     *,
+    tiers: Sequence[str] | str | None,
+    tags: Sequence[str] | str | None,
     all_mode: bool,
 ) -> list[str]:
     """Normalize user input into selector strings."""
 
     if all_mode:
-        if selectors is not None:
+        if selectors is not None or tiers is not None or tags is not None:
             raise ValueError("all mode cannot be combined with selectors")
         return [ALL_TASK_SELECTOR]
-    if selectors is None:
+    normalized: list[str] = []
+    normalized.extend(_normalize_values(selectors))
+    normalized.extend(f"tier:{tier}" for tier in _normalize_values(tiers))
+    normalized.extend(f"tag:{tag}" for tag in _normalize_values(tags))
+    if not normalized:
         raise ValueError("selectors must not be empty")
-    if isinstance(selectors, str):
-        return [selectors]
-    return list(selectors)
+    return normalized
 
 
 def _mode_label(selectors: Sequence[str], *, all_mode: bool) -> str:
@@ -328,6 +359,16 @@ def _is_exact_selector(selector: str) -> bool:
     """Return True when a selector has no glob tokens."""
 
     return not any(token in selector for token in ("*", "?", "[", "]"))
+
+
+def _normalize_values(values: Sequence[str] | str | None) -> list[str]:
+    """Flatten one selector input into a list of trimmed strings."""
+
+    if values is None:
+        return []
+    if isinstance(values, str):
+        return [values.strip()]
+    return [value.strip() for value in values]
 
 
 def _build_run_id(mode_label: str) -> str:

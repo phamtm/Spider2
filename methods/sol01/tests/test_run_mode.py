@@ -263,6 +263,35 @@ def test_run_persisted_mode_all_mode_resolves_full_dataset(
     assert result["run_id"].startswith("run-all-260429.1200")
 
 
+def test_run_mode_main_forwards_tier_and_tag_filters(monkeypatch: pytest.MonkeyPatch):
+    called: dict[str, object] = {}
+
+    def fake_run_persisted_mode(selectors=None, **kwargs):
+        called["selectors"] = selectors
+        called.update(kwargs)
+        return {}
+
+    monkeypatch.setattr(run_mode, "run_persisted_mode", fake_run_persisted_mode)
+
+    exit_code = run_mode.main(
+        ["sf_local*", "--tier", "3-5", "--tag", "aggregation", "--tag", "temporal"]
+    )
+
+    assert exit_code == 0
+    assert called == {
+        "selectors": ["sf_local*"],
+        "tiers": ["3-5"],
+        "tags": ["aggregation", "temporal"],
+        "all_mode": False,
+    }
+
+
+def test_run_mode_main_rejects_all_with_category_filters():
+    exit_code = run_mode.main(["--all", "--tier", "3"])
+
+    assert exit_code == 2
+
+
 def test_run_persisted_mode_rejects_bare_star(
     tmp_path: Path,
 ):

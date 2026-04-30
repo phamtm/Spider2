@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import re
 from collections.abc import Sequence
 from pathlib import Path
 
 from sol01.category_metadata import (  # noqa: F401
     CATEGORY_BATCHES_DIR,
+    KNOWN_CATEGORY_TAGS,
     CategoryMetadata,
     CategoryMetadataValidationError,
     load_category_metadata,
@@ -21,6 +23,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 SPIDER2_SNOW_PATH = REPO_ROOT / "spider2-snow" / "spider2-snow.jsonl"
 ALL_TASK_SELECTOR = "all"
 logger = get_logger(__name__)
+_TIER_SELECTOR_RE = re.compile(r"^\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$")
+_TAG_SELECTOR_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 
 
 def load_tasks(
@@ -66,8 +70,9 @@ def select_tasks(
     selectors: Sequence[str] | str,
     *,
     dataset_path: Path = SPIDER2_SNOW_PATH,
+    batch_dir: Path = CATEGORY_BATCHES_DIR,
 ) -> list[Task]:
-    """Resolve exact instance IDs or shell-style globs against dataset order."""
+    """Resolve exact IDs, globs, and category filters against dataset order."""
 
     if isinstance(selectors, str):
         selectors = [selectors]
@@ -86,17 +91,29 @@ def select_tasks(
         )
         return tasks
 
-    for selector in normalized_selectors:
+    task_selectors, primary_tiers, tags = _split_selector_filters(normalized_selectors)
+    for selector in task_selectors:
         _validate_selector(selector)
 
     tasks = _read_tasks(dataset_path)
+    metadata_map = None
+    if primary_tiers or tags:
+        metadata_map = load_category_metadata_map(dataset_path=dataset_path, batch_dir=batch_dir)
     selected: list[Task] = []
     seen: set[str] = set()
     for task in tasks:
-        if not any(
-            fnmatch.fnmatchcase(task.instance_id, selector) for selector in normalized_selectors
+        if task_selectors and not any(
+            fnmatch.fnmatchcase(task.instance_id, selector) for selector in task_selectors
         ):
             continue
+        if metadata_map is not None:
+            metadata = metadata_map.get(task.instance_id)
+            if metadata is None:
+                raise ValueError(f"Missing category metadata for instance_id: {task.instance_id}")
+            if primary_tiers and metadata.primary_tier not in primary_tiers:
+                continue
+            if tags and any(tag not in metadata.tags for tag in tags):
+                continue
         if task.instance_id in seen:
             continue
         seen.add(task.instance_id)
@@ -140,5 +157,82 @@ def _validate_selector(selector: str) -> None:
         raise ValueError("selector must not be empty")
     if selector == "*":
         raise ValueError("bare '*' is not allowed; use the all selector instead")
+    if selector.startswith(("tier:", "tier=", "tag:", "tag=")):
+        raise ValueError(f"category selector must be handled separately: {selector}")
     if "/" in selector or ".." in selector:
         raise ValueError(f"path-like selector is not allowed: {selector}")
+
+
+def _split_selector_filters(selectors: Sequence[str]) -> tuple[list[str], set[int], list[str]]:
+    """Split task selectors from tier and tag filters."""
+
+    task_selectors: list[str] = []
+    primary_tiers: list[int] = []
+    tags: list[str] = []
+    for selector in selectors:
+        if selector.startswith(("tier:", "tier=")):
+            primary_tiers.extend(_parse_tier_selector(selector))
+            continue
+        if selector.startswith(("tag:", "tag=")):
+            tags.extend(_parse_tag_selector(selector))
+            continue
+        task_selectors.append(selector)
+    return task_selectors, set(primary_tiers), list(dict.fromkeys(tags))
+
+
+def _parse_tier_selector(selector: str) -> list[int]:
+    """Return all tiers described by one selector token."""
+
+    _, value = selector.split(":", 1) if ":" in selector else selector.split("=", 1)
+    value = value.strip()
+    if not value:
+        raise ValueError(f"tier selector must not be empty: {selector}")
+
+    tiers: list[int] = []
+    for part in value.split(","):
+        part = part.strip()
+        if not part:
+            raise ValueError(f"tier selector must not contain empty entries: {selector}")
+        if part.count("-") > 1:
+            raise ValueError(f"invalid tier range: {part}")
+        if "-" in part:
+            start_text, end_text = part.split("-", 1)
+            try:
+                start = int(start_text)
+                end = int(end_text)
+            except ValueError as exc:
+                raise ValueError(f"invalid tier range: {part}") from exc
+            if start > end:
+                raise ValueError(f"tier range must be ascending: {part}")
+            tiers.extend(range(start, end + 1))
+            continue
+        try:
+            tiers.append(int(part))
+        except ValueError as exc:
+            raise ValueError(f"invalid tier value: {part}") from exc
+
+    for tier in tiers:
+        if tier < 1 or tier > 12:
+            raise ValueError(f"tier must be between 1 and 12: {tier}")
+    return tiers
+
+
+def _parse_tag_selector(selector: str) -> list[str]:
+    """Return all tags described by one selector token."""
+
+    _, value = selector.split(":", 1) if ":" in selector else selector.split("=", 1)
+    value = value.strip()
+    if not value:
+        raise ValueError(f"tag selector must not be empty: {selector}")
+
+    tags: list[str] = []
+    for part in value.split(","):
+        tag = part.strip()
+        if not tag:
+            raise ValueError(f"tag selector must not contain empty entries: {selector}")
+        if not _TAG_SELECTOR_RE.fullmatch(tag):
+            raise ValueError(f"invalid tag selector: {tag}")
+        if tag not in KNOWN_CATEGORY_TAGS:
+            raise ValueError(f"unknown tag selector: {tag}")
+        tags.append(tag)
+    return tags

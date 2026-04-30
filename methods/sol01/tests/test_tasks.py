@@ -1,6 +1,16 @@
+import json
+from pathlib import Path
+
 import pytest
 
 from sol01.tasks import ALL_TASK_SELECTOR, SPIDER2_SNOW_PATH, load_tasks, select_tasks
+
+
+def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
+    path.write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n",
+        encoding="utf-8",
+    )
 
 
 def test_default_dataset_path_exists():
@@ -77,3 +87,77 @@ def test_invalid_selectors_are_rejected(selectors):
 def test_zero_match_selectors_are_rejected():
     with pytest.raises(ValueError, match="No tasks matched"):
         select_tasks(["sf_does_not_exist*"])
+
+
+def test_category_selectors_can_filter_by_tier_and_tags(tmp_path: Path):
+    dataset = tmp_path / "spider2-snow.jsonl"
+    _write_jsonl(
+        dataset,
+        [
+            {"instance_id": "sf_a", "instruction": "q", "db_id": "DB", "external_knowledge": None},
+            {"instance_id": "sf_b", "instruction": "q", "db_id": "DB", "external_knowledge": None},
+            {"instance_id": "sf_c", "instruction": "q", "db_id": "DB", "external_knowledge": None},
+            {"instance_id": "sf_d", "instruction": "q", "db_id": "DB", "external_knowledge": None},
+        ],
+    )
+    batch_dir = tmp_path / "batches"
+    batch_dir.mkdir()
+    _write_jsonl(
+        batch_dir / "batch_01.jsonl",
+        [
+            {"instance_id": "sf_a", "primary_tier": 1, "tags": ["aggregation"]},
+            {"instance_id": "sf_b", "primary_tier": 3, "tags": ["aggregation", "temporal"]},
+            {"instance_id": "sf_c", "primary_tier": 5, "tags": ["comparison"]},
+            {"instance_id": "sf_d", "primary_tier": 4, "tags": ["aggregation", "comparison"]},
+        ],
+    )
+
+    assert [
+        task.instance_id
+        for task in select_tasks(["tier:3"], dataset_path=dataset, batch_dir=batch_dir)
+    ] == ["sf_b"]
+    assert [
+        task.instance_id
+        for task in select_tasks(["tier:3-4"], dataset_path=dataset, batch_dir=batch_dir)
+    ] == ["sf_b", "sf_d"]
+    assert [
+        task.instance_id
+        for task in select_tasks(["tag:aggregation"], dataset_path=dataset, batch_dir=batch_dir)
+    ] == ["sf_a", "sf_b", "sf_d"]
+    assert [
+        task.instance_id
+        for task in select_tasks(
+            ["tag:aggregation", "tag:temporal"],
+            dataset_path=dataset,
+            batch_dir=batch_dir,
+        )
+    ] == ["sf_b"]
+    assert [
+        task.instance_id
+        for task in select_tasks(
+            ["sf_*", "tier:4", "tag:comparison"],
+            dataset_path=dataset,
+            batch_dir=batch_dir,
+        )
+    ] == ["sf_d"]
+
+
+def test_category_selectors_reject_bad_ranges_and_tags(tmp_path: Path):
+    dataset = tmp_path / "spider2-snow.jsonl"
+    _write_jsonl(
+        dataset,
+        [
+            {"instance_id": "sf_a", "instruction": "q", "db_id": "DB", "external_knowledge": None},
+        ],
+    )
+    batch_dir = tmp_path / "batches"
+    batch_dir.mkdir()
+    _write_jsonl(
+        batch_dir / "batch_01.jsonl",
+        [{"instance_id": "sf_a", "primary_tier": 1, "tags": ["aggregation"]}],
+    )
+
+    with pytest.raises(ValueError, match="ascending"):
+        select_tasks(["tier:4-2"], dataset_path=dataset, batch_dir=batch_dir)
+    with pytest.raises(ValueError, match="unknown tag selector"):
+        select_tasks(["tag:not_a_tag"], dataset_path=dataset, batch_dir=batch_dir)
