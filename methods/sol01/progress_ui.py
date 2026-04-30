@@ -1,10 +1,10 @@
 """Local Streamlit dashboard for Spider progress.
 
-Run from the repo root:
-    uv run streamlit run tools/progress_ui.py
+Run from methods/sol01:
+    uv run streamlit run progress_ui.py
 
 Optional CLI defaults:
-    uv run streamlit run tools/progress_ui.py -- --source methods/sol01/outputs/registry/latest.json
+    uv run streamlit run progress_ui.py -- --source outputs/registry/latest.json
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import argparse
 import html
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -21,8 +21,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = ROOT / "spider2-snow" / "spider2-snow.jsonl"
 DEFAULT_SOURCE = ROOT / "methods" / "sol01" / "outputs" / "registry" / "latest.json"
 
@@ -34,11 +33,21 @@ STATUS_LABELS = {
     "unanswered": "Unanswered",
 }
 STATUS_COLORS = {
-    "correct": "#0a63b7",
-    "incorrect": "#ff2d55",
-    "answered": "#f5a524",
+    "correct": "#22c55e",
+    "incorrect": "#ef4444",
+    "answered": "#64748b",
     "unanswered": "#1f2937",
 }
+
+CORRECT_COLOR = STATUS_COLORS["correct"]
+INCORRECT_COLOR = STATUS_COLORS["incorrect"]
+ANSWERED_COLOR = STATUS_COLORS["answered"]
+
+CHART_HEIGHT = 440
+TABLE_ROW_HEIGHT = 24
+TABLE_VISIBLE_ROWS = 50
+TABLE_HEIGHT = TABLE_VISIBLE_ROWS * TABLE_ROW_HEIGHT + 48
+SECTION_GAP = 24
 
 
 @dataclass(frozen=True)
@@ -69,30 +78,48 @@ def resolve_path(value: str) -> Path:
 
 
 def read_json(path: Path) -> Any:
-    with path.open("r", encoding="utf-8") as file:
-        return json.load(file)
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            return json.load(file)
+    except (json.JSONDecodeError, FileNotFoundError):
+        return {}
 
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows = []
-    with path.open("r", encoding="utf-8") as file:
-        for line in file:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
+    try:
+        with path.open("r", encoding="utf-8") as file:
+            for line in file:
+                line = line.strip()
+                if line:
+                    try:
+                        rows.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+    except FileNotFoundError:
+        pass
     return rows
 
 
-def read_dataset(path: Path) -> pd.DataFrame:
-    if not path.exists():
+@st.cache_data(ttl=3600)  # Cache dataset, assume it rarely changes
+def read_dataset(path: str) -> pd.DataFrame:
+    path_obj = Path(path)
+    if not path_obj.exists():
         return pd.DataFrame(columns=["instance_id", "instruction", "db_id"])
-    rows = read_jsonl(path)
-    frame = pd.DataFrame(rows)
+
+    try:
+        # Vastly faster vectorized loading instead of looping json.loads
+        frame = pd.read_json(path_obj, lines=True)
+    except ValueError:
+        return pd.DataFrame(columns=["instance_id", "instruction", "db_id"])
+
     if "instance_id" not in frame.columns:
         return pd.DataFrame(columns=["instance_id", "instruction", "db_id"])
+
     for column in ("instruction", "db_id"):
         if column not in frame.columns:
             frame[column] = ""
+
     return frame[["instance_id", "instruction", "db_id"]].drop_duplicates("instance_id")
 
 
@@ -100,7 +127,7 @@ def parse_timestamp(value: Any) -> datetime | None:
     if value in (None, ""):
         return None
     if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value, tz=timezone.utc)
+        return datetime.fromtimestamp(value, tz=UTC)
 
     text = str(value).strip()
     formats = (
@@ -152,7 +179,9 @@ def classify(item: dict[str, Any]) -> tuple[str, float | None]:
         return "correct", 1.0
     if status in {"fail", "failed", "incorrect", "eval_failed", "error"}:
         return "incorrect", 0.0
-    if status in {"solver_failed", "not_answered", "missing"} and not (item.get("csv_path") or item.get("sql_path")):
+    if status in {"solver_failed", "not_answered", "missing"} and not (
+        item.get("csv_path") or item.get("sql_path")
+    ):
         return "unanswered", None
     if item.get("eval_error") or item.get("failure_reason"):
         return "incorrect", 0.0
@@ -161,7 +190,9 @@ def classify(item: dict[str, Any]) -> tuple[str, float | None]:
     return "answered", None
 
 
-def normalize_item(item: dict[str, Any], source_path: Path, fallback_id: str | None = None) -> Record | None:
+def normalize_item(
+    item: dict[str, Any], source_path: Path, fallback_id: str | None = None
+) -> Record | None:
     instance_id = find_instance_id(item, fallback=fallback_id)
     if not instance_id:
         return None
@@ -193,7 +224,11 @@ def records_from_json(path: Path) -> list[Record]:
             rows = data["per_instance"]
         elif isinstance(data.get("instance_scores"), dict):
             rows = [
-                {"instance_id": instance_id, "score": score, "generated_at": data.get("generated_at")}
+                {
+                    "instance_id": instance_id,
+                    "score": score,
+                    "generated_at": data.get("generated_at"),
+                }
                 for instance_id, score in data["instance_scores"].items()
             ]
         else:
@@ -204,7 +239,11 @@ def records_from_json(path: Path) -> list[Record]:
 
 
 def records_from_csv(path: Path) -> list[Record]:
-    frame = pd.read_csv(path)
+    try:
+        frame = pd.read_csv(path)
+    except Exception:
+        return []
+
     if frame.empty:
         return []
 
@@ -230,7 +269,7 @@ def records_from_file(path: Path) -> list[Record]:
                 instance_id=path.stem,
                 status="answered",
                 score=None,
-                timestamp=datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc),
+                timestamp=datetime.fromtimestamp(path.stat().st_mtime, tz=UTC),
                 run_id=None,
                 db=None,
                 note="SQL present, not evaluated",
@@ -253,14 +292,23 @@ def discover_result_files(path: Path) -> list[Path]:
     if found:
         return found
 
-    patterns = ("**/eval/summary.json", "**/eval/per_instance.jsonl", "*.json", "*.jsonl", "*.csv", "*.sql")
+    patterns = (
+        "**/eval/summary.json",
+        "**/eval/per_instance.jsonl",
+        "*.json",
+        "*.jsonl",
+        "*.csv",
+        "*.sql",
+    )
     files: list[Path] = []
     for pattern in patterns:
         files.extend(path.glob(pattern))
     return sorted(set(files))
 
 
-def load_records(source: Path) -> list[Record]:
+@st.cache_data(ttl=5)  # Cache but refresh every 5 seconds to track live runs
+def load_records(source_str: str) -> list[Record]:
+    source = Path(source_str)
     if not source.exists():
         return []
     if source.is_dir():
@@ -276,7 +324,7 @@ def latest_records(records: list[Record]) -> dict[str, Record]:
     for index, record in enumerate(records):
         current = latest.get(record.instance_id)
         current_time = current.timestamp if current else None
-        record_time = record.timestamp or datetime.fromtimestamp(index, tz=timezone.utc)
+        record_time = record.timestamp or datetime.fromtimestamp(index, tz=UTC)
         if current is None or current_time is None or record_time >= current_time:
             latest[record.instance_id] = record
     return latest
@@ -327,20 +375,51 @@ def build_status_frame(dataset: pd.DataFrame, records: list[Record]) -> pd.DataF
 
 def make_progress_frame(records: list[Record], total_questions: int) -> pd.DataFrame:
     if not records:
-        return pd.DataFrame(columns=["x", "answered_pct", "correct_pct", "answered", "correct", "incorrect"])
+        return pd.DataFrame(
+            columns=[
+                "x",
+                "answered_pct",
+                "correct_pct",
+                "answered",
+                "correct",
+                "incorrect",
+            ]
+        )
 
     sorted_records = sorted(
         enumerate(records),
-        key=lambda pair: pair[1].timestamp or datetime.fromtimestamp(pair[0], tz=timezone.utc),
+        key=lambda pair: pair[1].timestamp or datetime.fromtimestamp(pair[0], tz=UTC),
     )
+
     state: dict[str, str] = {}
     rows = []
+
+    # O(N) approach: Maintain running totals instead of recalculating on every row
+    answered, correct, incorrect = 0, 0, 0
+
     for index, (_, record) in enumerate(sorted_records, start=1):
-        state[record.instance_id] = record.status
+        prev_status = state.get(record.instance_id, "unanswered")
+        new_status = record.status
+
+        # Only update totals if the status actually changed
+        if prev_status != new_status:
+            if prev_status != "unanswered":
+                answered -= 1
+            if prev_status == "correct":
+                correct -= 1
+            if prev_status == "incorrect":
+                incorrect -= 1
+
+            if new_status != "unanswered":
+                answered += 1
+            if new_status == "correct":
+                correct += 1
+            if new_status == "incorrect":
+                incorrect += 1
+
+            state[record.instance_id] = new_status
+
         denominator = max(total_questions, len(state), 1)
-        answered = sum(status != "unanswered" for status in state.values())
-        correct = sum(status == "correct" for status in state.values())
-        incorrect = sum(status == "incorrect" for status in state.values())
         rows.append(
             {
                 "x": record.timestamp or index,
@@ -366,9 +445,9 @@ def render_chart(progress: pd.DataFrame) -> None:
             y=progress["answered_pct"],
             name="Answered",
             mode="lines+markers",
-            line={"color": "#0a63b7", "width": 3, "shape": "hv"},
+            line={"color": ANSWERED_COLOR, "width": 3, "shape": "hv"},
             fill="tozeroy",
-            fillcolor="rgba(10, 99, 183, 0.18)",
+            fillcolor="rgba(100, 116, 139, 0.18)",
             hovertemplate="Answered: %{customdata[0]}<br>%{y:.1f}%<extra></extra>",
             customdata=progress[["answered"]],
         )
@@ -379,15 +458,15 @@ def render_chart(progress: pd.DataFrame) -> None:
             y=progress["correct_pct"],
             name="Correct",
             mode="lines+markers",
-            line={"color": "#ff2d55", "width": 3, "shape": "hv"},
+            line={"color": CORRECT_COLOR, "width": 3, "shape": "hv"},
             fill="tozeroy",
-            fillcolor="rgba(255, 45, 85, 0.28)",
+            fillcolor="rgba(34, 197, 94, 0.18)",
             hovertemplate="Correct: %{customdata[0]}<br>%{y:.1f}%<extra></extra>",
             customdata=progress[["correct"]],
         )
     )
     fig.update_layout(
-        height=320,
+        height=CHART_HEIGHT,
         margin={"l": 8, "r": 8, "t": 8, "b": 8},
         paper_bgcolor="#080808",
         plot_bgcolor="#080808",
@@ -432,6 +511,9 @@ def render_grid(frame: pd.DataFrame) -> None:
             width: 100%;
             align-items: center;
         }}
+        .status-grid-wrap {{
+            padding-bottom: 16px;
+        }}
         .tile {{
             aspect-ratio: 1 / 1;
             border: 1px solid rgba(0, 0, 0, 0.65);
@@ -443,7 +525,9 @@ def render_grid(frame: pd.DataFrame) -> None:
             z-index: 2;
         }}
         </style>
-        <div class="status-grid">{''.join(tiles)}</div>
+        <div class="status-grid-wrap">
+            <div class="status-grid">{"".join(tiles)}</div>
+        </div>
         """,
         unsafe_allow_html=True,
     )
@@ -469,6 +553,9 @@ def apply_page_style() -> None:
         div[data-testid="stDataFrame"] {
             border: 1px solid rgba(255,255,255,0.08);
         }
+        .section-spacer {
+            height: 24px;
+        }
         </style>
         """,
         unsafe_allow_html=True,
@@ -484,13 +571,20 @@ def main() -> None:
     with st.sidebar:
         st.title("Progress UI")
         dataset_path = resolve_path(
-            st.text_input("Dataset JSONL", value=args.dataset, help="Used for the full question list.")
+            st.text_input(
+                "Dataset JSONL",
+                value=args.dataset,
+                help="Used for the full question list.",
+            )
         )
         source_path = resolve_path(
             st.text_input(
                 "Results source",
                 value=source_default,
-                help="File or directory: latest.json, task_results.jsonl, summary.json, per_instance.jsonl, CSV, SQL dir.",
+                help=(
+                    "File or directory: latest.json, task_results.jsonl, "
+                    "summary.json, per_instance.jsonl, CSV, SQL dir."
+                ),
             )
         )
         search = st.text_input("Search", value="")
@@ -500,20 +594,24 @@ def main() -> None:
             default=list(STATUS_ORDER),
             format_func=lambda value: STATUS_LABELS[value],
         )
-        st.caption("Run: `uv run streamlit run tools/progress_ui.py`")
+        st.caption("Run: `uv run streamlit run progress_ui.py`")
 
-    dataset = read_dataset(dataset_path)
-    records = load_records(source_path)
+    # Pass strings to the cached functions, as Streamlit handles string hashing perfectly
+    dataset = read_dataset(str(dataset_path))
+    records = load_records(str(source_path))
     frame = build_status_frame(dataset, records)
 
+    # Filter logic: Vectorized operations for significant speedup
     if search:
-        needle = search.lower()
-        frame = frame[
-            frame.apply(
-                lambda row: any(needle in str(row.get(column, "")).lower() for column in ("instance_id", "db", "instruction", "note")),
-                axis=1,
-            )
-        ]
+        # Check all string representations across the targeted columns simultaneously
+        search_mask = (
+            frame[["instance_id", "db", "instruction", "note"]]
+            .astype(str)
+            .apply(lambda col: col.str.contains(search, case=False, na=False))
+            .any(axis=1)
+        )
+        frame = frame[search_mask]
+
     if selected:
         frame = frame[frame["status"].isin(selected)]
 
@@ -535,10 +633,15 @@ def main() -> None:
     cols[3].metric("Incorrect", f"{incorrect:,}")
     cols[4].metric("Unanswered", f"{totals.get('unanswered', 0):,}")
 
+    st.subheader("Progress Chart")
     render_chart(make_progress_frame(records, len(dataset)))
 
-    st.subheader("Questions")
-    render_grid(frame)
+    st.markdown('<div class="section-spacer"></div>', unsafe_allow_html=True)
+
+    with st.expander("Question Grid", expanded=True):
+        render_grid(frame)
+
+    st.markdown('<div class="section-spacer"></div>', unsafe_allow_html=True)
 
     with st.expander("Rows"):
         display = frame.copy()
@@ -558,6 +661,8 @@ def main() -> None:
                 ]
             ],
             width="stretch",
+            height=TABLE_HEIGHT,
+            row_height=TABLE_ROW_HEIGHT,
             hide_index=True,
         )
 

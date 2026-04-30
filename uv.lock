@@ -3485,7 +3485,11 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.15.12,<0.16" }]
+dev = [
+    { name = "plotly", specifier = ">=6.7.0" },
+    { name = "ruff", specifier = ">=0.15.12,<0.16" },
+    { name = "streamlit", specifier = ">=1.57.0" },
+]
 
 [[package]]
 name = "sortedcontainers"

@@ -321,9 +321,7 @@ def _read_batch_records(
                 continue
 
             if instance_id not in dataset_order:
-                errors.append(
-                    f"{batch_path.name}:{line_number}: unknown instance_id {instance_id}"
-                )
+                errors.append(f"{batch_path.name}:{line_number}: unknown instance_id {instance_id}")
                 continue
 
             if instance_id in seen_instance_ids:
