@@ -607,6 +607,30 @@ def recommend_focus(frame: pd.DataFrame) -> dict[str, Any]:
         }
 
     if summary["answered"] < 10:
+        tier_summary = compute_tier_summary(frame)
+        low_tier_unanswered = tier_summary[
+            tier_summary["primary_tier"].isin([1, 2, 3]) & (tier_summary["unanswered"] > 0)
+        ]
+        if not low_tier_unanswered.empty:
+            row = low_tier_unanswered.sort_values(
+                by=["primary_tier", "unanswered", "total"],
+                ascending=[True, False, False],
+                kind="stable",
+            ).iloc[0]
+            tier_value = None if pd.isna(row["primary_tier"]) else int(row["primary_tier"])
+            return {
+                "kind": "unanswered",
+                "title": f"Clear tier {row['tier_label']}",
+                "detail": (
+                    f"{int(row['unanswered'])} questions in {row['tier_label']} are still unanswered."
+                ),
+                "count": int(row["unanswered"]),
+                "primary_tier": tier_value,
+                "tag": None,
+                "coverage_pct": float(row["coverage_pct"]),
+                "accuracy_pct": float(row["accuracy_pct"]),
+            }
+
         return {
             "kind": "baseline",
             "title": "Build a baseline",

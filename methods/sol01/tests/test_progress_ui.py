@@ -150,6 +150,22 @@ def test_apply_frame_filters_excludes_missing_metadata_when_category_filters_are
     assert list(filtered["instance_id"]) == ["sf_a"]
 
 
+def test_build_status_frame_handles_empty_results_and_missing_metadata():
+    dataset = pd.DataFrame(
+        [
+            {"instance_id": "sf_a", "instruction": "q1", "db_id": "DB_A"},
+            {"instance_id": "sf_b", "instruction": "q2", "db_id": "DB_B"},
+        ]
+    )
+
+    frame = build_status_frame(dataset, [], None)
+
+    assert list(frame["instance_id"]) == ["sf_a", "sf_b"]
+    assert list(frame["status"]) == ["unanswered", "unanswered"]
+    assert list(frame["tags"]) == [[], []]
+    assert list(frame["category_available"]) == [False, False]
+
+
 def test_make_progress_frame_filters_records_to_selected_questions():
     records = [
         Record(
@@ -297,8 +313,25 @@ def test_recommend_focus_prioritizes_low_answered_count():
         [
             {"status": "correct", "primary_tier": 1},
             {"status": "incorrect", "primary_tier": 2},
+            {"status": "unanswered", "primary_tier": 1},
             {"status": "unanswered", "primary_tier": 2},
             {"status": "unanswered", "primary_tier": 3},
+        ]
+    )
+
+    focus = recommend_focus(frame)
+
+    assert focus["kind"] == "unanswered"
+    assert focus["primary_tier"] == 1
+    assert focus["count"] == 1
+
+
+def test_recommend_focus_uses_baseline_when_low_answered_has_no_tier_one_to_three_gap():
+    frame = pd.DataFrame(
+        [
+            {"status": "correct", "primary_tier": 4},
+            {"status": "incorrect", "primary_tier": 4},
+            {"status": "unanswered", "primary_tier": 5},
         ]
     )
 
@@ -356,6 +389,14 @@ def test_recommend_focus_prioritizes_remaining_unanswered_tiers():
     assert focus["kind"] == "unanswered"
     assert focus["primary_tier"] == 1
     assert "Tier 1" in focus["title"]
+
+
+def test_recommend_focus_handles_empty_frame():
+    focus = recommend_focus(pd.DataFrame(columns=["status", "primary_tier"]))
+
+    assert focus["kind"] == "empty"
+    assert focus["count"] == 0
+    assert focus["coverage_pct"] == 0.0
 
 
 def test_prepare_display_frame_formats_display_fields_without_mutating_source():
