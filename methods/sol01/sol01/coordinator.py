@@ -10,6 +10,10 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Protocol
 
+import sqlglot
+from sqlglot import exp
+from sqlglot.errors import ParseError
+
 from sol01.config import RuntimeConfig
 from sol01.docs import load_document_text
 from sol01.index import CACHE_PATH
@@ -23,6 +27,7 @@ from sol01.models import (
     ExecutionResult,
     FinalAnswer,
     Intent,
+    OutputShapeReport,
     SchemaSelection,
     SQLCandidate,
     TableSchema,
@@ -810,6 +815,12 @@ def _evaluate_candidate(
         execution=execution,
     )
     result_profile = profile_dataframe(dataframe) if execution.ok else None
+    shape_report = _infer_output_shape_report(
+        intent=intent,
+        candidate=candidate,
+        execution=execution,
+        result_profile=result_profile,
+    )
     logger.debug(
         "candidate processed",
         stage=stage,
@@ -826,6 +837,7 @@ def _evaluate_candidate(
         "candidate_confidence": candidate.confidence,
         "validation": validation.model_dump(mode="json"),
         "execution_result": execution.model_dump(mode="json"),
+        "shape_report": shape_report.model_dump(mode="json") if shape_report is not None else None,
         "score_breakdown": _attempt_score_breakdown(
             intent=intent,
             candidate=candidate,
@@ -833,6 +845,7 @@ def _evaluate_candidate(
             execution=execution,
             aggregate_grain=aggregate_grain,
             result_profile=result_profile,
+            shape_report=shape_report,
         ),
     }
     attempt["score"] = sum(attempt["score_breakdown"].values())
@@ -855,6 +868,7 @@ def _attempt_score(
     execution: ExecutionResult,
     aggregate_grain: AggregateGrainReport | None = None,
     result_profile: dict[str, Any] | None = None,
+    shape_report: OutputShapeReport | None = None,
 ) -> float:
     """Rank candidates by verification evidence first and confidence last."""
 
@@ -866,6 +880,7 @@ def _attempt_score(
             execution=execution,
             aggregate_grain=aggregate_grain,
             result_profile=result_profile,
+            shape_report=shape_report,
         ).values()
     )
 
@@ -878,13 +893,14 @@ def _attempt_score_breakdown(
     execution: ExecutionResult,
     aggregate_grain: AggregateGrainReport | None = None,
     result_profile: dict[str, Any] | None = None,
+    shape_report: OutputShapeReport | None = None,
 ) -> dict[str, float]:
     """Return the score contribution for each verification check."""
 
     return {
         "execution_status": _execution_status_adjustment(execution),
         "validation": _validation_adjustment(validation),
-        "shape": _output_shape_adjustment(intent, execution, result_profile),
+        "shape": _output_shape_adjustment(intent, execution, result_profile, shape_report),
         "filter_grounding": _filter_grounding_adjustment(intent, validation, execution),
         "aggregate_grain": _aggregate_grain_adjustment(aggregate_grain),
         "cardinality": _cardinality_plausibility_adjustment(execution, result_profile),
@@ -911,6 +927,7 @@ def _comparison_attempt_summary(attempt: dict[str, Any]) -> dict[str, Any]:
         "score_breakdown": attempt.get("score_breakdown", {}),
         "validation": attempt["validation"],
         "execution_result": attempt["execution_result"],
+        "shape_report": attempt.get("shape_report"),
         "result_profile": attempt.get("result_profile", {}),
     }
 
@@ -1049,11 +1066,16 @@ def _output_shape_adjustment(
     intent: Intent | None,
     execution: ExecutionResult,
     result_profile: dict[str, Any] | None,
+    shape_report: OutputShapeReport | None = None,
 ) -> float:
     """Prefer result shapes that match the task's stated output contract."""
 
     if not execution.ok:
         return 0.0
+
+    score = 0.0
+    if shape_report is not None:
+        score += _shape_report_adjustment(shape_report)
 
     profile = result_profile or {
         "row_count": execution.row_count,
@@ -1064,30 +1086,132 @@ def _output_shape_adjustment(
     expectation = _normalized_output_expectation(intent)
 
     expected_columns = _expected_output_columns(expectation)
-    if expected_columns is not None:
+    if expected_columns is not None and shape_report is None:
         if column_count == expected_columns:
-            return 45.0
-        if abs(column_count - expected_columns) == 1:
-            return 10.0
-        return -25.0
+            score += 45.0
+        elif abs(column_count - expected_columns) == 1:
+            score += 10.0
+        else:
+            score -= 25.0
 
-    if _expects_scalar_output(expectation):
-        if row_count == 1 and column_count == 1:
-            return 35.0
-        if row_count == 1 or column_count == 1:
-            return 12.0
-        return -18.0
+    if shape_report is None:
+        if _expects_scalar_output(expectation):
+            if row_count == 1 and column_count == 1:
+                score += 35.0
+            elif row_count == 1 or column_count == 1:
+                score += 12.0
+            else:
+                score -= 18.0
 
-    if _expects_tabular_output(expectation):
-        if row_count > 0 and column_count >= 2:
-            return 18.0
-        if row_count > 0:
-            return 6.0
-        return -12.0
+        if _expects_tabular_output(expectation):
+            if row_count > 0 and column_count >= 2:
+                score += 18.0
+            elif row_count > 0:
+                score += 6.0
+            else:
+                score -= 12.0
 
-    if row_count > 0 and column_count > 0:
-        return 4.0
-    return -4.0
+        if row_count > 0 and column_count > 0:
+            score += 4.0
+        else:
+            score -= 4.0
+
+    return score
+
+
+def _shape_report_adjustment(report: OutputShapeReport | None) -> float:
+    """Score a candidate by how well its observed columns match the inferred contract."""
+
+    if report is None:
+        return 0.0
+
+    score = 0.0
+    if report.expected_columns:
+        if report.observed_columns == report.expected_columns:
+            score += 30.0
+        elif not report.missing_columns:
+            score += 12.0
+        else:
+            score -= 28.0 * len(report.missing_columns)
+
+    if report.violations:
+        score -= 20.0 * len(report.violations)
+        if any("grouped key" in violation for violation in report.violations):
+            score -= 15.0
+    return score
+
+
+def _projection_columns(statement: exp.Expression) -> list[str]:
+    """Return the projected output column names from one query."""
+
+    columns: list[str] = []
+    for expression in getattr(statement, "expressions", []):
+        name = _expression_output_name(expression)
+        if name is not None:
+            columns.append(name)
+    return columns
+
+
+def _grouped_columns(statement: exp.Expression) -> list[str]:
+    """Return simple grouped column names from one query."""
+
+    group = statement.args.get("group")
+    if group is None:
+        return []
+
+    columns: list[str] = []
+    for expression in group.expressions:
+        if isinstance(expression, exp.Column):
+            columns.append(_normalized_column_name(expression))
+    return columns
+
+
+def _expression_output_name(expression: exp.Expression) -> str | None:
+    """Return the visible output name for one select expression."""
+
+    if _is_aggregate_projection(expression):
+        alias = getattr(expression, "alias_or_name", None)
+        if alias:
+            return str(alias)
+        return None
+
+    if isinstance(expression, exp.Alias):
+        alias = expression.alias_or_name
+        return str(alias) if alias else None
+    if isinstance(expression, exp.Column):
+        return _normalized_column_name(expression)
+
+    alias = getattr(expression, "alias_or_name", None)
+    if alias:
+        return str(alias)
+
+    if expression.is_star:
+        return "*"
+    return None
+
+
+def _is_aggregate_projection(expression: exp.Expression) -> bool:
+    """Return True when one select expression contains an aggregate."""
+
+    return expression.find(exp.AggFunc) is not None
+
+
+def _normalized_column_name(expression: exp.Column) -> str:
+    """Return the visible column name for one AST column node."""
+
+    return str(expression.alias_or_name or expression.name)
+
+
+def _is_identifier_like_column_name(column_name: str) -> bool:
+    """Return True for likely identifier columns that should stay visible."""
+
+    normalized = column_name.replace('"', "").replace("`", "")
+    return bool(
+        re.search(r"(?:^|[_\W])id$", normalized, flags=re.IGNORECASE)
+        or re.search(r"[A-Z]ID$", column_name)
+        or normalized.lower().endswith("_id")
+        or normalized.lower().endswith("id")
+    )
 
 
 def _filter_grounding_adjustment(
@@ -1145,6 +1269,64 @@ def _cardinality_plausibility_adjustment(
     if row_count > 0:
         return 3.0
     return 0.0
+
+
+def _infer_output_shape_report(
+    *,
+    intent: Intent,
+    candidate: SQLCandidate,
+    execution: ExecutionResult,
+    result_profile: dict[str, Any] | None,
+) -> OutputShapeReport | None:
+    """Infer the answer contract from the SQL, intent, and executed result."""
+
+    if not execution.ok:
+        return None
+
+    profile = result_profile or {
+        "columns": execution.columns,
+        "sample_rows": execution.sample_rows,
+    }
+    observed_columns = [str(column) for column in profile.get("columns") or execution.columns]
+
+    try:
+        statement = sqlglot.parse_one(candidate.sql, read="snowflake")
+    except ParseError:
+        return OutputShapeReport(
+            expected_columns=observed_columns,
+            observed_columns=observed_columns,
+            violations=["SQL could not be parsed for shape analysis."],
+        )
+
+    projected_columns = _projection_columns(statement)
+    grouped_columns = _grouped_columns(statement)
+    expected_columns = list(dict.fromkeys(projected_columns))
+    violations: list[str] = []
+    has_non_aggregate_projection = any(
+        not _is_aggregate_projection(expression) for expression in statement.expressions
+    )
+
+    for grouped_column in grouped_columns:
+        if (
+            _is_identifier_like_column_name(grouped_column)
+            and grouped_column not in expected_columns
+            and has_non_aggregate_projection
+        ):
+            expected_columns.append(grouped_column)
+            violations.append(f"missing grouped key {grouped_column}")
+
+    missing_columns = [column for column in expected_columns if column not in observed_columns]
+    if missing_columns:
+        violations.extend(f"missing expected column {column}" for column in missing_columns)
+
+    return OutputShapeReport(
+        expected_columns=expected_columns,
+        observed_columns=observed_columns,
+        projected_columns=projected_columns,
+        grouped_columns=grouped_columns,
+        missing_columns=missing_columns,
+        violations=list(dict.fromkeys(violations)),
+    )
 
 
 def _normalized_output_expectation(intent: Intent | None) -> str:

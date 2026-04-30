@@ -1321,6 +1321,225 @@ def test_attempt_score_penalizes_ungrounded_filters_that_return_no_rows():
     assert grounded_score > empty_score
 
 
+def test_run_task_flags_missing_grouped_identifier_in_trace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    task = Task(
+        instance_id="sf_local131",
+        db="ENTERTAINMENTAGENCY",
+        question=(
+            "Could you list each musical style with the number of times it appears as a 1st, "
+            "2nd, or 3rd preference in a single row per style?"
+        ),
+    )
+    run_paths = ensure_run_paths("shape-run", outputs_root=tmp_path)
+    captured_prompts: dict[str, list[str]] = {}
+    styles_table = TableSchema(
+        name="MUSICAL_STYLES",
+        full_name="ENTERTAINMENTAGENCY.ENTERTAINMENTAGENCY.MUSICAL_STYLES",
+        ddl='create table MUSICAL_STYLES ("StyleID" number, "StyleName" text);',
+        columns=[
+            ColumnSchema(name="StyleID"),
+            ColumnSchema(name="StyleName"),
+        ],
+        searchable_text="musical styles styleid stylename",
+    )
+    preferences_table = TableSchema(
+        name="MUSICAL_PREFERENCES",
+        full_name="ENTERTAINMENTAGENCY.ENTERTAINMENTAGENCY.MUSICAL_PREFERENCES",
+        ddl=('create table MUSICAL_PREFERENCES ("StyleID" number, "PreferenceSeq" number);'),
+        columns=[
+            ColumnSchema(name="StyleID"),
+            ColumnSchema(name="PreferenceSeq"),
+        ],
+        searchable_text="musical preferences styleid preferenceseq",
+    )
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Count preferences by musical style.",
+                    entities=["musical styles", "musical preferences"],
+                    metrics=[
+                        "count of 1st preference",
+                        "count of 2nd preference",
+                        "count of 3rd preference",
+                    ],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation=(
+                        "One row per musical style with columns: musical style name, "
+                        "count as 1st preference, count as 2nd preference, "
+                        "count as 3rd preference."
+                    ),
+                    assumptions=[
+                        "MUSICAL_PREFERENCES contains PreferenceSeq (1,2,3) and StyleID.",
+                        (
+                            "All musical styles should be included, with zero counts if "
+                            "no preferences."
+                        ),
+                    ],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=(
+                        'SELECT ms."StyleName", '
+                        'COUNT(CASE WHEN mp."PreferenceSeq" = 1 THEN 1 END) '
+                        'AS "1stPreferenceCount", '
+                        'COUNT(CASE WHEN mp."PreferenceSeq" = 2 THEN 1 END) '
+                        'AS "2ndPreferenceCount", '
+                        'COUNT(CASE WHEN mp."PreferenceSeq" = 3 THEN 1 END) '
+                        'AS "3rdPreferenceCount" '
+                        "FROM ENTERTAINMENTAGENCY.ENTERTAINMENTAGENCY.MUSICAL_STYLES ms "
+                        "LEFT JOIN ENTERTAINMENTAGENCY.ENTERTAINMENTAGENCY.MUSICAL_PREFERENCES mp "
+                        'ON ms."StyleID" = mp."StyleID" '
+                        'GROUP BY ms."StyleID", ms."StyleName" '
+                        'ORDER BY ms."StyleName"'
+                    ),
+                    explanation="Omit the grouped key from the output.",
+                    assumptions=[],
+                    confidence=0.95,
+                ),
+                SQLCandidate(
+                    sql=(
+                        'SELECT ms."StyleID", ms."StyleName", '
+                        'COUNT(CASE WHEN mp."PreferenceSeq" = 1 THEN 1 END) '
+                        'AS "1stPreferenceCount", '
+                        'COUNT(CASE WHEN mp."PreferenceSeq" = 2 THEN 1 END) '
+                        'AS "2ndPreferenceCount", '
+                        'COUNT(CASE WHEN mp."PreferenceSeq" = 3 THEN 1 END) '
+                        'AS "3rdPreferenceCount" '
+                        "FROM ENTERTAINMENTAGENCY.ENTERTAINMENTAGENCY.MUSICAL_STYLES ms "
+                        "LEFT JOIN ENTERTAINMENTAGENCY.ENTERTAINMENTAGENCY.MUSICAL_PREFERENCES mp "
+                        'ON ms."StyleID" = mp."StyleID" '
+                        'GROUP BY ms."StyleID", ms."StyleName" '
+                        'ORDER BY ms."StyleName"'
+                    ),
+                    explanation="Keep the grouped key in the output.",
+                    assumptions=[],
+                    confidence=0.4,
+                ),
+            ],
+            "result_comparison": [
+                CandidateComparisonReport(
+                    baseline_stage="initial_1",
+                    preferred_stage="initial_2",
+                    compared_stages=["initial_1", "initial_2"],
+                    reasons=["The second candidate keeps the grouped key visible."],
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(confidence=0.9, issues=[], should_repair=False, repair_focus=None)
+            ],
+        },
+        prompts=captured_prompts,
+    )
+
+    def fake_fetch_query_dataframe(sql: str, *, db: str) -> pd.DataFrame:
+        if db != "ENTERTAINMENTAGENCY":
+            raise AssertionError(f"Unexpected database: {db}")
+        if 'SELECT ms."StyleID",' in sql:
+            return pd.DataFrame(
+                [
+                    {
+                        "StyleID": 1,
+                        "StyleName": "40's Ballroom Music",
+                        "1stPreferenceCount": 0,
+                        "2ndPreferenceCount": 3,
+                        "3rdPreferenceCount": 4,
+                    },
+                    {
+                        "StyleID": 2,
+                        "StyleName": "50's Music",
+                        "1stPreferenceCount": 1,
+                        "2ndPreferenceCount": 2,
+                        "3rdPreferenceCount": 3,
+                    },
+                    {
+                        "StyleID": 3,
+                        "StyleName": "60's Music",
+                        "1stPreferenceCount": 2,
+                        "2ndPreferenceCount": 1,
+                        "3rdPreferenceCount": 0,
+                    },
+                ]
+            )
+        return pd.DataFrame(
+            [
+                {
+                    "StyleName": "40's Ballroom Music",
+                    "1stPreferenceCount": 0,
+                    "2ndPreferenceCount": 3,
+                    "3rdPreferenceCount": 4,
+                },
+                {
+                    "StyleName": "50's Music",
+                    "1stPreferenceCount": 1,
+                    "2ndPreferenceCount": 2,
+                    "3rdPreferenceCount": 3,
+                },
+                {
+                    "StyleName": "60's Music",
+                    "1stPreferenceCount": 2,
+                    "2ndPreferenceCount": 1,
+                    "3rdPreferenceCount": 0,
+                },
+            ]
+        )
+
+    monkeypatch.setattr("sol01.coordinator.fetch_query_dataframe", fake_fetch_query_dataframe)
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="ENTERTAINMENTAGENCY",
+            selected_tables=[
+                styles_table.full_name or styles_table.name,
+                preferences_table.full_name or preferences_table.name,
+            ],
+            expanded_tables=[
+                styles_table.full_name or styles_table.name,
+                preferences_table.full_name or preferences_table.name,
+            ],
+            rationale="Musical styles and preferences are enough.",
+            confidence=0.95,
+        ),
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.load_db_index",
+        lambda *args, **kwargs: {
+            styles_table.full_name or styles_table.name: styles_table,
+            preferences_table.full_name or preferences_table.name: preferences_table,
+        },
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=2,
+    )
+
+    assert answer.status == "success"
+    trace = json.loads((run_paths.traces_dir / "sf_local131.json").read_text(encoding="utf-8"))
+    assert trace["final_sql"].startswith('SELECT ms."StyleID", ms."StyleName"')
+    assert trace["attempts"][0]["shape_report"]["expected_columns"] == [
+        "StyleName",
+        "1stPreferenceCount",
+        "2ndPreferenceCount",
+        "3rdPreferenceCount",
+        "StyleID",
+    ]
+    assert "missing grouped key StyleID" in trace["attempts"][0]["shape_report"]["violations"]
+    assert (
+        trace["attempts"][0]["score_breakdown"]["shape"]
+        < trace["attempts"][1]["score_breakdown"]["shape"]
+    )
+    assert "StyleID" not in trace["attempts"][0]["result_profile"]["columns"]
+    assert trace["attempts"][1]["shape_report"]["violations"] == []
+
+
 def test_run_task_without_external_knowledge_uses_no_document_context(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
 ):

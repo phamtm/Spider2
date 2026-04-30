@@ -133,6 +133,17 @@ class ExecutionResult(BaseModel):
     error: str | None = None
 
 
+class OutputShapeReport(BaseModel):
+    """Shape analysis for one SQL candidate and its executed result."""
+
+    expected_columns: list[str] = Field(default_factory=list)
+    observed_columns: list[str] = Field(default_factory=list)
+    projected_columns: list[str] = Field(default_factory=list)
+    grouped_columns: list[str] = Field(default_factory=list)
+    missing_columns: list[str] = Field(default_factory=list)
+    violations: list[str] = Field(default_factory=list)
+
+
 class ConfidenceReport(BaseModel):
     """Critic output that decides whether the best result needs repair."""
 
