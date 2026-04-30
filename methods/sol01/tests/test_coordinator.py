@@ -923,6 +923,8 @@ def test_run_task_prefers_row_count_over_distinct_entity_count(
     assert "unnecessary" in trace["attempts"][0]["aggregate_grain"]["distinct_reason"]
     assert trace["attempts"][1]["aggregate_grain"]["inferred_grain"] == "row_count"
     assert trace["attempts"][1]["aggregate_grain"].get("distinct_reason") is None
+    assert "row-count style aggregation" in captured_prompts["sql_generation"][0]
+    assert "COUNT(*) per group" in captured_prompts["sql_generation"][0]
     assert "COUNT(*)" in captured_prompts["result_comparison"][0]
 
 

@@ -349,6 +349,7 @@ def run_task(
     )
 
     table_schemas = _table_schemas_for_selection(schema)
+    aggregate_grain_guidance = _aggregate_grain_guidance(task, intent, schema, table_schemas)
     sql_reference_context = _sql_reference_context(schema, table_schemas)
     if task.external_knowledge:
         docs_context = load_document_text(task.external_knowledge)
@@ -381,6 +382,7 @@ def run_task(
                 intent,
                 sql_reference_context,
                 docs_context,
+                aggregate_grain_guidance=aggregate_grain_guidance,
             ),
         )
         attempt = _evaluate_candidate(
@@ -421,7 +423,13 @@ def run_task(
             prompt_hashes=prompt_hashes,
             prompt_name="sql_repair",
             output_type=SQLCandidate,
-            user_prompt=_sql_repair_prompt(task, best_attempt, sql_reference_context, docs_context),
+            user_prompt=_sql_repair_prompt(
+                task,
+                best_attempt,
+                sql_reference_context,
+                docs_context,
+                aggregate_grain_guidance=aggregate_grain_guidance,
+            ),
         )
         attempt = _evaluate_candidate(
             task=task,
@@ -465,6 +473,7 @@ def run_task(
                 executable_attempts,
                 sql_reference_context,
                 docs_context,
+                aggregate_grain_guidance=aggregate_grain_guidance,
                 baseline_stage=best_attempt["stage"] if best_attempt is not None else None,
             ),
         )
@@ -980,10 +989,7 @@ def _infer_aggregate_grain(
     ]
     entity_like_tables = [table for table in selected_tables if _table_is_entity_like(table)]
     question_text = task.question.lower()
-    wants_unique = any(
-        keyword in question_text
-        for keyword in ("unique", "distinct", "dedupe", "dedup", "without duplicates")
-    )
+    wants_unique = _question_requests_unique_entities(question_text)
     target = _count_distinct_target(sql)
 
     if uses_distinct:
@@ -1063,11 +1069,11 @@ def _aggregate_grain_adjustment(report: AggregateGrainReport | None) -> float:
     if report is None:
         return 0.0
     if report.inferred_grain == "row_count":
-        return -2.5 if report.uses_distinct else 0.75
+        return -6.0 if report.uses_distinct else 2.0
     if report.inferred_grain == "distinct_entity_count":
-        return 0.75 if report.uses_distinct else -1.5
+        return 2.0 if report.uses_distinct else -4.0
     if report.inferred_grain == "value_count":
-        return 0.25
+        return 0.5
     return 0.0
 
 
@@ -1761,6 +1767,82 @@ def _table_is_entity_like(table: TableSchema) -> bool:
     )
 
 
+def _question_requests_unique_entities(question_text: str) -> bool:
+    """Return True when the wording asks for unique or deduplicated entities."""
+
+    normalized = question_text.lower()
+    return any(
+        keyword in normalized
+        for keyword in ("unique", "distinct", "dedupe", "dedup", "without duplicates")
+    )
+
+
+def _aggregate_grain_guidance(
+    task: Task,
+    intent: Intent,
+    schema: SchemaSelection,
+    table_schemas: dict[str, TableSchema],
+) -> str | None:
+    """Return prompt guidance when a task looks like a plain count over one entity table."""
+
+    normalized_question = " ".join(
+        [
+            task.question.lower(),
+            intent.summary.lower(),
+            intent.output_expectation.lower(),
+            " ".join(intent.metrics).lower(),
+            " ".join(intent.filters).lower(),
+            " ".join(intent.assumptions).lower(),
+        ]
+    )
+    if not (
+        _expects_scalar_output(_normalized_output_expectation(intent))
+        or any(token in normalized_question for token in ("how many", "count", "number of"))
+    ):
+        return None
+
+    question_text = " ".join(
+        [
+            task.question,
+            intent.summary,
+            intent.output_expectation,
+            " ".join(intent.metrics),
+            " ".join(intent.filters),
+            " ".join(intent.assumptions),
+        ]
+    )
+    selected_tables = [
+        table_schemas.get(table_name) or TableSchema(name=table_name, ddl="", searchable_text="")
+        for table_name in schema.expanded_tables
+    ]
+    entity_like_tables = [table for table in selected_tables if _table_is_entity_like(table)]
+    if len(selected_tables) != 1 or len(entity_like_tables) != 1:
+        return None
+
+    table_name = entity_like_tables[0].full_name or entity_like_tables[0].name
+    if _question_requests_unique_entities(question_text):
+        return (
+            f"Grain guidance: {table_name} looks like a single entity table, and the question "
+            "asks for unique or deduplicated entities. Use COUNT(DISTINCT ...) only if the "
+            "intent explicitly requires uniqueness."
+        )
+
+    return (
+        f"Grain guidance: {table_name} looks like a single entity table. Treat this as a "
+        "row-count style aggregation and default to COUNT(*) per group. Do not switch to "
+        "COUNT(DISTINCT ...) unless the question explicitly asks for unique or deduplicated "
+        "entities."
+    )
+
+
+def _grain_guidance_block(guidance: str | None) -> str:
+    """Render an optional grain hint as a prompt section."""
+
+    if not guidance:
+        return ""
+    return f"Grain guidance:\n{guidance}\n\n"
+
+
 def _count_distinct_target(sql: str) -> str | None:
     """Extract the DISTINCT target column from a COUNT aggregate."""
 
@@ -1940,6 +2022,8 @@ def _sql_generation_prompt(
     intent: Intent,
     sql_reference_context: str,
     docs_context: str,
+    *,
+    aggregate_grain_guidance: str | None = None,
 ) -> str:
     """Build the SQL-generation prompt body."""
 
@@ -1948,6 +2032,7 @@ def _sql_generation_prompt(
         f"Document context:\n{docs_context}\n\n"
         f"Question: {task.question}\n\n"
         f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
+        f"{_grain_guidance_block(aggregate_grain_guidance)}"
         "Write the SQL using only the reference context above."
     )
 
@@ -1957,6 +2042,8 @@ def _sql_repair_prompt(
     attempt: dict[str, Any],
     sql_reference_context: str,
     docs_context: str,
+    *,
+    aggregate_grain_guidance: str | None = None,
 ) -> str:
     """Build a repair prompt using validation or execution feedback."""
 
@@ -1966,7 +2053,8 @@ def _sql_repair_prompt(
         f"Question: {task.question}\n\n"
         f"Failed SQL:\n{attempt['sql']}\n\n"
         f"Validation:\n{json.dumps(attempt['validation'], indent=2, sort_keys=True)}\n\n"
-        f"Execution:\n{json.dumps(attempt['execution_result'], indent=2, sort_keys=True)}"
+        f"Execution:\n{json.dumps(attempt['execution_result'], indent=2, sort_keys=True)}\n\n"
+        f"{_grain_guidance_block(aggregate_grain_guidance)}"
     )
 
 
@@ -2016,6 +2104,7 @@ def _candidate_comparison_prompt(
     sql_reference_context: str,
     docs_context: str,
     *,
+    aggregate_grain_guidance: str | None = None,
     baseline_stage: str | None,
 ) -> str:
     """Build the comparison prompt for executable candidates."""
@@ -2026,6 +2115,7 @@ def _candidate_comparison_prompt(
         f"Document context:\n{docs_context}\n\n"
         f"Question: {task.question}\n\n"
         f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
+        f"{_grain_guidance_block(aggregate_grain_guidance)}"
         f"Baseline stage: {baseline_stage or 'unknown'}\n\n"
         "Executable candidates:\n"
         f"{json.dumps(comparison_candidates, indent=2, sort_keys=True)}\n\n"
