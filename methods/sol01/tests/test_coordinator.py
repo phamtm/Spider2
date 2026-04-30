@@ -22,6 +22,7 @@ from sol01.coordinator import (
 )
 from sol01.llm import PromptSpec
 from sol01.models import (
+    CandidateComparisonReport,
     ColumnSchema,
     ConfidenceReport,
     FinalAnswer,
@@ -230,6 +231,92 @@ def test_run_task_live_client_wires_llm_call_log_path(
     assert created["path"] == log_path
     trace = json.loads((run_paths.traces_dir / "sf_local003.json").read_text(encoding="utf-8"))
     assert trace["llm_call_log_path"] == str(log_path)
+
+
+def test_run_task_compares_executable_candidates_before_critic(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
+):
+    task = Task(instance_id="sf_local007", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("comparison-run", outputs_root=tmp_path)
+    captured_prompts: dict[str, list[str]] = {}
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Find customer totals.",
+                    entities=["sales"],
+                    metrics=[],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="customer and total columns",
+                    assumptions=["Use all rows."],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE} ORDER BY amount DESC",
+                    explanation="Read customer amounts directly.",
+                    assumptions=["amount already stores totals"],
+                    confidence=0.95,
+                ),
+                SQLCandidate(
+                    sql=(
+                        f"SELECT customer, SUM(amount) AS total FROM {SALES_TABLE} "
+                        "GROUP BY customer ORDER BY total DESC"
+                    ),
+                    explanation="Aggregate by customer.",
+                    assumptions=["amount is additive"],
+                    confidence=0.55,
+                ),
+            ],
+            "result_comparison": [
+                CandidateComparisonReport(
+                    baseline_stage="initial_1",
+                    preferred_stage="initial_2",
+                    compared_stages=["initial_1", "initial_2"],
+                    reasons=[
+                        "initial_2 matches the requested customer-total contract better.",
+                    ],
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(confidence=0.9, issues=[], should_repair=False, repair_focus=None)
+            ],
+        },
+        prompts=captured_prompts,
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="test_db",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=2,
+    )
+
+    assert answer.status == "success"
+    trace = json.loads((run_paths.traces_dir / "sf_local007.json").read_text(encoding="utf-8"))
+    assert trace["candidate_comparison"]["preferred_stage"] == "initial_2"
+    assert [candidate["stage"] for candidate in trace["candidate_comparison"]["candidates"]] == [
+        "initial_1",
+        "initial_2",
+    ]
+    assert trace["final_sql"].startswith("SELECT customer, SUM(amount) AS total")
+    assert "initial_1" in captured_prompts["result_comparison"][0]
+    assert "initial_2" in captured_prompts["result_comparison"][0]
+    assert trace["attempts"][0]["candidate_confidence"] == 0.95
+    assert trace["attempts"][1]["candidate_confidence"] == 0.55
 
 
 def test_run_tasks_keeps_going_after_unexpected_task_exception(

@@ -142,6 +142,15 @@ class ConfidenceReport(BaseModel):
     repair_focus: str | None = None
 
 
+class CandidateComparisonReport(BaseModel):
+    """Comparator output that picks the executable candidate to inspect next."""
+
+    baseline_stage: str | None = None
+    preferred_stage: str | None = None
+    compared_stages: list[str] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+
+
 class FinalAnswer(BaseModel):
     """The final per-task status recorded by the coordinator."""
 

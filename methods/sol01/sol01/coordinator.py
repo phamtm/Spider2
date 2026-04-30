@@ -15,6 +15,7 @@ from sol01.llm import LLMClient
 from sol01.llm_logging import LLMCallLogger
 from sol01.logging import get_logger
 from sol01.models import (
+    CandidateComparisonReport,
     ConfidenceReport,
     ExecutionResult,
     FinalAnswer,
@@ -431,6 +432,53 @@ def run_task(
         )
         best_attempt = _best_attempt(attempts)
 
+    candidate_comparison_payload: dict[str, Any] | None = None
+    executable_attempts = [attempt for attempt in attempts if attempt["execution_result"]["ok"]]
+    if len(executable_attempts) > 1:
+        logger.info(
+            "candidate comparison requested",
+            instance_id=task.instance_id,
+            baseline_stage=best_attempt["stage"] if best_attempt is not None else None,
+            executable_attempts=len(executable_attempts),
+        )
+        comparison = _run_prompt(
+            client,
+            prompt_hashes=prompt_hashes,
+            prompt_name="result_comparison",
+            output_type=CandidateComparisonReport,
+            user_prompt=_candidate_comparison_prompt(
+                task,
+                intent,
+                executable_attempts,
+                sql_reference_context,
+                docs_context,
+                baseline_stage=best_attempt["stage"] if best_attempt is not None else None,
+            ),
+        )
+        candidate_comparison_payload = {
+            **comparison.model_dump(mode="json"),
+            "candidates": [_comparison_attempt_summary(attempt) for attempt in executable_attempts],
+        }
+        logger.info(
+            "candidate comparison reviewed",
+            instance_id=task.instance_id,
+            baseline_stage=comparison.baseline_stage,
+            preferred_stage=comparison.preferred_stage,
+            compared_stages=comparison.compared_stages,
+            reasons=comparison.reasons,
+        )
+        if comparison.preferred_stage:
+            preferred_attempt = next(
+                (
+                    attempt
+                    for attempt in executable_attempts
+                    if attempt["stage"] == comparison.preferred_stage
+                ),
+                None,
+            )
+            if preferred_attempt is not None:
+                best_attempt = preferred_attempt
+
     if (
         best_attempt is not None
         and best_attempt["execution_result"]["ok"]
@@ -509,6 +557,8 @@ def run_task(
         "prompt_hashes": prompt_hashes,
         "attempts": attempts,
     }
+    if candidate_comparison_payload is not None:
+        trace_payload["candidate_comparison"] = candidate_comparison_payload
     if live_logging_enabled:
         trace_payload["llm_call_log_path"] = str(task_llm_log_path)
 
@@ -712,6 +762,20 @@ def _best_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any] | None:
     return max(attempts, key=lambda attempt: float(attempt["score"]))
 
 
+def _comparison_attempt_summary(attempt: dict[str, Any]) -> dict[str, Any]:
+    """Render one attempt in a compact, comparison-friendly format."""
+
+    return {
+        "stage": attempt["stage"],
+        "sql": attempt["sql"],
+        "candidate_confidence": attempt["candidate_confidence"],
+        "score": attempt["score"],
+        "validation": attempt["validation"],
+        "execution_result": attempt["execution_result"],
+        "result_profile": attempt.get("result_profile", {}),
+    }
+
+
 def _trace_attempt(attempt: dict[str, Any]) -> dict[str, Any]:
     """Drop non-serializable internal fields before writing the trace."""
 
@@ -862,6 +926,31 @@ def _critic_prompt(task: Task, attempt: dict[str, Any], sql_reference_context: s
         f"SQL:\n{attempt['sql']}\n\n"
         "Result profile:\n"
         f"{json.dumps(attempt.get('result_profile', {}), indent=2, sort_keys=True)}"
+    )
+
+
+def _candidate_comparison_prompt(
+    task: Task,
+    intent: Intent,
+    attempts: list[dict[str, Any]],
+    sql_reference_context: str,
+    docs_context: str,
+    *,
+    baseline_stage: str | None,
+) -> str:
+    """Build the comparison prompt for executable candidates."""
+
+    comparison_candidates = [_comparison_attempt_summary(attempt) for attempt in attempts]
+    return (
+        f"{sql_reference_context}\n\n"
+        f"Document context:\n{docs_context}\n\n"
+        f"Question: {task.question}\n\n"
+        f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
+        f"Baseline stage: {baseline_stage or 'unknown'}\n\n"
+        "Executable candidates:\n"
+        f"{json.dumps(comparison_candidates, indent=2, sort_keys=True)}\n\n"
+        "Compare every executable candidate above and choose the one "
+        "that best fits the answer contract."
     )
 
 

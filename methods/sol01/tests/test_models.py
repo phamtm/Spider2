@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from sol01.models import (
+    CandidateComparisonReport,
     CategoryMetadata,
     ColumnSchema,
     ConfidenceReport,
@@ -127,6 +128,18 @@ def test_sql_validation_execution_and_critic_models_construct():
     assert validation.ok is True
     assert execution.error is None
     assert confidence.repair_focus is None
+
+
+def test_candidate_comparison_model_constructs():
+    comparison = CandidateComparisonReport(
+        baseline_stage="initial_1",
+        preferred_stage="initial_2",
+        compared_stages=["initial_1", "initial_2"],
+        reasons=["The second attempt matches the requested shape better."],
+    )
+
+    assert comparison.preferred_stage == "initial_2"
+    assert comparison.compared_stages == ["initial_1", "initial_2"]
 
 
 def test_final_answer_status_is_limited_to_expected_values():
