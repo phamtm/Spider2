@@ -1,0 +1,64 @@
+{"instance_id":"sf_local201","primary_tier":6,"tags":["text_search","string_match","sort","count"],"difficulty_notes":"Anagram counting is case-sensitive and grouped by word length and prefix."}
+{"instance_id":"sf_local202","primary_tier":5,"tags":["ranking","aggregation","comparison","filter"]}
+{"instance_id":"sf_local209","primary_tier":5,"tags":["join","aggregation","ratio","filter"]}
+{"instance_id":"sf_local210","primary_tier":6,"tags":["temporal","percent_change","aggregation","comparison"]}
+{"instance_id":"sf_local212","primary_tier":4,"tags":["ranking","aggregation","temporal"]}
+{"instance_id":"sf_local218","primary_tier":4,"tags":["aggregation","ranking"]}
+{"instance_id":"sf_local219","primary_tier":6,"tags":["aggregation","comparison","ranking","multi_join"],"difficulty_notes":"Need one winner per league with a tie-break to keep only one team."}
+{"instance_id":"sf_local221","primary_tier":3,"tags":["ranking","aggregation"]}
+{"instance_id":"sf_local220","primary_tier":5,"tags":["ranking","aggregation","filter"]}
+{"instance_id":"sf_local228","primary_tier":8,"tags":["ranking","multi_join","temporal","aggregation"],"difficulty_notes":"Season-level top-3 lists on both batting and bowling sides with matched output positions."}
+{"instance_id":"sf_local229","primary_tier":8,"tags":["ranking","join","aggregation","sort"],"difficulty_notes":"Pair ordering depends on player score ties and can return multiple rows per match."}
+{"instance_id":"sf_local244","primary_tier":4,"tags":["aggregation","group_by","comparison"]}
+{"instance_id":"sf_local253","primary_tier":7,"tags":["text_search","ranking","join","aggregation"],"difficulty_notes":"Salary values must be cleaned before ranking companies inside each city."}
+{"instance_id":"sf_local258","primary_tier":7,"tags":["aggregation","ratio","filter","comparison"],"difficulty_notes":"Excludes non-bowler dismissals and combines wickets, economy, strike rate, and best-match bowling."}
+{"instance_id":"sf_local259","primary_tier":10,"tags":["aggregation","ratio","ranking","join","comparison"],"difficulty_notes":"Wide career profile with many derived batting and bowling metrics."}
+{"instance_id":"sf_local262","primary_tier":11,"tags":["ranking","comparison","aggregation","subquery"],"difficulty_notes":"Requires classifying models by step/version before counting affected problems."}
+{"instance_id":"sf_local263","primary_tier":11,"tags":["ranking","aggregation","comparison","subquery"],"difficulty_notes":"Counts L1_model occurrences separately for strong and soft classifications."}
+{"instance_id":"sf_local264","primary_tier":8,"tags":["aggregation","ranking","comparison","subquery"]}
+{"instance_id":"sf_local269","primary_tier":11,"tags":["nested_aggregation","aggregation","join"],"difficulty_notes":"Needs full expansion of nested packaging before averaging leaf quantities."}
+{"instance_id":"sf_local270","primary_tier":11,"tags":["nested_aggregation","aggregation","filter","join"],"difficulty_notes":"Recursive rollup over packaging hierarchy with a threshold filter on total quantity."}
+{"instance_id":"sf_local272","primary_tier":12,"tags":["window","cumulative","join","ranking"],"difficulty_notes":"FIFO inventory allocation across order lines with strict quantity matching."}
+{"instance_id":"sf_local273","primary_tier":12,"tags":["window","cumulative","join","ratio"],"difficulty_notes":"Pick percentage comes from overlap between ordered demand and inventory lots."}
+{"instance_id":"sf_local274","primary_tier":11,"tags":["window","cumulative","join","aggregation"],"difficulty_notes":"FIFO picking is simpler than the other allocation tasks but still needs cumulative lot handling."}
+{"instance_id":"sf_local275","primary_tier":10,"tags":["time_series","window","temporal","comparison"],"difficulty_notes":"Centered moving average and seasonality-adjusted ratio checks across 2017."}
+{"instance_id":"sf_local277","primary_tier":12,"tags":["time_series","window","regression","temporal"],"difficulty_notes":"Forecasting uses seasonality adjustments plus weighted regression."}
+{"instance_id":"sf_local279","primary_tier":12,"tags":["time_series","recursive","window","temporal"],"difficulty_notes":"Recursive monthly inventory adjustment makes this an iterative state problem."}
+{"instance_id":"sf_local283","primary_tier":6,"tags":["ranking","aggregation","comparison","temporal"]}
+{"instance_id":"sf_local284","primary_tier":5,"tags":["aggregation","comparison","group_by"],"difficulty_notes":"Summary includes deviation buckets around the average loss rate."}
+{"instance_id":"sf_local285","primary_tier":7,"tags":["aggregation","group_by","comparison","temporal"],"difficulty_notes":"Multi-year category reporting with several financial measures per group."}
+{"instance_id":"sf_local286","primary_tier":7,"tags":["join","aggregation","filter","ranking"],"difficulty_notes":"Seller summary combines performance metrics with a sales threshold filter."}
+{"instance_id":"sf_local301","primary_tier":7,"tags":["time_series","temporal","comparison","percent_change"]}
+{"instance_id":"sf_local302","primary_tier":8,"tags":["time_series","comparison","aggregation","percent_change"],"difficulty_notes":"Averages percent change across several attribute types and their values."}
+{"instance_id":"sf_local329","primary_tier":4,"tags":["path_sequence","filter","count"]}
+{"instance_id":"sf_local330","primary_tier":4,"tags":["session_boundary","aggregation","count","path_sequence"],"difficulty_notes":"Count each session once per page even if the same page is both landing and exit."}
+{"instance_id":"sf_local331","primary_tier":6,"tags":["path_sequence","ranking","count"],"difficulty_notes":"Looks for the most common third page after two consecutive detail visits."}
+{"instance_id":"sf_local358","primary_tier":1,"tags":["count","group_by"]}
+{"instance_id":"sf_local360","primary_tier":6,"tags":["path_sequence","filter","count","ranking"],"difficulty_notes":"Finds sessions with the minimum count of qualifying events before the first target click."}
+{"instance_id":"sf_local344","primary_tier":10,"tags":["event_classification","temporal","comparison","external_knowledge"],"difficulty_notes":"Overtake counting depends on pit stops, retirements, and lap-state transitions."}
+{"instance_id":"sf_local336","primary_tier":9,"tags":["event_classification","temporal","count","external_knowledge"],"difficulty_notes":"Same overtake logic as the longer task, but restricted to the first five laps."}
+{"instance_id":"sf_local335","primary_tier":9,"tags":["ranking","aggregation","temporal","comparison"],"difficulty_notes":"Counts seasons where each constructor had the lowest point-scoring driver total."}
+{"instance_id":"sf_local309","primary_tier":4,"tags":["ranking","aggregation","comparison","temporal"]}
+{"instance_id":"sf_local310","primary_tier":6,"tags":["ranking","aggregation","comparison","subquery"],"difficulty_notes":"Ranks years by the sum of driver and constructor peak points from results only."}
+{"instance_id":"sf_local311","primary_tier":7,"tags":["ranking","aggregation","comparison","temporal"],"difficulty_notes":"Combines best driver and best constructor points per year."}
+{"instance_id":"sf_local354","primary_tier":8,"tags":["path_sequence","comparison","aggregation","temporal"],"difficulty_notes":"Checks constructor continuity between the first and last race within a season."}
+{"instance_id":"sf_local355","primary_tier":10,"tags":["path_sequence","aggregation","comparison","temporal"],"difficulty_notes":"Averages missed-race gaps only for drivers who switch constructors across the hiatus."}
+{"instance_id":"sf_local356","primary_tier":9,"tags":["event_classification","comparison","aggregation","temporal"],"difficulty_notes":"Compares on-track overtakes made versus suffered while excluding pit and start movements."}
+{"instance_id":"sf001","primary_tier":4,"tags":["date_range","filter","aggregation"]}
+{"instance_id":"sf003","primary_tier":6,"tags":["ranking","temporal","comparison","filter"],"difficulty_notes":"Second-highest growth rate with a minimum population threshold."}
+{"instance_id":"sf002","primary_tier":5,"tags":["ranking","filter","comparison","aggregation"],"difficulty_notes":"As-of-date ranking over active banks with an uninsured-assets percentage."}
+{"instance_id":"sf044","primary_tier":4,"tags":["time_series","comparison","percent_change"]}
+{"instance_id":"sf006","primary_tier":5,"tags":["temporal","aggregation","comparison","percent_change"],"difficulty_notes":"As-of counts at two dates drive the percent change by state."}
+{"instance_id":"sf008","primary_tier":5,"tags":["time_series","comparison","percent_change","aggregation"],"difficulty_notes":"Pairs a financial inflow measure with a seasonally adjusted index change."}
+{"instance_id":"sf010","primary_tier":7,"tags":["time_series","cumulative","ratio","aggregation"],"difficulty_notes":"Cumulative ratios by date across multiple mortgage stress categories."}
+{"instance_id":"sf037","primary_tier":9,"tags":["geospatial","distance","join","ranking"],"difficulty_notes":"Nearest-neighbor search using straight-line distance between store locations."}
+{"instance_id":"sf012","primary_tier":4,"tags":["temporal","aggregation","group_by"]}
+{"instance_id":"sf018","primary_tier":6,"tags":["event_classification","temporal","filter","aggregation"],"difficulty_notes":"One-hour window analysis of push notification engagement."}
+{"instance_id":"sf035","primary_tier":3,"tags":["temporal","group_by","count"]}
+{"instance_id":"sf029","primary_tier":8,"tags":["multi_join","aggregation","temporal","group_by"],"difficulty_notes":"Wide daily report joins sales, traffic, inventory, and net PPM data."}
+{"instance_id":"sf040","primary_tier":6,"tags":["geospatial","ranking","sort","filter"],"difficulty_notes":"Selects the northernmost addresses inside the largest Florida zip code area."}
+{"instance_id":"sf009","primary_tier":5,"tags":["pivot","comparison","aggregation","group_by"]}
+{"instance_id":"sf013","primary_tier":5,"tags":["pivot","comparison","aggregation","group_by"],"difficulty_notes":"Side-by-side road length comparison by class and subclass."}
+{"instance_id":"sf041","primary_tier":9,"tags":["multi_join","time_series","aggregation","comparison"],"difficulty_notes":"Hourly market and load report with timezone alignment and net load calculations."}
+{"instance_id":"sf011","primary_tier":6,"tags":["ratio","aggregation","comparison","join"],"difficulty_notes":"Block group population ratios are computed against census tract totals."}
+{"instance_id":"sf014","primary_tier":4,"tags":["ranking","aggregation","comparison","filter"]}
