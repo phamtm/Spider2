@@ -14,6 +14,7 @@ import pytest
 
 from sol01.config import RuntimeConfig
 from sol01.coordinator import (
+    _attempt_score,
     _sql_generation_prompt,
     _sql_reference_context,
     _sql_repair_prompt,
@@ -25,12 +26,14 @@ from sol01.models import (
     CandidateComparisonReport,
     ColumnSchema,
     ConfidenceReport,
+    ExecutionResult,
     FinalAnswer,
     Intent,
     SchemaSelection,
     SQLCandidate,
     TableSchema,
     Task,
+    ValidationReport,
 )
 from sol01.output import ensure_run_paths
 from sol01.retrieval import load_db_index
@@ -1185,6 +1188,137 @@ def test_run_task_uses_only_external_knowledge_for_document_context(
     assert answer.status == "success"
     sql_prompt = captured_prompts["sql_generation"][0]
     assert "Document context:\nWHOLE DOC FOR RFM.md" in sql_prompt
+
+
+def test_attempt_score_prefers_output_shape_over_candidate_confidence():
+    intent = Intent(
+        summary="Count customer totals.",
+        entities=["sales"],
+        metrics=["count"],
+        filters=[],
+        time_constraints=[],
+        output_expectation="one count",
+        assumptions=[],
+    )
+    validation = ValidationReport(ok=True, errors=[], warnings=[], referenced_tables=["sales"])
+    good_execution = ExecutionResult(
+        ok=True,
+        row_count=1,
+        columns=["total"],
+        sample_rows=[{"total": 12}],
+        csv_path=None,
+        error=None,
+    )
+    bad_execution = ExecutionResult(
+        ok=True,
+        row_count=1,
+        columns=["customer", "total"],
+        sample_rows=[{"customer": "bob", "total": 12}],
+        csv_path=None,
+        error=None,
+    )
+
+    good_score = _attempt_score(
+        candidate=SQLCandidate(
+            sql="SELECT COUNT(*) AS total FROM TEST_DB.PUBLIC.SALES",
+            explanation="Scalar count.",
+            assumptions=[],
+            confidence=0.2,
+        ),
+        intent=intent,
+        validation=validation,
+        execution=good_execution,
+        result_profile={
+            "row_count": 1,
+            "columns": ["total"],
+            "sample_rows": [{"total": 12}],
+        },
+    )
+    bad_score = _attempt_score(
+        candidate=SQLCandidate(
+            sql="SELECT customer, COUNT(*) AS total FROM TEST_DB.PUBLIC.SALES GROUP BY customer",
+            explanation="Too many columns for the contract.",
+            assumptions=[],
+            confidence=0.99,
+        ),
+        intent=intent,
+        validation=validation,
+        execution=bad_execution,
+        result_profile={
+            "row_count": 1,
+            "columns": ["customer", "total"],
+            "sample_rows": [{"customer": "bob", "total": 12}],
+        },
+    )
+
+    assert good_score > bad_score
+
+
+def test_attempt_score_penalizes_ungrounded_filters_that_return_no_rows():
+    intent = Intent(
+        summary="Find matching countries.",
+        entities=["countries"],
+        metrics=["count"],
+        filters=["country = 'Russia'"],
+        time_constraints=[],
+        output_expectation="one count",
+        assumptions=[],
+    )
+    validation = ValidationReport(ok=True, errors=[], warnings=[], referenced_tables=["countries"])
+    grounded_execution = ExecutionResult(
+        ok=True,
+        row_count=4,
+        columns=["total"],
+        sample_rows=[{"total": 4}],
+        csv_path=None,
+        error=None,
+    )
+    empty_execution = ExecutionResult(
+        ok=True,
+        row_count=0,
+        columns=["total"],
+        sample_rows=[],
+        csv_path=None,
+        error=None,
+    )
+
+    grounded_score = _attempt_score(
+        candidate=SQLCandidate(
+            sql=(
+                "SELECT COUNT(*) AS total FROM TEST_DB.PUBLIC.COUNTRIES "
+                "WHERE country = 'Russian Federation'"
+            ),
+            explanation="Uses the stored value variant.",
+            assumptions=[],
+            confidence=0.3,
+        ),
+        intent=intent,
+        validation=validation,
+        execution=grounded_execution,
+        result_profile={
+            "row_count": 4,
+            "columns": ["total"],
+            "sample_rows": [{"total": 4}],
+        },
+    )
+    empty_score = _attempt_score(
+        candidate=SQLCandidate(
+            sql="SELECT COUNT(*) AS total FROM TEST_DB.PUBLIC.COUNTRIES WHERE country = 'Russia'",
+            explanation="Exact string filter returns nothing.",
+            assumptions=[],
+            confidence=0.99,
+        ),
+        intent=intent,
+        validation=validation,
+        execution=empty_execution,
+        result_profile={
+            "row_count": 0,
+            "columns": ["total"],
+            "sample_rows": [],
+        },
+    )
+
+    assert grounded_score > empty_score
 
 
 def test_run_task_without_external_knowledge_uses_no_document_context(

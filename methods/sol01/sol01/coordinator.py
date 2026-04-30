@@ -27,6 +27,7 @@ from sol01.models import (
     SQLCandidate,
     TableSchema,
     Task,
+    ValidationReport,
 )
 from sol01.output import (
     OUTPUTS_ROOT,
@@ -379,6 +380,7 @@ def run_task(
         attempt = _evaluate_candidate(
             task=task,
             candidate=candidate,
+            intent=intent,
             schema=schema,
             table_schemas=table_schemas,
             stage=stage,
@@ -418,6 +420,7 @@ def run_task(
         attempt = _evaluate_candidate(
             task=task,
             candidate=repaired_candidate,
+            intent=intent,
             schema=schema,
             table_schemas=table_schemas,
             stage="repair",
@@ -545,6 +548,7 @@ def run_task(
                 attempt = _evaluate_candidate(
                     task=task,
                     candidate=repaired_candidate,
+                    intent=intent,
                     schema=schema,
                     table_schemas=table_schemas,
                     stage="aggregate_repair",
@@ -616,6 +620,7 @@ def run_task(
             attempt = _evaluate_candidate(
                 task=task,
                 candidate=repaired_candidate,
+                intent=intent,
                 schema=schema,
                 table_schemas=table_schemas,
                 stage="critic_repair",
@@ -751,6 +756,7 @@ def _evaluate_candidate(
     *,
     task: Task,
     candidate: SQLCandidate,
+    intent: Intent,
     schema: SchemaSelection,
     table_schemas: dict[str, TableSchema] | None = None,
     stage: str,
@@ -803,6 +809,7 @@ def _evaluate_candidate(
         validation=validation,
         execution=execution,
     )
+    result_profile = profile_dataframe(dataframe) if execution.ok else None
     logger.debug(
         "candidate processed",
         stage=stage,
@@ -819,16 +826,19 @@ def _evaluate_candidate(
         "candidate_confidence": candidate.confidence,
         "validation": validation.model_dump(mode="json"),
         "execution_result": execution.model_dump(mode="json"),
-        "score": _attempt_score(
+        "score_breakdown": _attempt_score_breakdown(
+            intent=intent,
             candidate=candidate,
             validation=validation,
             execution=execution,
             aggregate_grain=aggregate_grain,
+            result_profile=result_profile,
         ),
     }
+    attempt["score"] = sum(attempt["score_breakdown"].values())
 
-    if execution.ok:
-        attempt["result_profile"] = profile_dataframe(dataframe)
+    if result_profile is not None:
+        attempt["result_profile"] = result_profile
         attempt["_dataframe"] = dataframe
     if aggregate_grain is not None:
         attempt["aggregate_grain"] = aggregate_grain.model_dump(mode="json")
@@ -840,23 +850,46 @@ def _evaluate_candidate(
 def _attempt_score(
     *,
     candidate: SQLCandidate,
-    validation: Any,
-    execution: Any,
+    intent: Intent | None = None,
+    validation: ValidationReport,
+    execution: ExecutionResult,
     aggregate_grain: AggregateGrainReport | None = None,
+    result_profile: dict[str, Any] | None = None,
 ) -> float:
-    """Prefer successfully executed candidates, then valid ones, then candidate confidence."""
+    """Rank candidates by verification evidence first and confidence last."""
 
-    score = candidate.confidence
-    if validation.ok:
-        score += 10.0
-    if execution.ok:
-        score += 100.0
-        if execution.columns:
-            score += 2.0
-        if execution.row_count > 0:
-            score += 1.0
-    score += _aggregate_grain_adjustment(aggregate_grain)
-    return score
+    return sum(
+        _attempt_score_breakdown(
+            intent=intent,
+            candidate=candidate,
+            validation=validation,
+            execution=execution,
+            aggregate_grain=aggregate_grain,
+            result_profile=result_profile,
+        ).values()
+    )
+
+
+def _attempt_score_breakdown(
+    *,
+    intent: Intent | None,
+    candidate: SQLCandidate,
+    validation: ValidationReport,
+    execution: ExecutionResult,
+    aggregate_grain: AggregateGrainReport | None = None,
+    result_profile: dict[str, Any] | None = None,
+) -> dict[str, float]:
+    """Return the score contribution for each verification check."""
+
+    return {
+        "execution_status": _execution_status_adjustment(execution),
+        "validation": _validation_adjustment(validation),
+        "shape": _output_shape_adjustment(intent, execution, result_profile),
+        "filter_grounding": _filter_grounding_adjustment(intent, validation, execution),
+        "aggregate_grain": _aggregate_grain_adjustment(aggregate_grain),
+        "cardinality": _cardinality_plausibility_adjustment(execution, result_profile),
+        "confidence_tiebreaker": candidate.confidence * 0.01,
+    }
 
 
 def _best_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -875,6 +908,7 @@ def _comparison_attempt_summary(attempt: dict[str, Any]) -> dict[str, Any]:
         "sql": attempt["sql"],
         "candidate_confidence": attempt["candidate_confidence"],
         "score": attempt["score"],
+        "score_breakdown": attempt.get("score_breakdown", {}),
         "validation": attempt["validation"],
         "execution_result": attempt["execution_result"],
         "result_profile": attempt.get("result_profile", {}),
@@ -900,8 +934,7 @@ def _infer_aggregate_grain(
     uses_distinct = "count(distinct" in normalized_sql
     has_joins = " join " in normalized_sql
     selected_tables = [
-        table_schemas.get(table_name)
-        or TableSchema(name=table_name, ddl="", searchable_text="")
+        table_schemas.get(table_name) or TableSchema(name=table_name, ddl="", searchable_text="")
         for table_name in schema.expanded_tables
     ]
     entity_like_tables = [table for table in selected_tables if _table_is_entity_like(table)]
@@ -997,6 +1030,159 @@ def _aggregate_grain_adjustment(report: AggregateGrainReport | None) -> float:
     return 0.0
 
 
+def _execution_status_adjustment(execution: ExecutionResult) -> float:
+    """Make execution success dominate every other signal."""
+
+    return 1000.0 if execution.ok else -1000.0
+
+
+def _validation_adjustment(validation: ValidationReport) -> float:
+    """Reward SQL that validates cleanly and penalize noisy validation."""
+
+    score = 120.0 if validation.ok else -180.0
+    score -= 15.0 * len(validation.errors)
+    score -= 5.0 * len(validation.warnings)
+    return score
+
+
+def _output_shape_adjustment(
+    intent: Intent | None,
+    execution: ExecutionResult,
+    result_profile: dict[str, Any] | None,
+) -> float:
+    """Prefer result shapes that match the task's stated output contract."""
+
+    if not execution.ok:
+        return 0.0
+
+    profile = result_profile or {
+        "row_count": execution.row_count,
+        "columns": execution.columns,
+    }
+    row_count = int(profile.get("row_count") or 0)
+    column_count = len(profile.get("columns") or [])
+    expectation = _normalized_output_expectation(intent)
+
+    expected_columns = _expected_output_columns(expectation)
+    if expected_columns is not None:
+        if column_count == expected_columns:
+            return 45.0
+        if abs(column_count - expected_columns) == 1:
+            return 10.0
+        return -25.0
+
+    if _expects_scalar_output(expectation):
+        if row_count == 1 and column_count == 1:
+            return 35.0
+        if row_count == 1 or column_count == 1:
+            return 12.0
+        return -18.0
+
+    if _expects_tabular_output(expectation):
+        if row_count > 0 and column_count >= 2:
+            return 18.0
+        if row_count > 0:
+            return 6.0
+        return -12.0
+
+    if row_count > 0 and column_count > 0:
+        return 4.0
+    return -4.0
+
+
+def _filter_grounding_adjustment(
+    intent: Intent | None,
+    validation: ValidationReport,
+    execution: ExecutionResult,
+) -> float:
+    """Prefer candidates whose filters appear grounded in observed values."""
+
+    if intent is None or not intent.filters:
+        return 0.0
+    if not execution.ok:
+        return -30.0
+    if execution.row_count == 0:
+        return -22.0
+    score = 14.0
+    if validation.errors:
+        score -= 8.0
+    if validation.warnings:
+        score -= 3.0 * len(validation.warnings)
+    return score
+
+
+def _cardinality_plausibility_adjustment(
+    execution: ExecutionResult,
+    result_profile: dict[str, Any] | None,
+) -> float:
+    """Reward results whose size looks plausible for the query type."""
+
+    if not execution.ok:
+        return 0.0
+
+    profile = result_profile or {
+        "row_count": execution.row_count,
+        "sample_rows": execution.sample_rows,
+    }
+    row_count = int(profile.get("row_count") or 0)
+    if row_count == 0:
+        return -16.0
+
+    sample_rows = profile.get("sample_rows") or []
+    numeric_values = [
+        value
+        for value in (_coerce_number(item) for row in sample_rows for item in row.values())
+        if value is not None
+    ]
+    if not numeric_values:
+        return 0.0
+
+    max_value = max(numeric_values)
+    if row_count == 1 and max_value <= 1:
+        return -14.0
+    if row_count <= 2 and max_value <= 2:
+        return -8.0
+    if row_count > 0:
+        return 3.0
+    return 0.0
+
+
+def _normalized_output_expectation(intent: Intent | None) -> str:
+    """Normalize the intent's output expectation for shape heuristics."""
+
+    if intent is None:
+        return ""
+    return " ".join(intent.output_expectation.lower().split())
+
+
+def _expected_output_columns(expectation: str) -> int | None:
+    """Infer how many columns the answer should expose from the intent text."""
+
+    if not expectation:
+        return None
+    if any(token in expectation for token in (" and ", " columns", " per ", " by ")):
+        return 2
+    if any(token in expectation for token in ("count", "how many", "one count", "single count")):
+        return 1
+    if any(token in expectation for token in ("one column", "single column")):
+        return 1
+    return None
+
+
+def _expects_scalar_output(expectation: str) -> bool:
+    """Return True when the answer is likely a single value."""
+
+    return any(token in expectation for token in ("count", "how many", "one count", "single count"))
+
+
+def _expects_tabular_output(expectation: str) -> bool:
+    """Return True when the answer is likely a multi-column result set."""
+
+    return any(
+        token in expectation for token in (" and ", " columns", " per ", " by ", " rows", " list ")
+    )
+
+
 def _table_is_entity_like(table: TableSchema) -> bool:
     """Return True when a table looks like a master/entity table."""
 
@@ -1017,7 +1203,7 @@ def _count_distinct_target(sql: str) -> str | None:
         return None
     target = match.group(1).strip()
     target = re.sub(r"\s+as\s+\w+$", "", target, flags=re.IGNORECASE)
-    return target.strip(' "\'`')
+    return target.strip(" \"'`")
 
 
 def _aggregate_verification_reason(attempt: dict[str, Any]) -> str | None:
