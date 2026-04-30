@@ -20,6 +20,7 @@ from progress_ui import (
     prepare_question_table,
     recommend_focus,
     select_question_row,
+    should_show_all_questions,
 )
 
 
@@ -452,6 +453,26 @@ def test_prepare_question_table_orders_unanswered_first_and_truncates_text():
     assert table.loc[0, "primary_tier"] == "Tier 1"
     assert table.loc[0, "instruction"].endswith("…")
     assert table.loc[1, "note"] == "done"
+
+
+def test_should_show_all_questions_turns_on_for_tier_or_tag_filters():
+    assert should_show_all_questions([1], []) is True
+    assert should_show_all_questions([], ["aggregation"]) is True
+    assert should_show_all_questions([], []) is False
+
+
+def test_prepare_question_table_keeps_all_rows_available():
+    frame = pd.DataFrame(
+        [
+            {"instance_id": "sf_a", "status": "correct", "primary_tier": 1, "tags": []},
+            {"instance_id": "sf_b", "status": "incorrect", "primary_tier": 2, "tags": []},
+            {"instance_id": "sf_c", "status": "unanswered", "primary_tier": 3, "tags": []},
+        ]
+    )
+
+    table = prepare_question_table(frame)
+
+    assert list(table["instance_id"]) == ["sf_c", "sf_b", "sf_a"]
 
 
 def test_select_question_row_returns_full_detail_fields():

@@ -359,9 +359,7 @@ def _analysis_result_rows(
         seen.add(instance_id)
 
     source_detail = (
-        "eval summary per_instance"
-        if source == "eval_summary.per_instance"
-        else "trace fallback"
+        "eval summary per_instance" if source == "eval_summary.per_instance" else "trace fallback"
     )
     return rows, {
         "source": source,
@@ -583,9 +581,7 @@ def _render_summary(report: dict[str, Any]) -> str:
     lines.append("## Category Coverage")
     rows = report["category_rows"]
     coverage = report["category_coverage"]
-    lines.append(
-        f"- source: {rows['source_detail']} ({rows['source_row_count']} rows)"
-    )
+    lines.append(f"- source: {rows['source_detail']} ({rows['source_row_count']} rows)")
     lines.append(
         f"- mapped: {coverage['mapped']}, "
         f"unmapped: {coverage['unmapped']}, total {coverage['total']}"

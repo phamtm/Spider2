@@ -951,6 +951,10 @@ def build_run_command(dataset_path: Path, source_path: Path) -> str:
     )
 
 
+def should_show_all_questions(selected_tiers: list[int] | None, selected_tags: list[str] | None) -> bool:
+    return bool(selected_tiers or selected_tags)
+
+
 def apply_frame_filters(
     frame: pd.DataFrame,
     *,
@@ -1350,22 +1354,23 @@ def main() -> None:
 
     with questions_tab:
         render_status_legend()
+        question_columns = [
+            "instance_id",
+            "status",
+            "primary_tier",
+            "tags",
+            "db",
+            "instruction",
+            "note",
+        ]
+
+        st.subheader("Filtered questions")
         if frame.empty:
             st.info("No questions match the current filters.")
         else:
             question_frame = prepare_question_table(frame)
             st.dataframe(
-                question_frame[
-                    [
-                        "instance_id",
-                        "status",
-                        "primary_tier",
-                        "tags",
-                        "db",
-                        "instruction",
-                        "note",
-                    ]
-                ],
+                question_frame[question_columns],
                 width="stretch",
                 height=TABLE_HEIGHT,
                 row_height=TABLE_ROW_HEIGHT,
@@ -1386,6 +1391,20 @@ def main() -> None:
                 )
             with detail_col:
                 render_question_detail(select_question_row(frame, selected_instance_id))
+
+        if should_show_all_questions(selected_tiers, selected_tags):
+            st.subheader("All questions")
+            full_question_frame = prepare_question_table(full_frame)
+            if full_question_frame.empty:
+                st.info("No questions are available for the current dataset.")
+            else:
+                st.dataframe(
+                    full_question_frame[question_columns],
+                    width="stretch",
+                    height=TABLE_HEIGHT,
+                    row_height=TABLE_ROW_HEIGHT,
+                    hide_index=True,
+                )
 
     with debug_tab:
         st.header("Debug")

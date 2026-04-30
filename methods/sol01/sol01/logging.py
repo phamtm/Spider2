@@ -37,7 +37,6 @@ def configure_logging(
             structlog.stdlib.PositionalArgumentsFormatter(),
             structlog.processors.TimeStamper(fmt="iso", utc=True),
             structlog.processors.StackInfoRenderer(),
-            structlog.processors.format_exc_info,
             structlog.processors.UnicodeDecoder(),
             structlog.dev.ConsoleRenderer(colors=_resolve_colors(use_colors, output_stream)),
         ],
