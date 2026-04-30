@@ -13,6 +13,7 @@ from sol01.models import CategoryMetadata
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SPIDER2_SNOW_PATH = REPO_ROOT / "spider2-snow" / "spider2-snow.jsonl"
 CATEGORY_BATCHES_DIR = REPO_ROOT / "methods" / "sol01" / "metadata" / "category_batches"
+CATEGORY_METADATA_PATH = REPO_ROOT / "methods" / "sol01" / "metadata" / "category_metadata.jsonl"
 logger = get_logger(__name__)
 
 _SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
@@ -264,6 +265,36 @@ def load_category_metadata_map(
             allowed_tags=allowed_tags,
         )
     }
+
+
+def write_category_metadata(
+    *,
+    output_path: Path = CATEGORY_METADATA_PATH,
+    dataset_path: Path = SPIDER2_SNOW_PATH,
+    batch_dir: Path = CATEGORY_BATCHES_DIR,
+    allowed_tags: Iterable[str] = KNOWN_CATEGORY_TAGS,
+) -> Path:
+    """Write the validated merged category metadata JSONL file."""
+
+    records = load_category_metadata(
+        dataset_path=dataset_path,
+        batch_dir=batch_dir,
+        allowed_tags=allowed_tags,
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        "".join(
+            json.dumps(record.model_dump(exclude_none=True), separators=(",", ":")) + "\n"
+            for record in records
+        ),
+        encoding="utf-8",
+    )
+    logger.info(
+        "category metadata written",
+        output_path=str(output_path),
+        record_count=len(records),
+    )
+    return output_path
 
 
 def _dataset_order(dataset_path: Path) -> dict[str, int]:
