@@ -9,6 +9,13 @@ from sol01.analysis import analyze_run
 from sol01.output import ensure_run_paths, write_trace
 
 
+def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
+    path.write_text(
+        "\n".join(json.dumps(row) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_analyze_run_groups_failures_and_writes_reports(tmp_path: Path):
     """Synthetic traces should land in the expected failure buckets."""
 
@@ -339,3 +346,120 @@ def test_analyze_run_uses_manifest_for_missing_csv_without_eval_summary(tmp_path
     report = analyze_run("partial-run", outputs_root=tmp_path)
 
     assert [item["instance_id"] for item in report["by_category"]["missing_csv"]] == ["local202"]
+
+
+def test_analyze_run_groups_results_by_primary_tier_and_tag(tmp_path: Path):
+    """Category summaries should track pass/fail counts by tier and tag."""
+
+    dataset_path = tmp_path / "spider2-snow.jsonl"
+    _write_jsonl(
+        dataset_path,
+        [
+            {
+                "instance_id": "local001",
+                "instruction": "q",
+                "db_id": "DB",
+                "external_knowledge": None,
+            },
+            {
+                "instance_id": "local002",
+                "instruction": "q",
+                "db_id": "DB",
+                "external_knowledge": None,
+            },
+            {
+                "instance_id": "local003",
+                "instruction": "q",
+                "db_id": "DB",
+                "external_knowledge": None,
+            },
+        ],
+    )
+    batch_dir = tmp_path / "batches"
+    batch_dir.mkdir()
+    _write_jsonl(
+        batch_dir / "batch_01.jsonl",
+        [
+            {"instance_id": "local001", "primary_tier": 1, "tags": ["aggregation", "temporal"]},
+            {"instance_id": "local002", "primary_tier": 3, "tags": ["aggregation"]},
+            {"instance_id": "local003", "primary_tier": 3, "tags": ["comparison", "temporal"]},
+        ],
+    )
+
+    run_paths = ensure_run_paths("category-analysis", outputs_root=tmp_path)
+    run_paths.eval_dir.mkdir(parents=True, exist_ok=True)
+    (run_paths.eval_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "attempted_tasks": 3,
+                "correct_tasks": 1,
+                "missing_csv_count": 0,
+                "per_instance": [
+                    {
+                        "instance_id": "local001",
+                        "score": 1,
+                        "passed": True,
+                        "csv_present": True,
+                        "failure_reason": None,
+                    },
+                    {
+                        "instance_id": "local002",
+                        "score": 0,
+                        "passed": False,
+                        "csv_present": True,
+                        "failure_reason": "official_fail",
+                    },
+                    {
+                        "instance_id": "local003",
+                        "score": 0,
+                        "passed": False,
+                        "csv_present": True,
+                        "failure_reason": "official_fail",
+                    },
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    for instance_id in ("local001", "local002", "local003"):
+        write_trace(
+            run_paths,
+            instance_id=instance_id,
+            trace={
+                "instance_id": instance_id,
+                "db": "db_alpha",
+                "question": f"Question {instance_id}",
+                "status": "success" if instance_id == "local001" else "failed",
+                "csv_path": str(run_paths.csv_dir / f"{instance_id}.csv"),
+                "final_execution": {"ok": True, "row_count": 1},
+                "attempts": [
+                    {
+                        "sql": "SELECT 1",
+                        "validation": {"ok": True, "errors": []},
+                        "execution_result": {"ok": True, "error": None},
+                    }
+                ],
+            },
+        )
+
+    report = analyze_run(
+        "category-analysis",
+        outputs_root=tmp_path,
+        dataset_path=dataset_path,
+        batch_dir=batch_dir,
+    )
+
+    assert report["by_primary_tier"][1]["passed"] == 1
+    assert report["by_primary_tier"][1]["failed"] == 0
+    assert report["by_primary_tier"][3]["passed"] == 0
+    assert report["by_primary_tier"][3]["failed"] == 2
+    assert report["by_tag"]["aggregation"]["passed"] == 1
+    assert report["by_tag"]["aggregation"]["failed"] == 1
+    assert report["by_tag"]["temporal"]["total"] == 2
+
+    summary_text = (run_paths.analysis_dir / "summary.md").read_text(encoding="utf-8")
+    assert "## By Primary Tier" in summary_text
+    assert "- tier 3: passed 0, failed 2, total 2" in summary_text
+    assert "## By Tag" in summary_text

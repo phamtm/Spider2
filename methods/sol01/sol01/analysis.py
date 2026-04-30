@@ -6,6 +6,11 @@ import json
 from pathlib import Path
 from typing import Any
 
+from sol01.category_metadata import (
+    CATEGORY_BATCHES_DIR,
+    SPIDER2_SNOW_PATH,
+    load_category_metadata_map,
+)
 from sol01.logging import get_logger
 from sol01.output import RunPaths, ensure_run_paths
 from sol01.tasks import REPO_ROOT
@@ -27,6 +32,8 @@ def analyze_run(
     run_id: str,
     *,
     outputs_root: Path = OUTPUTS_ROOT,
+    dataset_path: Path = SPIDER2_SNOW_PATH,
+    batch_dir: Path = CATEGORY_BATCHES_DIR,
 ) -> dict[str, Any]:
     """Read one run's artifacts and write stable analysis outputs."""
 
@@ -35,6 +42,8 @@ def analyze_run(
     traces = _load_traces(run_paths)
     eval_summary = _load_optional_json(run_paths.eval_dir / "summary.json")
     trace_index = {trace["instance_id"]: trace for trace in traces}
+    category_map = load_category_metadata_map(dataset_path=dataset_path, batch_dir=batch_dir)
+    result_rows = _analysis_result_rows(run_paths, traces, trace_index, eval_summary)
 
     by_category = {category: [] for category in FAILURE_CATEGORIES}
     for trace in traces:
@@ -64,6 +73,8 @@ def analyze_run(
         "category_counts": {category: len(records) for category, records in by_category.items()},
         "by_category": by_category,
         "by_database": _database_summary(traces, by_category),
+        "by_primary_tier": _category_result_summary(result_rows, category_map, kind="tier"),
+        "by_tag": _category_result_summary(result_rows, category_map, kind="tag"),
     }
 
     failures_path = run_paths.analysis_dir / "failures.json"
@@ -275,6 +286,104 @@ def _analysis_text(trace: dict[str, Any], final_attempt: dict[str, Any]) -> str:
     return " ".join(str(part) for part in parts if part).lower()
 
 
+def _analysis_result_rows(
+    run_paths: RunPaths,
+    traces: list[dict[str, Any]],
+    trace_index: dict[str, dict[str, Any]],
+    eval_summary: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Return one pass/fail row per expected task for category summaries."""
+
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    per_instance = eval_summary.get("per_instance") if isinstance(eval_summary, dict) else None
+    if isinstance(per_instance, list) and per_instance:
+        for row in per_instance:
+            if not isinstance(row, dict):
+                continue
+            instance_id = row.get("instance_id")
+            if not isinstance(instance_id, str) or not instance_id or instance_id in seen:
+                continue
+            rows.append(
+                {
+                    "instance_id": instance_id,
+                    "passed": bool(row.get("passed")),
+                    "failure_reason": row.get("failure_reason"),
+                }
+            )
+            seen.add(instance_id)
+    else:
+        for trace in traces:
+            instance_id = str(trace.get("instance_id") or "")
+            if not instance_id or instance_id in seen:
+                continue
+            rows.append(
+                {
+                    "instance_id": instance_id,
+                    "passed": str(trace.get("status") or "") == "success",
+                    "failure_reason": None,
+                }
+            )
+            seen.add(instance_id)
+
+    for instance_id in _missing_csv_ids(run_paths, trace_index, eval_summary):
+        if instance_id in seen:
+            continue
+        rows.append(
+            {
+                "instance_id": instance_id,
+                "passed": False,
+                "failure_reason": "missing_csv",
+            }
+        )
+        seen.add(instance_id)
+
+    return rows
+
+
+def _category_result_summary(
+    result_rows: list[dict[str, Any]],
+    category_map: dict[str, Any],
+    *,
+    kind: str,
+) -> dict[Any, dict[str, Any]]:
+    """Summarize pass/fail counts by tier or tag."""
+
+    buckets: dict[Any, dict[str, Any]] = {}
+    for row in result_rows:
+        instance_id = str(row.get("instance_id") or "")
+        metadata = category_map.get(instance_id)
+        if metadata is None:
+            continue
+
+        keys = [metadata.primary_tier] if kind == "tier" else list(metadata.tags)
+        for key in keys:
+            bucket = buckets.setdefault(
+                key,
+                {
+                    "total": 0,
+                    "passed": 0,
+                    "failed": 0,
+                    "instance_ids": [],
+                },
+            )
+            bucket["total"] += 1
+            if row.get("passed"):
+                bucket["passed"] += 1
+            else:
+                bucket["failed"] += 1
+            bucket["instance_ids"].append(instance_id)
+
+    if kind == "tier":
+        return dict(sorted(buckets.items(), key=lambda item: item[0]))
+    return dict(
+        sorted(
+            buckets.items(),
+            key=lambda item: (-item[1]["failed"], -item[1]["passed"], item[0]),
+        )
+    )
+
+
 def _missing_csv_ids(
     run_paths: RunPaths,
     trace_index: dict[str, dict[str, Any]],
@@ -410,6 +519,23 @@ def _render_summary(report: dict[str, Any]) -> str:
         lines.append(
             f"- {db}: total {bucket['total']}, "
             f"success {bucket['success']}, failed {bucket['failed']}, skipped {bucket['skipped']}"
+        )
+
+    lines.append("")
+    lines.append("## By Primary Tier")
+    for tier, bucket in report["by_primary_tier"].items():
+        lines.append(
+            f"- tier {tier}: passed {bucket['passed']}, "
+            f"failed {bucket['failed']}, total {bucket['total']}"
+        )
+
+    lines.append("")
+    lines.append("## By Tag")
+    lines.append("- Tag buckets overlap; one task can appear in multiple tags.")
+    for tag, bucket in report["by_tag"].items():
+        lines.append(
+            f"- {tag}: passed {bucket['passed']}, "
+            f"failed {bucket['failed']}, total {bucket['total']}"
         )
 
     lines.append("")
