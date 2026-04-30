@@ -79,6 +79,7 @@ Selector rules:
 - `tier:` filters are ORed
 - repeated `tag:` filters are ANDed
 - `all` must stand alone
+- category-filtered runs skip tasks that do not have category metadata and log a warning
 
 Category selectors can be passed directly to `just run`, or through the alias
 recipes below when you want a shorter command.

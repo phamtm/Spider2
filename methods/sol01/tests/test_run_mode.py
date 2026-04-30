@@ -304,6 +304,13 @@ def test_run_mode_main_help_mentions_selector_rules(capsys: pytest.CaptureFixtur
     assert "Must be used by itself." in output
 
 
+def test_mode_label_is_order_insensitive_for_equivalent_selectors():
+    assert run_mode._mode_label(["sf_*", "tier:3"], all_mode=False) == run_mode._mode_label(
+        ["tier:3", "sf_*"],
+        all_mode=False,
+    )
+
+
 def test_run_persisted_mode_rejects_bare_star(
     tmp_path: Path,
 ):

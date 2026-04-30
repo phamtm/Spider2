@@ -99,6 +99,7 @@ def select_tasks(
     metadata_map = None
     if primary_tiers or tags:
         metadata_map = load_category_metadata_map(dataset_path=dataset_path, batch_dir=batch_dir)
+    missing_metadata_ids: list[str] = []
     selected: list[Task] = []
     seen: set[str] = set()
     for task in tasks:
@@ -109,7 +110,8 @@ def select_tasks(
         if metadata_map is not None:
             metadata = metadata_map.get(task.instance_id)
             if metadata is None:
-                raise ValueError(f"Missing category metadata for instance_id: {task.instance_id}")
+                missing_metadata_ids.append(task.instance_id)
+                continue
             if primary_tiers and metadata.primary_tier not in primary_tiers:
                 continue
             if tags and any(tag not in metadata.tags for tag in tags):
@@ -118,6 +120,13 @@ def select_tasks(
             continue
         seen.add(task.instance_id)
         selected.append(task)
+
+    if missing_metadata_ids:
+        logger.warning(
+            "skipping tasks without category metadata",
+            missing_count=len(missing_metadata_ids),
+            sample_instance_ids=missing_metadata_ids[:5],
+        )
 
     if not selected:
         raise ValueError(f"No tasks matched selectors: {', '.join(normalized_selectors)}")

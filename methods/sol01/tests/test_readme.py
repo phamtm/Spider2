@@ -14,6 +14,7 @@ def test_readme_documents_persisted_eval_runs():
     assert "task selectors are ORed" in text
     assert "repeated `tag:` filters are ANDed" in text
     assert "`all` must stand alone" in text
+    assert "skip tasks that do not have category metadata" in text
     assert "Category shortcuts are also available:" in text
     assert "just tiers tier:1 tier:2" in text
     assert "just spatial" in text

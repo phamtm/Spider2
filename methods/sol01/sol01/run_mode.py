@@ -212,7 +212,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         help=(
             "Task selectors such as sf_bq320, sf_bq3*, tier:3-5, or tag:temporal. "
             "Task selectors are ORed, repeated --tier values are ORed, repeated --tag "
-            "values are ANDed, and --all must be used by itself."
+            "values are ANDed, and --all must be used by itself. "
+            "Category-filtered runs skip tasks without category metadata and log a warning."
         ),
     )
     parser.add_argument(
@@ -354,7 +355,8 @@ def _mode_label(selectors: Sequence[str], *, all_mode: bool) -> str:
         return "all"
     if len(selectors) == 1 and _is_exact_selector(selectors[0]):
         return _slug(selectors[0])
-    digest = hashlib.sha256("\0".join(selectors).encode("utf-8")).hexdigest()[:3]
+    canonical_selectors = _canonicalize_selectors_for_label(selectors)
+    digest = hashlib.sha256("\0".join(canonical_selectors).encode("utf-8")).hexdigest()[:3]
     return f"pat-{digest}"
 
 
@@ -372,6 +374,14 @@ def _normalize_values(values: Sequence[str] | str | None) -> list[str]:
     if isinstance(values, str):
         return [values.strip()]
     return [value.strip() for value in values]
+
+
+def _canonicalize_selectors_for_label(selectors: Sequence[str]) -> list[str]:
+    """Normalize selector order for deterministic run labels."""
+
+    if list(selectors) == [ALL_TASK_SELECTOR]:
+        return [ALL_TASK_SELECTOR]
+    return sorted(dict.fromkeys(selectors))
 
 
 def _build_run_id(mode_label: str) -> str:

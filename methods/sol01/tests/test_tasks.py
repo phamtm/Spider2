@@ -142,6 +142,35 @@ def test_category_selectors_can_filter_by_tier_and_tags(tmp_path: Path):
     ] == ["sf_d"]
 
 
+def test_category_selectors_skip_tasks_missing_metadata(tmp_path: Path):
+    dataset = tmp_path / "spider2-snow.jsonl"
+    _write_jsonl(
+        dataset,
+        [
+            {"instance_id": "sf_a", "instruction": "q", "db_id": "DB", "external_knowledge": None},
+            {"instance_id": "sf_b", "instruction": "q", "db_id": "DB", "external_knowledge": None},
+            {"instance_id": "sf_c", "instruction": "q", "db_id": "DB", "external_knowledge": None},
+        ],
+    )
+    batch_dir = tmp_path / "batches"
+    batch_dir.mkdir()
+    _write_jsonl(
+        batch_dir / "batch_01.jsonl",
+        [
+            {"instance_id": "sf_a", "primary_tier": 1, "tags": ["aggregation"]},
+            {"instance_id": "sf_c", "primary_tier": 3, "tags": ["temporal"]},
+        ],
+    )
+
+    tasks = select_tasks(
+        ["sf_a", "sf_b", "tag:aggregation"],
+        dataset_path=dataset,
+        batch_dir=batch_dir,
+    )
+
+    assert [task.instance_id for task in tasks] == ["sf_a"]
+
+
 def test_category_selectors_reject_bad_ranges_and_tags(tmp_path: Path):
     dataset = tmp_path / "spider2-snow.jsonl"
     _write_jsonl(
