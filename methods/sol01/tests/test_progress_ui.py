@@ -11,9 +11,12 @@ from progress_ui import (
     compute_tag_summary,
     compute_tier_summary,
     format_tier_summary,
+    format_question_option,
     make_progress_frame_for_ids,
     prepare_display_frame,
+    prepare_question_table,
     recommend_focus,
+    select_question_row,
 )
 
 
@@ -370,3 +373,79 @@ def test_prepare_display_frame_formats_display_fields_without_mutating_source():
     assert display.loc[0, "timestamp"].startswith("2026-04-30")
     assert display.loc[0, "tags"] == "aggregation, temporal"
     assert display.loc[0, "primary_tier"] == "Tier 2"
+
+
+def test_prepare_question_table_orders_unanswered_first_and_truncates_text():
+    frame = pd.DataFrame(
+        [
+            {
+                "instance_id": "sf_answered",
+                "status": "correct",
+                "primary_tier": 3,
+                "tags": ["aggregation"],
+                "db": "DB_B",
+                "instruction": "short prompt",
+                "note": "done",
+                "score": 1.0,
+            },
+            {
+                "instance_id": "sf_unanswered",
+                "status": "unanswered",
+                "primary_tier": 1,
+                "tags": ["temporal"],
+                "db": "DB_A",
+                "instruction": "x" * 160,
+                "note": None,
+                "score": None,
+            },
+        ]
+    )
+
+    table = prepare_question_table(frame)
+
+    assert list(table["instance_id"]) == ["sf_unanswered", "sf_answered"]
+    assert table.loc[0, "status"] == "Unanswered"
+    assert table.loc[0, "primary_tier"] == "Tier 1"
+    assert table.loc[0, "instruction"].endswith("…")
+    assert table.loc[1, "note"] == "done"
+
+
+def test_select_question_row_returns_full_detail_fields():
+    frame = pd.DataFrame(
+        [
+            {
+                "instance_id": "sf_1",
+                "status": "incorrect",
+                "primary_tier": 4,
+                "tags": ["ranking", "joins"],
+                "db": "DB_A",
+                "instruction": "find the top seller",
+                "note": "missing join",
+                "difficulty_notes": "needs ranking",
+                "source_path": "/tmp/result.json",
+                "score": 0.0,
+            }
+        ]
+    )
+
+    row = select_question_row(frame, "sf_1")
+
+    assert row is not None
+    assert row["status_label"] == "Incorrect"
+    assert row["primary_tier_label"] == "Tier 4"
+    assert row["tags_label"] == "ranking, joins"
+    assert row["source_path"] == "/tmp/result.json"
+
+
+def test_format_question_option_builds_readable_label():
+    row = {
+        "instance_id": "sf_1",
+        "status": "Unanswered",
+        "primary_tier": "Tier 2",
+        "db": "DB_A",
+        "instruction": "find the top seller among regions",
+    }
+
+    label = format_question_option(row)
+
+    assert label == "sf_1 | Unanswered | Tier 2 | DB_A | find the top seller among regions"

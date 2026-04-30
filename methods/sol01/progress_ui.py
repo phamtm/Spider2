@@ -50,6 +50,7 @@ TABLE_ROW_HEIGHT = 24
 TABLE_VISIBLE_ROWS = 50
 TABLE_HEIGHT = TABLE_VISIBLE_ROWS * TABLE_ROW_HEIGHT + 48
 SECTION_GAP = 24
+QUESTION_STATUS_ORDER = ("unanswered", "incorrect", "answered", "correct")
 
 TIER_COMPLEXITY = {
     1: "Simple lookup or single-step aggregate. Usually one table and one obvious filter.",
@@ -690,6 +691,194 @@ def prepare_display_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return display
 
 
+def _truncate_text(value: Any, limit: int) -> str:
+    if _is_missing_value(value):
+        return ""
+    text = str(value).strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(limit - 1, 0)].rstrip() + "…"
+
+
+def _tier_display(value: Any) -> str:
+    if _is_missing_value(value):
+        return "Uncategorized"
+    try:
+        return f"Tier {int(float(value))}"
+    except (TypeError, ValueError):
+        text = str(value).strip()
+        return text or "Uncategorized"
+
+
+def _tier_sort_value(value: Any) -> int:
+    if _is_missing_value(value):
+        return 9999
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 9999
+
+
+def prepare_question_table(frame: pd.DataFrame) -> pd.DataFrame:
+    if frame.empty:
+        return pd.DataFrame(
+            columns=[
+                "instance_id",
+                "status",
+                "primary_tier",
+                "tags",
+                "db",
+                "instruction",
+                "note",
+                "score",
+            ]
+        )
+
+    display = frame.copy()
+    if "status" not in display.columns:
+        display["status"] = ""
+    if "primary_tier" not in display.columns:
+        display["primary_tier"] = pd.NA
+    if "tags" not in display.columns:
+        display["tags"] = [[] for _ in range(len(display))]
+    if "db" not in display.columns:
+        display["db"] = ""
+    if "instruction" not in display.columns:
+        display["instruction"] = ""
+    if "note" not in display.columns:
+        display["note"] = ""
+    if "score" not in display.columns:
+        display["score"] = pd.NA
+
+    display["status_sort"] = display["status"].astype(str).str.lower().map(
+        {status: index for index, status in enumerate(QUESTION_STATUS_ORDER)}
+    )
+    display["status_sort"] = display["status_sort"].fillna(len(QUESTION_STATUS_ORDER))
+    display["tier_sort"] = display["primary_tier"].apply(_tier_sort_value)
+    display["status"] = display["status"].astype(str).map(STATUS_LABELS).fillna(display["status"])
+    display["primary_tier"] = display["primary_tier"].apply(_tier_display)
+    display["tags"] = display["tags"].apply(
+        lambda value: ", ".join(_normalize_tag_values(value)) or "—"
+    )
+    display["instruction"] = display["instruction"].apply(lambda value: _truncate_text(value, 120) or "—")
+    display["note"] = display["note"].apply(lambda value: _truncate_text(value, 80) or "—")
+    display["db"] = display["db"].apply(lambda value: _truncate_text(value, 48) or "—")
+
+    display = display.sort_values(
+        by=["status_sort", "tier_sort", "instance_id"],
+        kind="stable",
+    ).reset_index(drop=True)
+    return display[
+        [
+            "instance_id",
+            "status",
+            "primary_tier",
+            "tags",
+            "db",
+            "instruction",
+            "note",
+            "score",
+        ]
+    ]
+
+
+def format_question_option(row: pd.Series | dict[str, Any]) -> str:
+    data = row if isinstance(row, dict) else row.to_dict()
+    parts = [str(data.get("instance_id") or "")]
+    status = str(data.get("status") or "")
+    if status:
+        parts.append(STATUS_LABELS.get(status, status.title()))
+    tier = data.get("primary_tier")
+    if not _is_missing_value(tier):
+        parts.append(_tier_display(tier))
+    db = data.get("db")
+    if db:
+        parts.append(str(db))
+    instruction = _truncate_text(data.get("instruction"), 80)
+    if instruction:
+        parts.append(instruction)
+    return " | ".join(parts)
+
+
+def select_question_row(frame: pd.DataFrame, instance_id: str | None) -> dict[str, Any] | None:
+    if not instance_id or frame.empty or "instance_id" not in frame.columns:
+        return None
+    matches = frame.loc[frame["instance_id"] == instance_id]
+    if matches.empty:
+        return None
+    row = matches.iloc[0].to_dict()
+    row["status_label"] = STATUS_LABELS.get(str(row.get("status") or ""), str(row.get("status") or ""))
+    tier = row.get("primary_tier")
+    row["primary_tier_label"] = _tier_display(tier)
+    row["tags_label"] = ", ".join(_normalize_tag_values(row.get("tags"))) or "—"
+    row["instruction"] = str(row.get("instruction") or "")
+    row["note"] = str(row.get("note") or "")
+    row["difficulty_notes"] = str(row.get("difficulty_notes") or "")
+    row["db"] = str(row.get("db") or "")
+    row["source_path"] = str(row.get("source_path") or "")
+    return row
+
+
+def render_status_legend() -> None:
+    items = "".join(
+        f"""
+        <span class="status-chip">
+            <span class="status-swatch" style="background:{STATUS_COLORS[status]}"></span>
+            {STATUS_LABELS[status]}
+        </span>
+        """
+        for status in STATUS_ORDER
+    )
+    st.markdown(
+        f"""
+        <style>
+        .status-legend {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 0 0 12px 0;
+        }}
+        .status-chip {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.9rem;
+        }}
+        .status-swatch {{
+            width: 10px;
+            height: 10px;
+            border-radius: 999px;
+            display: inline-block;
+        }}
+        </style>
+        <div class="status-legend">{items}</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_question_detail(row: dict[str, Any] | None) -> None:
+    if not row:
+        st.info("Select a question to see its details.")
+        return
+
+    st.subheader("Selected question")
+    detail_cols = st.columns(4)
+    detail_cols[0].metric("Status", row["status_label"])
+    detail_cols[1].metric("Tier", row["primary_tier_label"])
+    detail_cols[2].metric("DB", row["db"] or "—")
+    detail_cols[3].metric("Score", "" if pd.isna(row.get("score")) else f"{row['score']}")
+
+    st.markdown(f"**Question**\n\n{row.get('instruction') or '—'}")
+    st.markdown(f"**Tags**\n\n{row['tags_label']}")
+
+    extra_cols = st.columns(2)
+    extra_cols[0].markdown(f"**Note**\n\n{row['note'] or '—'}")
+    extra_cols[1].markdown(f"**Difficulty notes**\n\n{row['difficulty_notes'] or '—'}")
+
+    st.markdown(f"**Source**: `{row['source_path'] or '—'}`")
+
+
 def apply_frame_filters(
     frame: pd.DataFrame,
     *,
@@ -1010,9 +1199,6 @@ def main() -> None:
             default=[],
             help="Multiple tags use AND semantics.",
         )
-        if not available_tiers or not available_tags:
-            st.caption("Category metadata is unavailable for the current dataset.")
-        st.caption("Run: `uv run streamlit run progress_ui.py`")
 
     # Pass strings to the cached functions, as Streamlit handles string hashing perfectly
     dataset = read_dataset(str(dataset_path))
@@ -1037,57 +1223,84 @@ def main() -> None:
     correct_score = summary["accuracy_pct"]
 
     st.title(f"{answered} of {total} questions answered, {correct} correct ({correct_score:.1f}%)")
-    st.caption(f"Dataset: `{dataset_path}`  |  Results: `{source_path}`")
+    overview_tab, questions_tab = st.tabs(["Overview", "Questions"])
 
-    cols = st.columns(5)
-    cols[0].metric("Questions", f"{total:,}")
-    cols[1].metric("Answered", f"{answered:,}", f"{answered_score:.1f}%")
-    cols[2].metric("Correct", f"{correct:,}")
-    cols[3].metric("Incorrect", f"{incorrect:,}")
-    cols[4].metric("Unanswered", f"{totals.get('unanswered', 0):,}")
+    with overview_tab:
+        st.caption(f"Dataset: `{dataset_path}`  |  Results: `{source_path}`")
 
-    st.subheader("Progress Chart")
-    chart_empty_message = (
-        "No questions match the current filters."
-        if frame.empty
-        else "No progress records found for the current slice."
-    )
-    render_chart(
-        make_progress_frame_for_ids(records, len(frame), selected_instance_ids),
-        empty_message=chart_empty_message,
-    )
+        cols = st.columns(5)
+        cols[0].metric("Questions", f"{total:,}")
+        cols[1].metric("Coverage", f"{answered_score:.1f}%", f"{answered:,} answered")
+        cols[2].metric("Accuracy", f"{correct_score:.1f}%", f"{correct:,} correct")
+        cols[3].metric("Incorrect", f"{incorrect:,}")
+        cols[4].metric("Unanswered", f"{summary['unanswered']:,}")
 
-    st.markdown('<div class="section-spacer"></div>', unsafe_allow_html=True)
+        focus = recommend_focus(frame)
+        focus_cols = st.columns([2, 1])
+        with focus_cols[0]:
+            st.subheader("Recommended focus")
+            st.info(f"{focus['title']}\n\n{focus['detail']}")
+        with focus_cols[1]:
+            st.metric("Focus count", f"{focus['count']:,}")
+            st.metric("Coverage", f"{focus['coverage_pct']:.1f}%")
+            st.metric("Accuracy", f"{focus['accuracy_pct']:.1f}%")
 
-    with st.expander("Question Grid", expanded=True):
-        render_grid(frame)
-
-    st.markdown('<div class="section-spacer"></div>', unsafe_allow_html=True)
-
-    with st.expander("Rows"):
-        display = prepare_display_frame(frame)
-        st.dataframe(
-            display[
-                [
-                    "instance_id",
-                    "status",
-                    "score",
-                    "primary_tier",
-                    "tags",
-                    "difficulty_notes",
-                    "db",
-                    "timestamp",
-                    "run_id",
-                    "note",
-                    "instruction",
-                    "source_path",
-                ]
-            ],
-            width="stretch",
-            height=TABLE_HEIGHT,
-            row_height=TABLE_ROW_HEIGHT,
-            hide_index=True,
+        st.subheader("Progress chart")
+        chart_empty_message = (
+            "No questions match the current filters."
+            if frame.empty
+            else "No progress records found for the current slice."
         )
+        render_chart(
+            make_progress_frame_for_ids(records, len(frame), selected_instance_ids),
+            empty_message=chart_empty_message,
+        )
+
+        with st.expander("Run context"):
+            st.write(f"Dataset: `{dataset_path}`")
+            st.write(f"Results source: `{source_path}`")
+            if not available_tiers or not available_tags:
+                st.caption("Category metadata is unavailable for the current dataset.")
+            render_tier_guide(selected_tiers)
+
+    with questions_tab:
+        render_status_legend()
+        if frame.empty:
+            st.info("No questions match the current filters.")
+        else:
+            question_frame = prepare_question_table(frame)
+            st.dataframe(
+                question_frame[
+                    [
+                        "instance_id",
+                        "status",
+                        "primary_tier",
+                        "tags",
+                        "db",
+                        "instruction",
+                        "note",
+                    ]
+                ],
+                width="stretch",
+                height=TABLE_HEIGHT,
+                row_height=TABLE_ROW_HEIGHT,
+                hide_index=True,
+            )
+
+            st.markdown('<div class="section-spacer"></div>', unsafe_allow_html=True)
+
+            selection_col, detail_col = st.columns([1, 2])
+            with selection_col:
+                selected_instance_id = st.selectbox(
+                    "Selected question",
+                    options=list(question_frame["instance_id"]),
+                    format_func=lambda instance_id: format_question_option(
+                        question_frame.loc[question_frame["instance_id"] == instance_id].iloc[0]
+                    ),
+                    label_visibility="visible",
+                )
+            with detail_col:
+                render_question_detail(select_question_row(frame, selected_instance_id))
 
 
 if __name__ == "__main__":
