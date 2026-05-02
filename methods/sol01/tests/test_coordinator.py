@@ -13,17 +13,16 @@ import pandas as pd
 import pytest
 
 from sol01.config import RuntimeConfig
-from sol01.coordinator import (
-    _attempt_score,
+from sol01.candidate_scoring import _attempt_score
+from sol01.candidate_verification import _metric_source_guidance
+from sol01.coordinator import run_task, run_tasks
+from sol01.prompt_builders import (
     _critic_prompt,
     _intent_user_prompt,
-    _metric_source_guidance,
     _semantic_repair_prompt,
     _sql_generation_prompt,
     _sql_reference_context,
     _sql_repair_prompt,
-    run_task,
-    run_tasks,
 )
 from sol01.llm import PromptSpec
 from sol01.models import (

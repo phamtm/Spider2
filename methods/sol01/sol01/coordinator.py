@@ -65,7 +65,7 @@ from sol01.retrieval import load_db_index, retrieve_schema
 logger = get_logger(__name__)
 LLMClient: Any | None = None
 
-__all__ = ["_attempt_score", "_metric_source_guidance", "run_task", "run_tasks"]
+__all__ = ["run_task", "run_tasks"]
 
 
 def load_document_text(file_name: str) -> str:
