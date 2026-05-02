@@ -1122,27 +1122,67 @@ def render_question_detail(row: dict[str, Any] | None) -> None:
         return
 
     st.subheader("Selected question")
+    question_text = (
+        html.escape(str(row.get("instruction")))
+        if not _is_missing_value(row.get("instruction"))
+        else "—"
+    )
     st.markdown(
         f"**Question**\n\n"
-        f"{row.get('instruction') if not _is_missing_value(row.get('instruction')) else '—'}"
+        f"{question_text}"
     )
-    _render_question_field("Status", row["status_label"])
-    _render_question_field("Tier", row["primary_tier_label"])
-    _render_question_field("DB", row["db"] if not _is_missing_value(row["db"]) else "—")
-    _render_question_field("Score", "" if pd.isna(row.get("score")) else row["score"])
-    st.markdown(f"**Tags**\n\n{row['tags_label']}")
-    _render_question_field("Note", row["note"] if not _is_missing_value(row["note"]) else "—")
-    _render_question_field(
-        "Difficulty notes",
-        row["difficulty_notes"] if not _is_missing_value(row["difficulty_notes"]) else "—",
-    )
-
-    if not _is_missing_value(row.get("diagnostics")):
-        st.markdown(f"**Diagnostics**\n\n{row['diagnostics']}")
-
     st.markdown(
-        f"**Source**: `{row['source_path'] if not _is_missing_value(row['source_path']) else '—'}`"
+        """
+        <div class="question-summary">
+          <div class="question-summary-item">
+            <span class="question-summary-label">Status</span>
+            <span class="question-summary-value">{status}</span>
+          </div>
+          <div class="question-summary-item">
+            <span class="question-summary-label">Tier</span>
+            <span class="question-summary-value">{tier}</span>
+          </div>
+          <div class="question-summary-item">
+            <span class="question-summary-label">DB</span>
+            <span class="question-summary-value">{db}</span>
+          </div>
+          <div class="question-summary-item">
+            <span class="question-summary-label">Score</span>
+            <span class="question-summary-value">{score}</span>
+          </div>
+        </div>
+        """.format(
+            status=html.escape(str(row["status_label"])),
+            tier=html.escape(str(row["primary_tier_label"])),
+            db=html.escape(str(row["db"] if not _is_missing_value(row["db"]) else "—")),
+            score=html.escape("" if pd.isna(row.get("score")) else str(row["score"])),
+        ),
+        unsafe_allow_html=True,
     )
+    st.markdown(
+        """
+        <div class="question-tags">
+          <div class="question-tags-label">Tags</div>
+          <div class="question-tags-row">{tags}</div>
+        </div>
+        """.format(tags=_render_tag_chips(row.get("tags"))),
+        unsafe_allow_html=True,
+    )
+
+    with st.expander("More details", expanded=False):
+        _render_question_field("Note", row["note"] if not _is_missing_value(row["note"]) else "—")
+        _render_question_field(
+            "Difficulty notes",
+            row["difficulty_notes"] if not _is_missing_value(row["difficulty_notes"]) else "—",
+        )
+
+        if not _is_missing_value(row.get("diagnostics")):
+            _render_question_field("Diagnostics", row["diagnostics"])
+
+        _render_question_field(
+            "Source",
+            f"`{row['source_path'] if not _is_missing_value(row['source_path']) else '—'}`",
+        )
     st.markdown('<div class="section-spacer"></div>', unsafe_allow_html=True)
     render_llm_call_log_panel(row)
 
@@ -1151,6 +1191,18 @@ def _render_question_field(label: str, value: Any) -> None:
     """Render one question detail field on its own line."""
 
     st.markdown(f"**{label}**\n\n{value}")
+
+
+def _render_tag_chips(value: Any) -> str:
+    """Render tags as compact wrapping chips."""
+
+    tags = _normalize_tag_values(value)
+    if not tags:
+        return "<span class='question-tag question-tag-empty'>—</span>"
+    return "".join(
+        f"<span class='question-tag'>{html.escape(tag)}</span>"
+        for tag in tags
+    )
 
 
 def _status_dot_label(status: str) -> str:
@@ -1466,6 +1518,74 @@ def apply_page_style() -> None:
         }
         .section-spacer {
             height: 24px;
+        }
+        .question-summary {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+            margin: 8px 0 12px 0;
+        }
+        .question-summary-item {
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 8px;
+            padding: 10px 12px;
+            background: rgba(255, 255, 255, 0.03);
+            min-width: 0;
+        }
+        .question-summary-label {
+            display: block;
+            font-size: 0.78rem;
+            color: rgba(255, 255, 255, 0.65);
+            margin-bottom: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0;
+        }
+        .question-summary-value {
+            display: block;
+            font-size: 1rem;
+            color: #f8fafc;
+            overflow-wrap: anywhere;
+        }
+        .question-tags {
+            margin: 0 0 12px 0;
+        }
+        .question-tags-label {
+            font-size: 0.78rem;
+            color: rgba(255, 255, 255, 0.65);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0;
+        }
+        .question-tags-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .question-tag {
+            display: inline-flex;
+            align-items: center;
+            min-height: 28px;
+            padding: 0 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            background: rgba(96, 165, 250, 0.14);
+            color: #dbeafe;
+            font-size: 0.85rem;
+            white-space: nowrap;
+        }
+        .question-tag-empty {
+            background: rgba(255, 255, 255, 0.04);
+            color: rgba(255, 255, 255, 0.6);
+        }
+        @media (max-width: 1100px) {
+            .question-summary {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+        @media (max-width: 700px) {
+            .question-summary {
+                grid-template-columns: 1fr;
+            }
         }
         </style>
         """,
