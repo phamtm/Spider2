@@ -995,8 +995,13 @@ def resolve_selected_llm_call_log_path(row: dict[str, Any]) -> Path | None:
 
 
 def _format_llm_call_option(row: dict[str, Any]) -> str:
+    sequence = (
+        row.get("sequence")
+        if row.get("sequence") is not None
+        else row.get("line_number", "—")
+    )
     parts = [
-        f"#{row.get('sequence') if row.get('sequence') is not None else row.get('line_number', '—')}",
+        f"#{sequence}",
         str(row.get("prompt_name") or "—"),
         str(row.get("status") or "—"),
         str(row.get("duration") or "—"),
@@ -1032,7 +1037,16 @@ def render_llm_call_log_panel(row: dict[str, Any]) -> None:
     st.caption(f"Log file: `{log_path}`")
     st.dataframe(
         pd.DataFrame(summary_rows)[
-            ["sequence", "call_id", "prompt_name", "status", "duration", "model", "attempts", "error_state"]
+            [
+                "sequence",
+                "call_id",
+                "prompt_name",
+                "status",
+                "duration",
+                "model",
+                "attempts",
+                "error_state",
+            ]
         ],
         width="stretch",
         hide_index=True,
@@ -1108,25 +1122,19 @@ def render_question_detail(row: dict[str, Any] | None) -> None:
         return
 
     st.subheader("Selected question")
-    detail_cols = st.columns(4)
-    detail_cols[0].metric("Status", row["status_label"])
-    detail_cols[1].metric("Tier", row["primary_tier_label"])
-    detail_cols[2].metric("DB", row["db"] if not _is_missing_value(row["db"]) else "—")
-    detail_cols[3].metric("Score", "" if pd.isna(row.get("score")) else f"{row['score']}")
-
     st.markdown(
         f"**Question**\n\n"
         f"{row.get('instruction') if not _is_missing_value(row.get('instruction')) else '—'}"
     )
+    _render_question_field("Status", row["status_label"])
+    _render_question_field("Tier", row["primary_tier_label"])
+    _render_question_field("DB", row["db"] if not _is_missing_value(row["db"]) else "—")
+    _render_question_field("Score", "" if pd.isna(row.get("score")) else row["score"])
     st.markdown(f"**Tags**\n\n{row['tags_label']}")
-
-    extra_cols = st.columns(2)
-    extra_cols[0].markdown(
-        f"**Note**\n\n{row['note'] if not _is_missing_value(row['note']) else '—'}"
-    )
-    extra_cols[1].markdown(
-        f"**Difficulty notes**\n\n"
-        f"{row['difficulty_notes'] if not _is_missing_value(row['difficulty_notes']) else '—'}"
+    _render_question_field("Note", row["note"] if not _is_missing_value(row["note"]) else "—")
+    _render_question_field(
+        "Difficulty notes",
+        row["difficulty_notes"] if not _is_missing_value(row["difficulty_notes"]) else "—",
     )
 
     if not _is_missing_value(row.get("diagnostics")):
@@ -1137,6 +1145,12 @@ def render_question_detail(row: dict[str, Any] | None) -> None:
     )
     st.markdown('<div class="section-spacer"></div>', unsafe_allow_html=True)
     render_llm_call_log_panel(row)
+
+
+def _render_question_field(label: str, value: Any) -> None:
+    """Render one question detail field on its own line."""
+
+    st.markdown(f"**{label}**\n\n{value}")
 
 
 def _status_dot_label(status: str) -> str:
@@ -1614,18 +1628,16 @@ def main() -> None:
 
             st.markdown('<div class="section-spacer"></div>', unsafe_allow_html=True)
 
-            selection_col, detail_col = st.columns([1, 2])
-            with selection_col:
-                selected_instance_id = st.selectbox(
-                    "Selected question",
-                    options=list(question_frame["instance_id"]),
-                    format_func=lambda instance_id: format_question_option(
-                        question_frame.loc[question_frame["instance_id"] == instance_id].iloc[0]
-                    ),
-                    label_visibility="visible",
-                )
-            with detail_col:
-                render_question_detail(select_question_row(frame, selected_instance_id))
+            selected_instance_id = st.selectbox(
+                "Selected question",
+                options=list(question_frame["instance_id"]),
+                format_func=lambda instance_id: format_question_option(
+                    question_frame.loc[question_frame["instance_id"] == instance_id].iloc[0]
+                ),
+                label_visibility="visible",
+            )
+            st.markdown('<div class="section-spacer"></div>', unsafe_allow_html=True)
+            render_question_detail(select_question_row(frame, selected_instance_id))
 
         if should_show_all_questions(selected_tiers, selected_tags):
             st.subheader("All questions")
