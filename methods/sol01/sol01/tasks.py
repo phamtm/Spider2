@@ -5,6 +5,7 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
+from functools import lru_cache
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -143,8 +144,24 @@ def select_tasks(
 def _read_tasks(dataset_path: Path) -> list[Task]:
     """Read the JSONL dataset into typed task objects."""
 
-    with dataset_path.open(encoding="utf-8") as handle:
-        return [_task_from_record(json.loads(line)) for line in handle if line.strip()]
+    signature = _path_signature(dataset_path)
+    if signature is None:
+        with dataset_path.open(encoding="utf-8") as handle:
+            return [_task_from_record(json.loads(line)) for line in handle if line.strip()]
+
+    return list(_read_tasks_cached(str(dataset_path.resolve()), signature))
+
+
+@lru_cache(maxsize=None)
+def _read_tasks_cached(
+    dataset_path: str,
+    signature: tuple[int, int],
+) -> tuple[Task, ...]:
+    """Read one dataset snapshot into cached task objects."""
+
+    path = Path(dataset_path)
+    with path.open(encoding="utf-8") as handle:
+        return tuple(_task_from_record(json.loads(line)) for line in handle if line.strip())
 
 
 def _task_from_record(record: dict[str, object]) -> Task:
@@ -157,6 +174,16 @@ def _task_from_record(record: dict[str, object]) -> Task:
         question=str(record["instruction"]),
         external_knowledge=str(external_knowledge) if external_knowledge is not None else None,
     )
+
+
+def _path_signature(path: Path) -> tuple[int, int] | None:
+    """Return a cheap cache key for one file path, or None when it is missing."""
+
+    try:
+        stat_result = path.stat()
+    except FileNotFoundError:
+        return None
+    return stat_result.st_mtime_ns, stat_result.st_size
 
 
 def _validate_selector(selector: str) -> None:

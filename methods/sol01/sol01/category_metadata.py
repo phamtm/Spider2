@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from functools import lru_cache
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -303,24 +304,20 @@ def load_category_metadata(
 ) -> list[CategoryMetadata]:
     """Load, validate, and order Spider2-Snow category batch rows."""
 
-    dataset_order = _dataset_order(dataset_path)
-    allowed_lookup = set(allowed_tags)
-    records, errors = _read_batch_records(
-        batch_dir,
-        dataset_order=dataset_order,
-        allowed_tags=allowed_lookup,
+    ordered_records = _load_category_metadata_cached(
+        str(dataset_path.resolve()),
+        _path_signature(dataset_path),
+        str(batch_dir.resolve()),
+        _batch_dir_signature(batch_dir),
+        tuple(sorted(allowed_tags)),
     )
-    if errors:
-        raise CategoryMetadataValidationError(errors)
-
-    ordered_records = sorted(records, key=lambda record: dataset_order[record.instance_id])
     logger.info(
         "category metadata loaded",
         batch_dir=str(batch_dir),
         dataset_path=str(dataset_path),
         record_count=len(ordered_records),
     )
-    return ordered_records
+    return list(ordered_records)
 
 
 def load_category_metadata_map(
@@ -371,6 +368,28 @@ def write_category_metadata(
     return output_path
 
 
+@lru_cache(maxsize=None)
+def _load_category_metadata_cached(
+    dataset_path: str,
+    dataset_signature: tuple[int, int] | None,
+    batch_dir: str,
+    batch_signature: tuple[tuple[str, int, int], ...] | None,
+    allowed_tags: tuple[str, ...],
+) -> tuple[CategoryMetadata, ...]:
+    """Load and validate one category metadata snapshot."""
+
+    dataset_order = _dataset_order(Path(dataset_path))
+    records, errors = _read_batch_records(
+        Path(batch_dir),
+        dataset_order=dataset_order,
+        allowed_tags=set(allowed_tags),
+    )
+    if errors:
+        raise CategoryMetadataValidationError(errors)
+
+    return tuple(sorted(records, key=lambda record: dataset_order[record.instance_id]))
+
+
 def _dataset_order(dataset_path: Path) -> dict[str, int]:
     """Map each Spider2-Snow instance id to its dataset order."""
 
@@ -383,6 +402,32 @@ def _dataset_order(dataset_path: Path) -> dict[str, int]:
             instance_id = str(record["instance_id"])
             order[instance_id] = index
     return order
+
+
+def _path_signature(path: Path) -> tuple[int, int] | None:
+    """Return a cheap cache key for one file path, or None when it is missing."""
+
+    try:
+        stat_result = path.stat()
+    except FileNotFoundError:
+        return None
+    return stat_result.st_mtime_ns, stat_result.st_size
+
+
+def _batch_dir_signature(batch_dir: Path) -> tuple[tuple[str, int, int], ...] | None:
+    """Return a cache key for the current batch directory contents."""
+
+    if not batch_dir.exists():
+        return None
+
+    entries: list[tuple[str, int, int]] = []
+    for path in sorted(batch_dir.glob("batch_*.jsonl")):
+        try:
+            stat_result = path.stat()
+        except FileNotFoundError:
+            return None
+        entries.append((path.name, stat_result.st_mtime_ns, stat_result.st_size))
+    return tuple(entries)
 
 
 def _read_batch_records(

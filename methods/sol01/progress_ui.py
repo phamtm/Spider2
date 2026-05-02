@@ -178,6 +178,11 @@ def as_float(value: Any) -> float | None:
         return None
 
 
+def dataframe_height(row_count: int) -> int:
+    visible_rows = max(1, min(row_count, TABLE_VISIBLE_ROWS))
+    return visible_rows * TABLE_ROW_HEIGHT + 48
+
+
 def find_instance_id(item: dict[str, Any], fallback: str | None = None) -> str | None:
     for key in ("instance_id", "id", "question_id", "task_id", "output"):
         value = item.get(key)
@@ -1506,7 +1511,7 @@ def main() -> None:
             st.dataframe(
                 question_display.style.map(_status_dot_style, subset=["status"]),
                 width="stretch",
-                height=TABLE_HEIGHT,
+                height=dataframe_height(len(question_display)),
                 row_height=TABLE_ROW_HEIGHT,
                 hide_index=True,
             )

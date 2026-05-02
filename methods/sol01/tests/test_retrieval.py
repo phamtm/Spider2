@@ -39,8 +39,6 @@ class FakeSelectorLLM:
         )
         assert output_type is TableSelectionDecision
         return self.decision
-
-
 def test_retrieve_schema_defaults_to_llm_only_mode():
     llm = FakeSelectorLLM(
         TableSelectionDecision(

@@ -15,9 +15,7 @@ from sqlglot import exp
 from sqlglot.errors import ParseError
 
 from sol01.config import RuntimeConfig
-from sol01.docs import load_document_text
 from sol01.index import CACHE_PATH
-from sol01.llm import LLMClient
 from sol01.llm_logging import LLMCallLogger
 from sol01.logging import get_logger
 from sol01.models import (
@@ -47,12 +45,54 @@ from sol01.output import (
     write_sql,
     write_trace,
 )
-from sol01.profiling import profile_dataframe
 from sol01.retrieval import load_db_index, retrieve_schema
-from sol01.snowflake_runner import _dataframe_records, fetch_query_dataframe
 from sol01.validation import validate_sql
 
 logger = get_logger(__name__)
+LLMClient: Any | None = None
+
+
+def load_document_text(file_name: str) -> str:
+    """Load task-linked document text without importing the docs module at startup."""
+
+    from sol01.docs import load_document_text as _load_document_text
+
+    return _load_document_text(file_name)
+
+
+def fetch_query_dataframe(sql: str, *, db: str):
+    """Run one query without importing the Snowflake stack at startup."""
+
+    from sol01.snowflake_runner import fetch_query_dataframe as _fetch_query_dataframe
+
+    return _fetch_query_dataframe(sql, db=db)
+
+
+def _dataframe_records(dataframe):
+    """Convert one DataFrame slice without importing the Snowflake stack at startup."""
+
+    from sol01.snowflake_runner import _dataframe_records as _dataframe_records_impl
+
+    return _dataframe_records_impl(dataframe)
+
+
+def profile_dataframe(dataframe):
+    """Profile one DataFrame without importing pandas at startup."""
+
+    from sol01.profiling import profile_dataframe as _profile_dataframe
+
+    return _profile_dataframe(dataframe)
+
+
+def _llm_client_class() -> Any:
+    """Return the live LLM client class, importing it only when needed."""
+
+    global LLMClient
+    if LLMClient is None:
+        from sol01.llm import LLMClient as _LLMClient
+
+        LLMClient = _LLMClient
+    return LLMClient
 
 
 class StructuredLLM(Protocol):
@@ -279,7 +319,7 @@ def run_task(
     started_at = perf_counter()
     live_logging_enabled = llm_client is None
     task_llm_log_path = llm_call_log_path_for(run_paths, instance_id=task.instance_id)
-    client = llm_client or LLMClient(
+    client = llm_client or _llm_client_class()(
         config,
         call_logger=LLMCallLogger(task_llm_log_path),
     )

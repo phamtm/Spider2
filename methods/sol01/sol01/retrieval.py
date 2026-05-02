@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -55,10 +56,11 @@ def load_db_index(db: str, *, cache_path: Path = CACHE_PATH) -> dict[str, TableS
 
     payload = load_index_cache(cache_path=cache_path) if cache_path.exists() else {}
     if db not in payload:
+        payload = dict(payload)
         payload[db] = build_db_index(db)
         _write_index_cache(payload, cache_path)
 
-    return payload[db]
+    return dict(payload[db])
 
 
 def _retrieve_schema_with_llm(
@@ -127,10 +129,21 @@ def load_index_cache(
 ) -> dict[str, dict[str, TableSchema]]:
     """Load the cached schema index, or build it if the cache is missing."""
 
-    if not cache_path.exists():
+    signature = _path_signature(cache_path)
+    if signature is None:
         return build_index_cache(cache_path=cache_path)
 
-    raw_payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    return _load_index_cache_snapshot(str(cache_path.resolve()), signature)
+
+
+@lru_cache(maxsize=None)
+def _load_index_cache_snapshot(
+    cache_path: str,
+    signature: tuple[int, int],
+) -> dict[str, dict[str, TableSchema]]:
+    """Load one cached schema snapshot and keep it in memory."""
+
+    raw_payload = json.loads(Path(cache_path).read_text(encoding="utf-8"))
     return {
         db_name: {
             table_name: TableSchema.model_validate(table_schema)
@@ -159,6 +172,16 @@ def _write_index_cache(
         + "\n",
         encoding="utf-8",
     )
+
+
+def _path_signature(path: Path) -> tuple[int, int] | None:
+    """Return a cheap cache key for one file path, or None when it is missing."""
+
+    try:
+        stat_result = path.stat()
+    except FileNotFoundError:
+        return None
+    return stat_result.st_mtime_ns, stat_result.st_size
 
 
 def _db_schema_summary(db_index: dict[str, TableSchema]) -> str:

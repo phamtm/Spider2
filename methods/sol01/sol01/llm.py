@@ -6,16 +6,11 @@ import hashlib
 import time
 from dataclasses import dataclass, replace
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
-from pydantic_ai import Agent, PromptedOutput
-from pydantic_ai.exceptions import ModelHTTPError
-from pydantic_ai.models import Model
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.profiles.openai import OpenAIModelProfile
-from pydantic_ai.providers.openai import OpenAIProvider
 
 from sol01.config import RuntimeConfig
 from sol01.llm_logging import (
@@ -34,6 +29,7 @@ OutputT = TypeVar("OutputT", bound=BaseModel)
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 MAX_MODEL_ATTEMPTS = 3
 logger = get_logger(__name__)
+Agent: Any | None = None
 
 
 @dataclass(frozen=True)
@@ -62,13 +58,7 @@ class LLMClient:
     def load_prompt(self, prompt_name: str) -> PromptSpec:
         """Read one markdown prompt and compute its reproducible content hash."""
 
-        prompt_path = _prompt_path(prompt_name, prompts_dir=self.prompts_dir)
-        text = prompt_path.read_text(encoding="utf-8")
-        prompt = PromptSpec(
-            name=prompt_name,
-            text=text,
-            sha256=prompt_sha256(text),
-        )
+        prompt = _load_prompt_spec(str(self.prompts_dir.resolve()), prompt_name)
         logger.debug("prompt loaded", prompt_name=prompt_name, prompt_hash=prompt.sha256)
         return prompt
 
@@ -113,12 +103,12 @@ class LLMClient:
         *,
         prompt: PromptSpec,
         output_type: type[OutputT],
-        model: Model | str | None,
+        model: Any | None,
     ) -> OutputT:
         """Run and optionally log one structured prompt."""
 
         resolved_model = _resolve_model(model, config=self.config)
-        agent = Agent(
+        agent = _agent_class()(
             model=resolved_model,
             system_prompt=prompt.text,
             output_type=_structured_output(output_type),
@@ -233,16 +223,33 @@ def prompt_sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+@lru_cache(maxsize=None)
+def _load_prompt_spec(prompts_dir: str, prompt_name: str) -> PromptSpec:
+    """Load one prompt file and keep the parsed result in memory."""
+
+    prompt_path = _prompt_path(prompt_name, prompts_dir=Path(prompts_dir))
+    text = prompt_path.read_text(encoding="utf-8")
+    return PromptSpec(
+        name=prompt_name,
+        text=text,
+        sha256=prompt_sha256(text),
+    )
+
+
 def build_model_settings(config: RuntimeConfig) -> dict[str, Any]:
     """Build the OpenRouter request body additions required by this solver."""
 
     return {"extra_body": config.provider_routing}
 
 
-def build_model(config: RuntimeConfig, *, model_name: str | None = None) -> OpenAIChatModel:
+def build_model(config: RuntimeConfig, *, model_name: str | None = None) -> Any:
     """Create the OpenAI-compatible chat model that points at OpenRouter."""
 
     resolved_model_name = model_name or config.model
+    from pydantic_ai.models.openai import OpenAIChatModel
+    from pydantic_ai.profiles.openai import OpenAIModelProfile
+    from pydantic_ai.providers.openai import OpenAIProvider
+
     provider = OpenAIProvider(
         base_url=config.base_url,
         api_key=config.api_key,
@@ -276,20 +283,35 @@ def _resolve_model(model: Model | str | None, *, config: RuntimeConfig) -> Model
     return model
 
 
-def _structured_output(output_type: type[OutputT]) -> PromptedOutput[OutputT]:
+def _structured_output(output_type: type[OutputT]) -> Any:
     """Use prompted JSON output so DeepSeek does not need tool calling support."""
+
+    from pydantic_ai import PromptedOutput
 
     return PromptedOutput(output_type)
 
 
+def _agent_class() -> Any:
+    """Return the live Agent class, importing it only when needed."""
+
+    global Agent
+    if Agent is None:
+        from pydantic_ai import Agent as _Agent
+
+        Agent = _Agent
+    return Agent
+
+
 def _run_agent_sync(
-    agent: Agent[Any, Any],
+    agent: Any,
     user_prompt: str,
     *,
     prompt_name: str,
     attempts: list[dict[str, Any]],
 ) -> Any:
     """Retry transient provider errors a few times before failing the call."""
+
+    from pydantic_ai.exceptions import ModelHTTPError
 
     for attempt in range(1, MAX_MODEL_ATTEMPTS + 1):
         attempt_started = time.perf_counter()
@@ -336,7 +358,7 @@ def _run_agent_sync(
 def _model_label(
     model: Model | str | None,
     *,
-    resolved_model: Model,
+    resolved_model: Any,
     config: RuntimeConfig,
 ) -> str:
     """Return log-safe model identity without exposing credentials."""
