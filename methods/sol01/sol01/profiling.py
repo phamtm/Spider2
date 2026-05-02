@@ -4,31 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from sol01.snowflake_runner import (
-    _clean_value,
-    _dataframe_records,
-    _record_keys,
-    fetch_query_dataframe,
-)
-
-
-def profile_sql(
-    sql: str,
-    *,
-    db: str,
-    sample_limit: int = 3,
-    max_profile_rows: int = 1000,
-    top_k: int = 5,
-) -> dict[str, object]:
-    """Execute one query and return a bounded profile of its result set."""
-
-    dataframe = fetch_query_dataframe(sql, db=db)
-    return profile_dataframe(
-        dataframe,
-        sample_limit=sample_limit,
-        max_profile_rows=max_profile_rows,
-        top_k=top_k,
-    )
+from sol01.snowflake_runner import _clean_value, _dataframe_records, _record_keys
 
 
 def profile_dataframe(

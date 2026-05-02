@@ -96,12 +96,6 @@ def load_llm_call_log(path: Path) -> LLMCallLog:
     return LLMCallLog(path=path, records=records, errors=errors)
 
 
-def read_llm_call_log(path: Path) -> LLMCallLog:
-    """Compatibility alias for loading one per-instance LLM call log file."""
-
-    return load_llm_call_log(path)
-
-
 def build_llm_call_summary_rows(log: LLMCallLog) -> list[dict[str, Any]]:
     """Return display-friendly summary rows for one call log."""
 

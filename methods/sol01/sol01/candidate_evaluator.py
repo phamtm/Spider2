@@ -20,35 +20,13 @@ from sol01.models import (
     TableSchema,
     Task,
 )
+from sol01.profiling import profile_dataframe
+from sol01.snowflake_runner import _dataframe_records, fetch_query_dataframe
 from sol01.validation import validate_sql
 
 logger = get_logger(__name__)
 
 __all__ = ["evaluate_candidate"]
-
-
-def fetch_query_dataframe(sql: str, *, db: str):
-    """Run one query without importing the Snowflake stack at startup."""
-
-    from sol01.snowflake_runner import fetch_query_dataframe as _fetch_query_dataframe
-
-    return _fetch_query_dataframe(sql, db=db)
-
-
-def _dataframe_records(dataframe):
-    """Convert one DataFrame slice without importing the Snowflake stack at startup."""
-
-    from sol01.snowflake_runner import _dataframe_records as _dataframe_records_impl
-
-    return _dataframe_records_impl(dataframe)
-
-
-def _profile_dataframe(dataframe):
-    """Profile one DataFrame without importing pandas at startup."""
-
-    from sol01.profiling import profile_dataframe as _profile_dataframe_impl
-
-    return _profile_dataframe_impl(dataframe)
 
 
 def evaluate_candidate(
@@ -108,7 +86,7 @@ def evaluate_candidate(
         validation=validation,
         execution=execution,
     )
-    result_profile = _profile_dataframe(dataframe) if execution.ok else None
+    result_profile = profile_dataframe(dataframe) if execution.ok else None
     shape_report = _infer_output_shape_report(
         intent=intent,
         candidate=candidate,

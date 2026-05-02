@@ -16,9 +16,8 @@ For local development, copy [`.env.example`](./.env.example) to `.env`.
 The `sol01` CLI loads `methods/sol01/.env` automatically, but real shell
 variables still win.
 Set `SOL01_CONCURRENCY` to control batch worker count. The default is `4`.
-Use `--concurrency` on `sol01 run` or `sol01.run_mode` to override the
-environment for one run. Concurrency is task-level per question batch, not per
-database.
+Use `--concurrency` on `sol01 run` to override the environment for one run.
+Concurrency is task-level per question batch, not per database.
 
 Create `methods/sol01/snowflake_credential.json` locally with a programmatic
 access token:
@@ -59,61 +58,18 @@ uv run sol01 run --concurrency 4
 uv run sol01 eval --run-id <run_id>
 uv run sol01 analyze --run-id <run_id>
 uv run sol01 ask --db E_COMMERCE "Which customers have the highest AOV?"
-```
-
-`sol01 run` and `just run` accept `--concurrency <n>`. If omitted, the CLI
-uses `SOL01_CONCURRENCY` or the default value of `4`.
-
-Persisted solver mode uses `just run <selector>`:
-
-```bash
-just run sf_bq320
-just run 'sf_bq3*' 'sf_bq4*'
-just run tier:3-5 tag:temporal
-just all
+uv run sol01 run --instance-id sf_bq320
+uv run sol01 run --db E_COMMERCE --question-contains revenue
 just gold sf_bq320
 ```
 
-Use quotes around patterns so the shell does not expand them first.
-Bare `*` is rejected by the helper on purpose.
+`sol01 run` accepts `--concurrency <n>`. If omitted, the CLI uses
+`SOL01_CONCURRENCY` or the default value of `4`.
+
+`just run` runs the default solver CLI.
 `just gold` is only for exact instance IDs and runs the persisted gold SQL path.
-There is no smoke workflow.
 Gold runs reuse the same outputs root, but they do not populate
 `eval/scored_csv/` because the gold CSV is already the scored input.
-Selector rules:
-
-- task selectors are ORed
-- `tier:` filters are ORed
-- repeated `tag:` filters are ANDed
-- `all` must stand alone
-- category-filtered runs skip tasks that do not have category metadata and log a warning
-
-Category selectors can be passed directly to `just run`, or through the alias
-recipes below when you want a shorter command.
-
-Category shortcuts are also available:
-
-```bash
-just tiers tier:1 tier:2
-just tiers tier:3-5
-just tags tag:spatial tag:spatial_join
-just easy
-just hard
-just spatial
-just nested_events
-just anti_join
-just external_formula
-```
-
-Use `just tiers` and `just tags` when you want to mix category selectors with exact IDs or globs.
-The named shortcuts are convenience presets for common batches:
-
-- `easy`: tiers 1-2
-- `hard`: tiers 6-12
-- `spatial`: spatial-related tags
-- `nested_events`: event-sequence tags
-- `anti_join`: anti-join tasks
-- `external_formula`: formula-heavy tasks with external knowledge
 
 ## Output Layout
 

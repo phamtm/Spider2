@@ -31,16 +31,9 @@ from sol01.models import (
 )
 from sol01.prompt_builders import _infer_native_value_terms
 from sol01.retrieval import load_db_index
+from sol01.snowflake_runner import fetch_query_dataframe as _fetch_query_dataframe
 
 logger = get_logger(__name__)
-
-
-def _fetch_query_dataframe(sql: str, *, db: str):
-    """Run one query without importing the Snowflake stack at startup."""
-
-    from sol01.snowflake_runner import fetch_query_dataframe as _impl
-
-    return _impl(sql, db=db)
 
 
 def _infer_aggregate_grain(

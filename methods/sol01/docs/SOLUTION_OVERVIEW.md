@@ -46,8 +46,7 @@ Spider2-Snow task
 
 ## Main Entry Points
 
-- `just run <selector>` runs the persisted solver flow.
-- `just all` runs the full Spider2-Snow set.
+- `just run` runs the solver CLI with its default batch settings.
 - `just gold <instance_id>` runs the benchmark gold SQL for one exact question.
 - `just progress` opens the local progress dashboard.
 - `uv run sol01 ...` exposes lower-level commands for indexing, running, eval,
@@ -56,20 +55,11 @@ Spider2-Snow task
 Common examples:
 
 ```bash
-just run sf_bq320
-just run 'sf_bq3*' 'sf_bq4*'
-just run tier:3-5 tag:temporal
-just all
+uv run sol01 run
+uv run sol01 run --instance-id sf_bq320
+uv run sol01 run --db E_COMMERCE --question-contains revenue
 just gold sf_bq320
 ```
-
-Selectors are intentionally strict:
-
-- task selectors are ORed
-- `tier:` filters are ORed
-- repeated `tag:` filters are ANDed
-- bare `*` is rejected
-- `all` must stand alone
 
 ## Data Sources
 
@@ -374,7 +364,6 @@ The default worker count is `4`. It can be set with:
 
 - `SOL01_CONCURRENCY` in `methods/sol01/.env`
 - `--concurrency` on `sol01 run`
-- `--concurrency` on `python -m sol01.run_mode`
 
 Each worker handles a whole question. The solver does not split one question
 across workers. This keeps output artifacts coherent and avoids shared CSV or
@@ -397,7 +386,7 @@ trace races.
 - `sol01/output.py`: creates run folders and writes artifacts.
 - `sol01/eval_runner.py`: runs and persists official evaluator output.
 - `sol01/registry.py`: records local run history.
-- `sol01/run_mode.py`: implements persisted selector-based runs.
+- `sol01/cli.py`: wires the user-facing commands to the solver pipeline.
 - `sol01/gold_run.py`: runs one official gold SQL file.
 - `progress_ui.py`: shows run progress, failures, and LLM call details.
 
@@ -410,4 +399,3 @@ trace races.
 - It uses Snowflake for execution.
 - It uses the official evaluator only after choosing one final CSV per task.
 - It does not push code, beads data, or run artifacts anywhere.
-
