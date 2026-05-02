@@ -8,6 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from sol01.time_utils import format_duration
+
 
 @dataclass(frozen=True)
 class LLMCallLogError:
@@ -144,7 +146,9 @@ def format_llm_call_duration(duration_ms: int | None) -> str:
 
     if duration_ms is None:
         return "—"
-    return f"{duration_ms:,} ms"
+    if duration_ms < 1000:
+        return f"{duration_ms:,} ms"
+    return format_duration(duration_ms / 1000)
 
 
 def format_llm_call_value(value: Any) -> str:

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -495,8 +495,10 @@ def test_llm_calls_command_summarizes_rows(monkeypatch, tmp_path: Path):
     )
 
     assert result.exit_code == 0
-    assert "- 1: intent | success | 1,000 ms | deepseek/deepseek-v4-pro | 1 attempt | no error" in result.output
-    assert "- 2: sql_generation | error | 3,000 ms | deepseek/deepseek-v4-pro | 1 attempt |" in result.output
+    expected_first = "- 1: intent | success | 1s | deepseek/deepseek-v4-pro | 1 attempt | no error"
+    expected_second = "- 2: sql_generation | error | 3s | deepseek/deepseek-v4-pro | 1 attempt |"
+    assert expected_first in result.output
+    assert expected_second in result.output
     assert "ModelHTTPError" in result.output
 
 

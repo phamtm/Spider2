@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sol01.llm_call_logs import load_llm_call_log
+from sol01.llm_call_logs import build_llm_call_summary_rows, load_llm_call_log
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
@@ -89,6 +89,9 @@ def test_load_llm_call_log_reads_valid_rows_in_order(tmp_path: Path):
     assert result.records[2].attempts[0]["status"] == "error"
     assert result.records[2].attempts[1]["status"] == "success"
     assert result.records[2].duration_ms == 5000
+
+    summary_rows = build_llm_call_summary_rows(result)
+    assert [row["duration"] for row in summary_rows] == ["1s", "3s", "5s"]
 
 
 def test_load_llm_call_log_reports_corrupted_rows_and_skips_them(tmp_path: Path):

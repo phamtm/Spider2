@@ -1061,21 +1061,18 @@ def render_llm_call_log_panel(row: dict[str, Any]) -> None:
     selected_record = log.records[selected_call_index]
     sections = build_llm_call_detail_sections(selected_record)
 
-    detail_cols = st.columns(2)
-    with detail_cols[0]:
-        st.markdown("**System prompt**")
-        st.code(format_llm_call_value(sections["system_prompt"]), language="text")
-        st.markdown("**User prompt**")
-        st.code(format_llm_call_value(sections["user_prompt"]), language="text")
-        st.markdown("**Output schema**")
-        st.code(format_llm_call_value(sections["output_schema"]), language="text")
-    with detail_cols[1]:
-        st.markdown("**Validated response**")
-        st.code(format_llm_call_value(sections["validated_output"]), language="json")
-        st.markdown("**Attempts**")
-        st.code(format_llm_call_value(sections["attempts"]), language="json")
-        st.markdown("**Error**")
-        st.code(format_llm_call_value(sections["error"]), language="json")
+    st.markdown("**System prompt**")
+    st.code(format_llm_call_value(sections["system_prompt"]), language="text")
+    st.markdown("**User prompt**")
+    st.code(format_llm_call_value(sections["user_prompt"]), language="text")
+    st.markdown("**Output schema**")
+    st.code(format_llm_call_value(sections["output_schema"]), language="text")
+    st.markdown("**Validated response**")
+    st.code(format_llm_call_value(sections["validated_output"]), language="json")
+    st.markdown("**Attempts**")
+    st.code(format_llm_call_value(sections["attempts"]), language="json")
+    st.markdown("**Error**")
+    st.code(format_llm_call_value(sections["error"]), language="json")
 
 
 def render_status_legend() -> None:
