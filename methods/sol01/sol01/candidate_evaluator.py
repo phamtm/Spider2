@@ -1,0 +1,170 @@
+"""Validate, execute, profile, and score one SQL candidate into an attempt record."""
+
+from __future__ import annotations
+
+from time import perf_counter
+from typing import Any
+
+from sol01.candidate_scoring import _attempt_score_breakdown
+from sol01.candidate_verification import (
+    _infer_aggregate_grain,
+    _infer_filter_grounding_report,
+    _infer_output_shape_report,
+)
+from sol01.logging import get_logger
+from sol01.models import (
+    ExecutionResult,
+    Intent,
+    SchemaSelection,
+    SQLCandidate,
+    TableSchema,
+    Task,
+)
+from sol01.validation import validate_sql
+
+logger = get_logger(__name__)
+
+__all__ = ["evaluate_candidate"]
+
+
+def fetch_query_dataframe(sql: str, *, db: str):
+    """Run one query without importing the Snowflake stack at startup."""
+
+    from sol01.snowflake_runner import fetch_query_dataframe as _fetch_query_dataframe
+
+    return _fetch_query_dataframe(sql, db=db)
+
+
+def _dataframe_records(dataframe):
+    """Convert one DataFrame slice without importing the Snowflake stack at startup."""
+
+    from sol01.snowflake_runner import _dataframe_records as _dataframe_records_impl
+
+    return _dataframe_records_impl(dataframe)
+
+
+def _profile_dataframe(dataframe):
+    """Profile one DataFrame without importing pandas at startup."""
+
+    from sol01.profiling import profile_dataframe as _profile_dataframe_impl
+
+    return _profile_dataframe_impl(dataframe)
+
+
+def evaluate_candidate(
+    *,
+    task: Task,
+    candidate: SQLCandidate,
+    intent: Intent,
+    schema: SchemaSelection,
+    table_schemas: dict[str, TableSchema] | None = None,
+    stage: str,
+) -> dict[str, Any]:
+    """Validate and execute one candidate, then return a trace-ready attempt record."""
+
+    started_at = perf_counter()
+    validation = validate_sql(
+        candidate.sql,
+        allowed_tables=schema.expanded_tables,
+        table_schemas=table_schemas,
+    )
+    if validation.ok:
+        try:
+            dataframe = fetch_query_dataframe(candidate.sql, db=task.db)
+            execution = ExecutionResult(
+                ok=True,
+                row_count=len(dataframe),
+                columns=[str(column) for column in dataframe.columns],
+                sample_rows=_dataframe_records(dataframe.head(3)),
+                csv_path=None,
+                error=None,
+            )
+        except Exception as exc:
+            dataframe = None
+            execution = ExecutionResult(
+                ok=False,
+                row_count=0,
+                columns=[],
+                sample_rows=[],
+                csv_path=None,
+                error=str(exc),
+            )
+    else:
+        dataframe = None
+        execution = ExecutionResult(
+            ok=False,
+            row_count=0,
+            columns=[],
+            sample_rows=[],
+            csv_path=None,
+            error="Validation failed before execution.",
+        )
+
+    aggregate_grain = _infer_aggregate_grain(
+        task=task,
+        candidate=candidate,
+        schema=schema,
+        table_schemas=table_schemas or {},
+        validation=validation,
+        execution=execution,
+    )
+    result_profile = _profile_dataframe(dataframe) if execution.ok else None
+    shape_report = _infer_output_shape_report(
+        intent=intent,
+        candidate=candidate,
+        execution=execution,
+        result_profile=result_profile,
+    )
+    filter_grounding_report = _infer_filter_grounding_report(
+        task=task,
+        candidate=candidate,
+        schema=schema,
+        table_schemas=table_schemas or {},
+        validation=validation,
+        execution=execution,
+    )
+    logger.debug(
+        "candidate processed",
+        stage=stage,
+        validation_ok=validation.ok,
+        execution_ok=execution.ok,
+        row_count=execution.row_count,
+        error=execution.error,
+    )
+    attempt: dict[str, Any] = {
+        "stage": stage,
+        "sql": candidate.sql,
+        "explanation": candidate.explanation,
+        "assumptions": candidate.assumptions,
+        "constraint_ledger": candidate.constraint_ledger,
+        "unsupported_assumptions": candidate.unsupported_assumptions,
+        "candidate_confidence": candidate.confidence,
+        "validation": validation.model_dump(mode="json"),
+        "execution_result": execution.model_dump(mode="json"),
+        "filter_grounding_report": (
+            filter_grounding_report.model_dump(mode="json")
+            if filter_grounding_report is not None
+            else None
+        ),
+        "shape_report": shape_report.model_dump(mode="json") if shape_report is not None else None,
+        "score_breakdown": _attempt_score_breakdown(
+            intent=intent,
+            candidate=candidate,
+            validation=validation,
+            execution=execution,
+            aggregate_grain=aggregate_grain,
+            result_profile=result_profile,
+            shape_report=shape_report,
+            filter_grounding_report=filter_grounding_report,
+        ),
+    }
+    attempt["score"] = sum(attempt["score_breakdown"].values())
+
+    if result_profile is not None:
+        attempt["result_profile"] = result_profile
+        attempt["_dataframe"] = dataframe
+    if aggregate_grain is not None:
+        attempt["aggregate_grain"] = aggregate_grain.model_dump(mode="json")
+    attempt["elapsed_seconds"] = round(perf_counter() - started_at, 3)
+
+    return attempt

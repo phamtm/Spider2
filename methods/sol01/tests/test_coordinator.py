@@ -50,7 +50,9 @@ BIKE_TABLE = "TEST_DB.PUBLIC.BIKESHARE_STATIONS"
 def _patch_db_index(monkeypatch: pytest.MonkeyPatch, schema: dict) -> None:
     """Patch load_db_index in both coordinator and candidate_verification."""
     monkeypatch.setattr("sol01.coordinator.load_db_index", lambda *args, **kwargs: schema)
-    monkeypatch.setattr("sol01.candidate_verification.load_db_index", lambda *args, **kwargs: schema)
+    monkeypatch.setattr(
+        "sol01.candidate_verification.load_db_index", lambda *args, **kwargs: schema
+    )
 
 
 @dataclass
@@ -115,7 +117,9 @@ def fake_snowflake(monkeypatch: pytest.MonkeyPatch) -> None:
             ]
         )
 
-    monkeypatch.setattr("sol01.coordinator.fetch_query_dataframe", fake_fetch_query_dataframe)
+    monkeypatch.setattr(
+        "sol01.candidate_evaluator.fetch_query_dataframe", fake_fetch_query_dataframe
+    )
     monkeypatch.setattr(
         "sol01.candidate_verification._fetch_query_dataframe", fake_fetch_query_dataframe
     )
@@ -871,7 +875,7 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
     )
 
     monkeypatch.setattr(
-        "sol01.coordinator.fetch_query_dataframe",
+        "sol01.candidate_evaluator.fetch_query_dataframe",
         fake_fetch_query_dataframe,
     )
     monkeypatch.setattr(
@@ -1004,7 +1008,7 @@ def test_run_task_prefers_row_count_over_distinct_entity_count(
     )
 
     monkeypatch.setattr(
-        "sol01.coordinator.fetch_query_dataframe",
+        "sol01.candidate_evaluator.fetch_query_dataframe",
         lambda sql, *, db: pd.DataFrame(
             [
                 {"age_bucket": "18-25", "users": 7},
@@ -1577,7 +1581,7 @@ def test_run_task_grounds_status_literals_before_sql_generation(
     )
     _patch_db_index(monkeypatch, {BIKE_TABLE: bike_table})
     monkeypatch.setattr(
-        "sol01.coordinator.fetch_query_dataframe",
+        "sol01.candidate_evaluator.fetch_query_dataframe",
         lambda sql, db: pd.DataFrame(
             [
                 {"status": "active", "station_count": 10},
@@ -1670,7 +1674,7 @@ def test_run_task_keeps_successful_critic_repair_on_score_tie(
     )
     _patch_db_index(monkeypatch, {})
     monkeypatch.setattr(
-        "sol01.coordinator.fetch_query_dataframe",
+        "sol01.candidate_evaluator.fetch_query_dataframe",
         lambda sql, db: pd.DataFrame([{"customer": "bob", "amount": 12.0}]),
     )
 
@@ -1985,7 +1989,9 @@ def test_run_task_flags_missing_grouped_identifier_in_trace(
             ]
         )
 
-    monkeypatch.setattr("sol01.coordinator.fetch_query_dataframe", fake_fetch_query_dataframe)
+    monkeypatch.setattr(
+        "sol01.candidate_evaluator.fetch_query_dataframe", fake_fetch_query_dataframe
+    )
     monkeypatch.setattr(
         "sol01.coordinator.retrieve_schema",
         lambda *args, **kwargs: SchemaSelection(

@@ -16,7 +16,6 @@ from sol01.candidate_scoring import (
     _normalized_output_expectation,
 )
 from sol01.index import CACHE_PATH
-from sol01.retrieval import load_db_index
 from sol01.logging import get_logger
 from sol01.models import (
     AggregateGrainReport,
@@ -31,6 +30,7 @@ from sol01.models import (
     ValidationReport,
 )
 from sol01.prompt_builders import _infer_native_value_terms
+from sol01.retrieval import load_db_index
 
 logger = get_logger(__name__)
 
