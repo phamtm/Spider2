@@ -167,11 +167,13 @@ Pass/fail comes from the official evaluator:
 
 1. Read `logs/run.jsonl` for the run sequence.
 2. Check `logs/stdout.txt` and `logs/stderr.txt`.
-3. Inspect `sql/`, `csv/`, and `traces/` for the task-level artifacts.
+3. Inspect `sql/`, `csv/`, `traces/`, and `llm_calls/` for the task-level artifacts.
 4. Open `eval/runs/default/command.json`, `stdout.txt`, `stderr.txt`,
    `summary.json`, `per_instance.jsonl`, `input_csv/`, `input_csv.csv`,
    `workspace/temp/`, and `workspace/spider2-snow/evaluation_suite/log.txt`.
 5. Open `eval/summary.json` and `eval/per_instance.jsonl`.
 6. Check `methods/sol01/outputs/registry/latest.json`.
+7. Use the Streamlit `LLM calls` view in `progress_ui.py` to pick a question and inspect the call timeline.
+8. Use `uv run sol01 llm-calls --run-id <run_id> --instance-id <instance_id>` for a terminal summary, or add `--call-id <call_id>` for one full call.
 
 The implementation plan is tracked in `PLAN.md`.
