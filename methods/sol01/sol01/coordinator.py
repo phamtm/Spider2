@@ -1931,9 +1931,7 @@ def _metric_source_guidance(
     table_lines: list[str] = []
     for table_name in sorted(table_schemas):
         table = table_schemas[table_name]
-        metric_columns = [
-            column for column in table.columns if _column_looks_native_metric(column)
-        ]
+        metric_columns = [column for column in table.columns if _column_looks_native_metric(column)]
         if not metric_columns:
             continue
         metric_columns = sorted(
@@ -1969,8 +1967,7 @@ def _metric_source_guidance(
         "the question; do not treat subtotal, total due, tax, freight, or line-item "
         "formulas as interchangeable. Candidate metric columns below are ordered by "
         "semantic fit to the task text.\n"
-        "Native metric candidates in selected tables:\n"
-        + "\n".join(table_lines)
+        "Native metric candidates in selected tables:\n" + "\n".join(table_lines)
     )
 
 
@@ -2058,7 +2055,10 @@ def _metric_column_sort_key(column: Any, task_text: str) -> tuple[int, str]:
         score += 5
     if "tax" in normalized_text and "tax" in normalized_name:
         score += 5
-    if any(token in normalized_text for token in ("freight", "shipping")) and "freight" in normalized_name:
+    if (
+        any(token in normalized_text for token in ("freight", "shipping"))
+        and "freight" in normalized_name
+    ):
         score += 5
 
     if "subtotal" in normalized_name and not any(
@@ -2456,7 +2456,9 @@ def _sql_repair_prompt(
 ) -> str:
     """Build a repair prompt using validation or execution feedback."""
 
-    grounded_literals = _grounded_literal_context_from_intent(intent) if intent is not None else None
+    grounded_literals = (
+        _grounded_literal_context_from_intent(intent) if intent is not None else None
+    )
     grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
 
     return (
@@ -2578,7 +2580,9 @@ def _aggregate_repair_prompt(
     verification_json = json.dumps(verification.model_dump(mode="json"), indent=2, sort_keys=True)
     execution_json = json.dumps(attempt["execution_result"], indent=2, sort_keys=True)
     profile_json = json.dumps(attempt.get("result_profile", {}), indent=2, sort_keys=True)
-    grounded_literals = _grounded_literal_context_from_intent(intent) if intent is not None else None
+    grounded_literals = (
+        _grounded_literal_context_from_intent(intent) if intent is not None else None
+    )
     grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
     return (
         f"{sql_reference_context}\n\n"

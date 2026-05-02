@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from functools import lru_cache
+from functools import cache
 
 from sol01.tasks import REPO_ROOT
 
@@ -22,7 +22,7 @@ class DocumentChunk:
     text: str
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_document_chunks(file_name: str) -> list[DocumentChunk]:
     """Split one markdown document into heading, table, and paragraph chunks."""
 
@@ -97,7 +97,7 @@ def load_document_chunks(file_name: str) -> list[DocumentChunk]:
     return chunks
 
 
-@lru_cache(maxsize=None)
+@cache
 def load_document_text(file_name: str) -> str:
     """Return one allowed markdown document as plain text."""
 

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import re
-from functools import lru_cache
 from collections.abc import Iterable
+from functools import cache
 from pathlib import Path
 
 from sol01.logging import get_logger
@@ -368,7 +368,7 @@ def write_category_metadata(
     return output_path
 
 
-@lru_cache(maxsize=None)
+@cache
 def _load_category_metadata_cached(
     dataset_path: str,
     dataset_signature: tuple[int, int] | None,

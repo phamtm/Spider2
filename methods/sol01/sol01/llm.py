@@ -6,9 +6,9 @@ import hashlib
 import time
 from dataclasses import dataclass, replace
 from datetime import datetime
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -30,6 +30,9 @@ TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 MAX_MODEL_ATTEMPTS = 3
 logger = get_logger(__name__)
 Agent: Any | None = None
+
+if TYPE_CHECKING:
+    from pydantic_ai.models import Model
 
 
 @dataclass(frozen=True)
@@ -223,7 +226,7 @@ def prompt_sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-@lru_cache(maxsize=None)
+@cache
 def _load_prompt_spec(prompts_dir: str, prompt_name: str) -> PromptSpec:
     """Load one prompt file and keep the parsed result in memory."""
 

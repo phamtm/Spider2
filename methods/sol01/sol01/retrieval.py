@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from functools import lru_cache
+from functools import cache
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -142,7 +142,7 @@ def load_index_cache(
     return _load_index_cache_snapshot(str(cache_path.resolve()), signature)
 
 
-@lru_cache(maxsize=None)
+@cache
 def _load_index_cache_snapshot(
     cache_path: str,
     signature: tuple[int, int],

@@ -5,8 +5,8 @@ from __future__ import annotations
 import fnmatch
 import json
 import re
-from functools import lru_cache
 from collections.abc import Sequence
+from functools import cache
 from pathlib import Path
 
 from sol01.category_metadata import (  # noqa: F401
@@ -152,7 +152,7 @@ def _read_tasks(dataset_path: Path) -> list[Task]:
     return list(_read_tasks_cached(str(dataset_path.resolve()), signature))
 
 
-@lru_cache(maxsize=None)
+@cache
 def _read_tasks_cached(
     dataset_path: str,
     signature: tuple[int, int],

@@ -327,6 +327,105 @@ def test_run_task_compares_executable_candidates_before_critic(
     assert trace["attempts"][1]["candidate_confidence"] == 0.55
 
 
+def test_run_task_default_lifecycle_persists_only_selected_candidate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
+):
+    task = Task(instance_id="sf_local008", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("default-lifecycle-run", outputs_root=tmp_path)
+    captured_prompts: dict[str, list[str]] = {}
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Find customer totals.",
+                    entities=["sales"],
+                    metrics=["total amount"],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="customer and total columns",
+                    assumptions=["Use all rows."],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE} ORDER BY amount DESC",
+                    explanation="Read customer amounts directly.",
+                    assumptions=[],
+                    confidence=0.8,
+                ),
+                SQLCandidate(
+                    sql=(
+                        f"SELECT customer, SUM(amount) AS total FROM {SALES_TABLE} "
+                        "GROUP BY customer"
+                    ),
+                    explanation="Aggregate by customer.",
+                    assumptions=[],
+                    confidence=0.7,
+                ),
+                SQLCandidate(
+                    sql=(
+                        f"SELECT customer, SUM(amount) AS total FROM {SALES_TABLE} "
+                        "GROUP BY customer ORDER BY total DESC"
+                    ),
+                    explanation="Aggregate and order by total.",
+                    assumptions=[],
+                    confidence=0.6,
+                ),
+            ],
+            "result_comparison": [
+                CandidateComparisonReport(
+                    baseline_stage="initial_1",
+                    preferred_stage="initial_3",
+                    compared_stages=["initial_1", "initial_2", "initial_3"],
+                    reasons=["initial_3 best matches the requested output and ordering."],
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(confidence=0.9, issues=[], should_repair=False, repair_focus=None)
+            ],
+        },
+        prompts=captured_prompts,
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="test_db",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+    )
+
+    trace = json.loads((run_paths.traces_dir / "sf_local008.json").read_text(encoding="utf-8"))
+    sql_path = run_paths.sql_dir / "sf_local008.sql"
+    csv_path = run_paths.csv_dir / "sf_local008.csv"
+
+    assert answer.status == "success"
+    assert len(captured_prompts["sql_generation"]) == 3
+    assert [attempt["stage"] for attempt in trace["attempts"]] == [
+        "initial_1",
+        "initial_2",
+        "initial_3",
+    ]
+    assert trace["candidate_comparison"]["preferred_stage"] == "initial_3"
+    assert trace["final_sql"] == sql_path.read_text(encoding="utf-8").strip()
+    assert trace["final_sql"].endswith("ORDER BY total DESC")
+    assert trace["csv_path"] == str(csv_path)
+    assert answer.csv_path == str(csv_path)
+    assert csv_path.exists()
+    assert sorted(path.name for path in run_paths.sql_dir.glob("*.sql")) == ["sf_local008.sql"]
+    assert sorted(path.name for path in run_paths.csv_dir.glob("*.csv")) == ["sf_local008.csv"]
+
+
 def test_run_tasks_keeps_going_after_unexpected_task_exception(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
@@ -1431,7 +1530,10 @@ def test_run_task_grounds_status_literals_before_sql_generation(
             ],
             "sql_generation": [
                 SQLCandidate(
-                    sql=f'SELECT "status", COUNT(*) AS station_count FROM {BIKE_TABLE} GROUP BY "status" ORDER BY "status"',
+                    sql=(
+                        f'SELECT "status", COUNT(*) AS station_count FROM {BIKE_TABLE} '
+                        'GROUP BY "status" ORDER BY "status"'
+                    ),
                     explanation="Count stations by stored status.",
                     assumptions=["status stores the station state"],
                     confidence=0.9,
@@ -1494,7 +1596,7 @@ def test_run_task_grounds_status_literals_before_sql_generation(
     assert f"{BIKE_TABLE}.status=closed" in intent_prompt
 
     sql_prompt = captured_prompts["sql_generation"][0]
-    assert f'"native_value_terms": [' in sql_prompt
+    assert '"native_value_terms": [' in sql_prompt
     assert f"{BIKE_TABLE}.status=active" in sql_prompt
     assert f"{BIKE_TABLE}.status=closed" in sql_prompt
 

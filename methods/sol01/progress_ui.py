@@ -996,9 +996,7 @@ def resolve_selected_llm_call_log_path(row: dict[str, Any]) -> Path | None:
 
 def _format_llm_call_option(row: dict[str, Any]) -> str:
     sequence = (
-        row.get("sequence")
-        if row.get("sequence") is not None
-        else row.get("line_number", "—")
+        row.get("sequence") if row.get("sequence") is not None else row.get("line_number", "—")
     )
     parts = [
         f"#{sequence}",
@@ -1124,10 +1122,7 @@ def render_question_detail(row: dict[str, Any] | None) -> None:
         if not _is_missing_value(row.get("instruction"))
         else "—"
     )
-    st.markdown(
-        f"**Question**\n\n"
-        f"{question_text}"
-    )
+    st.markdown(f"**Question**\n\n{question_text}")
     st.markdown(
         """
         <div class="question-summary">
@@ -1202,10 +1197,7 @@ def _render_tag_chips(value: Any) -> str:
     tags = _normalize_tag_values(value)
     if not tags:
         return "<span class='question-tag question-tag-empty'>—</span>"
-    return "".join(
-        f"<span class='question-tag'>{html.escape(tag)}</span>"
-        for tag in tags
-    )
+    return "".join(f"<span class='question-tag'>{html.escape(tag)}</span>" for tag in tags)
 
 
 def _status_dot_label(status: str) -> str:
