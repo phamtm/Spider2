@@ -28,12 +28,20 @@ from sol01.category_metadata import (
     load_category_metadata_map,
     tier_complexity_summary,
 )
+from sol01.llm_call_logs import (
+    build_llm_call_detail_sections,
+    build_llm_call_summary_rows,
+    format_llm_call_value,
+    load_llm_call_log,
+)
 from sol01.logging import get_logger
+from sol01.registry import resolve_llm_call_log_path as resolve_task_llm_call_log_path
 from sol01.trace_diagnostics import summarize_trace_diagnostics
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATASET = ROOT / "spider2-snow" / "spider2-snow.jsonl"
 DEFAULT_SOURCE = ROOT / "methods" / "sol01" / "outputs" / "registry" / "latest.json"
+OUTPUTS_ROOT = ROOT / "methods" / "sol01" / "outputs"
 logger = get_logger(__name__)
 
 STATUS_ORDER = ("correct", "incorrect", "answered", "unanswered")
@@ -970,6 +978,92 @@ def select_question_row(frame: pd.DataFrame, instance_id: str | None) -> dict[st
     return row
 
 
+def resolve_selected_llm_call_log_path(row: dict[str, Any]) -> Path | None:
+    if _is_missing_value(row.get("run_id")) or _is_missing_value(row.get("instance_id")):
+        return None
+    task_row = {
+        "run_id": row["run_id"],
+        "instance_id": row["instance_id"],
+    }
+    for key in ("trace_path", "extra_artifacts"):
+        if key in row and not _is_missing_value(row.get(key)):
+            task_row[key] = row[key]
+    try:
+        return resolve_task_llm_call_log_path(task_row, outputs_root=OUTPUTS_ROOT)
+    except ValueError:
+        return None
+
+
+def _format_llm_call_option(row: dict[str, Any]) -> str:
+    parts = [
+        f"#{row.get('sequence') if row.get('sequence') is not None else row.get('line_number', '—')}",
+        str(row.get("prompt_name") or "—"),
+        str(row.get("status") or "—"),
+        str(row.get("duration") or "—"),
+    ]
+    call_id = row.get("call_id")
+    if call_id and call_id != "—":
+        parts.append(str(call_id))
+    return " | ".join(parts)
+
+
+def render_llm_call_log_panel(row: dict[str, Any]) -> None:
+    st.subheader("LLM calls")
+    log_path = resolve_selected_llm_call_log_path(row)
+    if log_path is None:
+        st.info("No LLM call log is available for this question.")
+        return
+
+    log = load_llm_call_log(log_path)
+    if log.errors:
+        st.warning(f"Skipped {len(log.errors)} corrupted LLM call row(s) while loading this log.")
+        with st.expander("Load warnings", expanded=False):
+            for error in log.errors:
+                st.code(
+                    f"{error.path}:{error.line_number}\n{error.message}\n{error.raw_line or ''}",
+                    language="text",
+                )
+
+    if not log.records:
+        st.info(f"No usable LLM call rows were found in `{log_path}`.")
+        return
+
+    summary_rows = build_llm_call_summary_rows(log)
+    st.caption(f"Log file: `{log_path}`")
+    st.dataframe(
+        pd.DataFrame(summary_rows)[
+            ["sequence", "call_id", "prompt_name", "status", "duration", "model", "attempts", "error_state"]
+        ],
+        width="stretch",
+        hide_index=True,
+    )
+
+    selected_call_index = st.selectbox(
+        "Selected call",
+        options=list(range(len(summary_rows))),
+        format_func=lambda index: _format_llm_call_option(summary_rows[index]),
+        key=f"llm-call-{row['instance_id']}",
+    )
+    selected_record = log.records[selected_call_index]
+    sections = build_llm_call_detail_sections(selected_record)
+
+    detail_cols = st.columns(2)
+    with detail_cols[0]:
+        st.markdown("**System prompt**")
+        st.code(format_llm_call_value(sections["system_prompt"]), language="text")
+        st.markdown("**User prompt**")
+        st.code(format_llm_call_value(sections["user_prompt"]), language="text")
+        st.markdown("**Output schema**")
+        st.code(format_llm_call_value(sections["output_schema"]), language="text")
+    with detail_cols[1]:
+        st.markdown("**Validated response**")
+        st.code(format_llm_call_value(sections["validated_output"]), language="json")
+        st.markdown("**Attempts**")
+        st.code(format_llm_call_value(sections["attempts"]), language="json")
+        st.markdown("**Error**")
+        st.code(format_llm_call_value(sections["error"]), language="json")
+
+
 def render_status_legend() -> None:
     items = "".join(
         f"""
@@ -1041,6 +1135,8 @@ def render_question_detail(row: dict[str, Any] | None) -> None:
     st.markdown(
         f"**Source**: `{row['source_path'] if not _is_missing_value(row['source_path']) else '—'}`"
     )
+    st.markdown('<div class="section-spacer"></div>', unsafe_allow_html=True)
+    render_llm_call_log_panel(row)
 
 
 def _status_dot_label(status: str) -> str:

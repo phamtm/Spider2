@@ -100,6 +100,82 @@ def read_llm_call_log(path: Path) -> LLMCallLog:
     return load_llm_call_log(path)
 
 
+def build_llm_call_summary_rows(log: LLMCallLog) -> list[dict[str, Any]]:
+    """Return display-friendly summary rows for one call log."""
+
+    return [build_llm_call_summary_row(record) for record in log.records]
+
+
+def build_llm_call_summary_row(record: LLMCallLogRecord) -> dict[str, Any]:
+    """Return one display-friendly summary row for a call log record."""
+
+    return {
+        "sequence": record.sequence if record.sequence is not None else record.line_number,
+        "call_id": record.call_id or "—",
+        "prompt_name": record.prompt_name or "—",
+        "status": record.status or "—",
+        "duration": format_llm_call_duration(record.duration_ms),
+        "model": record.model or "—",
+        "attempts": _attempt_count(record.attempts),
+        "error_state": format_llm_call_error_state(record.error) or "—",
+    }
+
+
+def build_llm_call_detail_sections(record: LLMCallLogRecord) -> dict[str, Any]:
+    """Return the key request and response sections for one call."""
+
+    request = record.request if isinstance(record.request, dict) else {}
+    response = record.response if isinstance(record.response, dict) else record.response
+    validated_output = response.get("validated_output") if isinstance(response, dict) else response
+    return {
+        "system_prompt": request.get("system_prompt"),
+        "user_prompt": request.get("user_prompt"),
+        "output_schema": request.get("output_schema"),
+        "validated_output": validated_output,
+        "attempts": record.attempts,
+        "error": record.error,
+        "request": record.request,
+        "response": record.response,
+    }
+
+
+def format_llm_call_duration(duration_ms: int | None) -> str:
+    """Render a duration as a compact human-readable string."""
+
+    if duration_ms is None:
+        return "—"
+    return f"{duration_ms:,} ms"
+
+
+def format_llm_call_value(value: Any) -> str:
+    """Render one log value for a code-style display block."""
+
+    if value in (None, ""):
+        return "—"
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False)
+
+
+def format_llm_call_error_state(value: Any) -> str:
+    """Render one error object as a short summary."""
+
+    if value in (None, "", {}):
+        return ""
+    if isinstance(value, dict):
+        parts: list[str] = []
+        for key in ("type", "message"):
+            item = value.get(key)
+            if item not in (None, ""):
+                parts.append(str(item))
+        status_code = value.get("status_code")
+        if status_code not in (None, ""):
+            parts.append(f"status {status_code}")
+        if parts:
+            return " | ".join(parts)
+    return format_llm_call_value(value)
+
+
 def _parse_record(*, line_number: int, row: dict[str, Any]) -> LLMCallLogRecord:
     """Normalize one raw JSON row into a stable record shape."""
 
@@ -166,3 +242,9 @@ def _to_str(value: Any) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _attempt_count(value: Any) -> int:
+    """Count retry attempts when the field contains a list."""
+
+    return len(value) if isinstance(value, list) else 0
