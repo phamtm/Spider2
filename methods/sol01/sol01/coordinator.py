@@ -9,11 +9,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Protocol
 
-from sol01.candidate_evaluator import evaluate_candidate
-from sol01.candidate_scoring import (
-    _attempt_score,
-    _best_attempt,
-)
+from sol01.candidate_evaluator import _dataframe_records, evaluate_candidate
+from sol01.candidate_scoring import _best_attempt
 from sol01.candidate_verification import (
     _aggregate_grain_guidance,
     _aggregate_verification_reason,
@@ -74,14 +71,6 @@ def load_document_text(file_name: str) -> str:
     from sol01.docs import load_document_text as _load_document_text
 
     return _load_document_text(file_name)
-
-
-def _dataframe_records(dataframe):
-    """Convert one DataFrame slice without importing the Snowflake stack at startup."""
-
-    from sol01.snowflake_runner import _dataframe_records as _dataframe_records_impl
-
-    return _dataframe_records_impl(dataframe)
 
 
 def _llm_client_class() -> Any:
@@ -333,7 +322,9 @@ def _check_skip(
 ) -> FinalAnswer | None:
     """Return an existing FinalAnswer if the task should be skipped, else None."""
 
-    if force or not should_skip_task(run_paths, instance_id=task.instance_id, skip_failed=skip_failed):
+    if force or not should_skip_task(
+        run_paths, instance_id=task.instance_id, skip_failed=skip_failed
+    ):
         return None
     existing_trace = json.loads(task_trace_path.read_text(encoding="utf-8"))
     logger.info(
@@ -702,7 +693,7 @@ def _apply_critic_repair(
     if (
         best_attempt is None
         or not best_attempt["execution_result"]["ok"]
-        or semantic_repairs < 1  # equivalent to original `critic_repairs_used < semantic_repairs` since counter was always 0 at this point
+        or semantic_repairs < 1
         or len(attempts) >= max_attempts
     ):
         return best_attempt
