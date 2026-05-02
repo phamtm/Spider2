@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,11 @@ from sol01.models import FinalAnswer, Task
 from sol01.output import AskPaths, ensure_run_paths, eval_input_csv_dir_for
 
 runner = CliRunner()
+
+
+def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
 
 
 @dataclass
@@ -444,6 +450,143 @@ def test_analyze_command_dispatches(monkeypatch):
 
     assert result.exit_code == 0
     assert called == {"run_id": "smoke-local003"}
+
+
+def test_llm_calls_command_summarizes_rows(monkeypatch, tmp_path: Path):
+    """The llm-calls command should print a compact summary by default."""
+
+    monkeypatch.setattr(cli, "OUTPUTS_ROOT", tmp_path)
+    log_path = tmp_path / "smoke-local003" / "llm_calls" / "local003.jsonl"
+    _write_jsonl(
+        log_path,
+        [
+            {
+                "sequence": 1,
+                "call_id": "0001-intent",
+                "prompt_name": "intent",
+                "status": "success",
+                "duration_ms": 1000,
+                "model": "deepseek/deepseek-v4-pro",
+                "attempts": [{"status": "success"}],
+                "error": None,
+            },
+            {
+                "sequence": 2,
+                "call_id": "0002-sql_generation",
+                "prompt_name": "sql_generation",
+                "status": "error",
+                "duration_ms": 3000,
+                "model": "deepseek/deepseek-v4-pro",
+                "attempts": [{"status": "error"}],
+                "error": {"type": "ModelHTTPError", "message": "bad request", "status_code": 400},
+            },
+        ],
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "llm-calls",
+            "--run-id",
+            "smoke-local003",
+            "--instance-id",
+            "local003",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "- 1: intent | success | 1,000 ms | deepseek/deepseek-v4-pro | 1 attempt | no error" in result.output
+    assert "- 2: sql_generation | error | 3,000 ms | deepseek/deepseek-v4-pro | 1 attempt |" in result.output
+    assert "ModelHTTPError" in result.output
+
+
+def test_llm_calls_command_prints_full_selected_call(monkeypatch, tmp_path: Path):
+    """The llm-calls command should print the full payload for one selected call."""
+
+    monkeypatch.setattr(cli, "OUTPUTS_ROOT", tmp_path)
+    log_path = tmp_path / "smoke-local003" / "llm_calls" / "local003.jsonl"
+    _write_jsonl(
+        log_path,
+        [
+            {
+                "sequence": 1,
+                "call_id": "0001-intent",
+                "prompt_name": "intent",
+                "status": "success",
+                "duration_ms": 1000,
+                "model": "deepseek/deepseek-v4-pro",
+                "request": {
+                    "system_prompt": "# Sample Prompt\n\nDo the thing.",
+                    "user_prompt": "Question one.",
+                    "output_schema": "SampleOutput",
+                },
+                "response": {"validated_output": {"value": "hello"}},
+                "attempts": [{"status": "success"}],
+                "error": None,
+            },
+            {
+                "sequence": 2,
+                "call_id": "0002-sql_generation",
+                "prompt_name": "sql_generation",
+                "status": "error",
+                "duration_ms": 3000,
+                "model": "deepseek/deepseek-v4-pro",
+                "request": {
+                    "system_prompt": "# SQL Prompt",
+                    "user_prompt": "Question two.",
+                    "output_schema": "SqlOutput",
+                },
+                "response": None,
+                "attempts": [{"status": "error", "error": {"status_code": 400}}],
+                "error": {"type": "ModelHTTPError", "message": "bad request", "status_code": 400},
+            },
+        ],
+    )
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "llm-calls",
+            "--run-id",
+            "smoke-local003",
+            "--instance-id",
+            "local003",
+            "--call-id",
+            "0001-intent",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert "System prompt:" in result.output
+    assert "# Sample Prompt" in result.output
+    assert "User prompt:" in result.output
+    assert "Question one." in result.output
+    assert "Validated response:" in result.output
+    assert '"value": "hello"' in result.output
+    assert "Attempts:" in result.output
+    assert '"status": "success"' in result.output
+    assert "Error:" in result.output
+    assert "—" in result.output
+
+
+def test_llm_calls_command_exits_cleanly_when_log_is_missing(monkeypatch, tmp_path: Path):
+    """The llm-calls command should fail with a useful message when no log exists."""
+
+    monkeypatch.setattr(cli, "OUTPUTS_ROOT", tmp_path)
+
+    result = runner.invoke(
+        cli.app,
+        [
+            "llm-calls",
+            "--run-id",
+            "smoke-local003",
+            "--instance-id",
+            "local003",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "No usable LLM call rows were found" in result.output
 
 
 def test_ask_command_dispatches(monkeypatch):
