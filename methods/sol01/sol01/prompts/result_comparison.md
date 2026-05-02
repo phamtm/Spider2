@@ -4,6 +4,7 @@ Use the question, reference context, and result profiles to decide which candida
 Prefer the candidate that best matches the requested output shape, grain, filters, and table usage.
 Prefer the candidate whose assumptions and constraint ledger are best grounded in the answer contract.
 Do not reward an executable candidate for adding unrequested filters, current/latest rules, dedupe rules, status rules, limits, or row narrowing.
+If the contract includes `native_value_terms`, prefer candidates that use those values as native column values instead of inventing a derived business class.
 If a candidate preserves a stable grouping identifier alongside a display label, prefer it over a candidate that drops the identifier when both satisfy the same grain.
 If the current best candidate should not win, explain why and name the better stage.
 

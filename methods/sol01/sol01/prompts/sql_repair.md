@@ -11,3 +11,4 @@ Quote columns that are quoted in the DDL; do not leave mixed-case or lower-case 
 - when a grouped entity has a stable identifier and a display label, keep both in the SELECT and GROUP BY unless the question explicitly asks to omit the identifier
 - when repairing max/min/top/bottom over grouped counts or metrics, preserve the winning group key plus the metric; do not collapse to only MAX(metric) unless the answer contract explicitly asks for only the scalar value
 - remove filters, current/latest rules, dedupe rules, status rules, limits, or row narrowing when the repair feedback says they are not grounded
+- if the answer contract includes `native_value_terms`, keep those values tied to the named column and do not rewrite them as a behavioral definition

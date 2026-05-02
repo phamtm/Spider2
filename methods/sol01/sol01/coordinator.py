@@ -378,12 +378,19 @@ def run_task(
     else:
         docs_context = "No task-linked document context."
 
+    table_schemas = _table_schemas_for_selection(schema)
     intent = _run_prompt(
         client,
         prompt_hashes=prompt_hashes,
         prompt_name="intent",
         output_type=Intent,
-        user_prompt=_intent_user_prompt(task, schema, docs_context),
+        user_prompt=_intent_user_prompt(task, schema, docs_context, table_schemas),
+    )
+    intent = _augment_intent_with_value_groundings(
+        intent,
+        task=task,
+        schema=schema,
+        table_schemas=table_schemas,
     )
     logger.info(
         "intent extracted",
@@ -393,7 +400,6 @@ def run_task(
         time_constraints=intent.time_constraints,
     )
 
-    table_schemas = _table_schemas_for_selection(schema)
     aggregate_grain_guidance = _aggregate_grain_guidance(task, intent, schema, table_schemas)
     sql_reference_context = _sql_reference_context(schema, table_schemas)
 
@@ -466,6 +472,7 @@ def run_task(
             output_type=SQLCandidate,
             user_prompt=_sql_repair_prompt(
                 task,
+                intent,
                 best_attempt,
                 sql_reference_context,
                 docs_context,
@@ -599,6 +606,7 @@ def run_task(
                         aggregate_verification,
                         sql_reference_context,
                         docs_context,
+                        intent=intent,
                     ),
                 )
                 attempt = _evaluate_candidate(
@@ -1970,6 +1978,72 @@ def _trace_attempt(attempt: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in attempt.items() if not key.startswith("_")}
 
 
+def _augment_intent_with_value_groundings(
+    intent: Intent,
+    *,
+    task: Task,
+    schema: SchemaSelection,
+    table_schemas: dict[str, TableSchema],
+) -> Intent:
+    """Attach native value matches from selected schemas to the answer contract."""
+
+    native_value_terms = _infer_native_value_terms(task, schema, table_schemas)
+    if not native_value_terms:
+        return intent
+
+    merged_terms = list(dict.fromkeys([*intent.native_value_terms, *native_value_terms]))
+    return intent.model_copy(update={"native_value_terms": merged_terms})
+
+
+def _infer_native_value_terms(
+    task: Task,
+    schema: SchemaSelection,
+    table_schemas: dict[str, TableSchema],
+) -> list[str]:
+    """Return exact sample-value matches that should stay tied to native columns."""
+
+    question_text = _normalized_text(task.question)
+    terms: list[str] = []
+    for table_name in schema.expanded_tables:
+        table = table_schemas.get(table_name)
+        if table is None:
+            continue
+        table_identity = table.full_name or table.name
+        for column in table.columns:
+            if not _column_looks_string_like(column.type):
+                continue
+            for sample_value in column.sample_values:
+                if not _question_mentions_literal(question_text, sample_value):
+                    continue
+                term = f"{table_identity}.{column.name}={sample_value}"
+                if term not in terms:
+                    terms.append(term)
+    return terms
+
+
+def _normalized_text(value: str) -> str:
+    """Lower-case and collapse whitespace in one text fragment."""
+
+    return " ".join(value.lower().split())
+
+
+def _question_mentions_literal(question_text: str, literal: str) -> bool:
+    """Return True when a question appears to name one stored literal value."""
+
+    normalized_literal = _normalized_text(literal)
+    if not normalized_literal:
+        return False
+    if normalized_literal in question_text:
+        return True
+
+    literal_tokens = re.findall(r"[a-z0-9]+", normalized_literal)
+    if not literal_tokens:
+        return False
+
+    question_tokens = set(re.findall(r"[a-z0-9]+", question_text))
+    return all(token in question_tokens for token in literal_tokens)
+
+
 def _schema_context(schema: SchemaSelection) -> str:
     """Render a compact schema summary for prompt inputs."""
 
@@ -2064,14 +2138,58 @@ def _question_preview(question: str, *, max_length: int = 120) -> str:
     return normalized[: max_length - 1].rstrip() + "…"
 
 
-def _intent_user_prompt(task: Task, schema: SchemaSelection, docs_context: str) -> str:
+def _intent_user_prompt(
+    task: Task,
+    schema: SchemaSelection,
+    docs_context: str,
+    table_schemas: dict[str, TableSchema] | None = None,
+) -> str:
     """Build the user prompt for intent extraction."""
 
-    return (
+    grounded_literals = _grounded_literal_context(task, schema, table_schemas or {})
+    prompt = (
         f"Question: {task.question}\n\n"
         f"Document context:\n{docs_context}\n\n"
         f"Schema context:\n{_schema_context(schema)}"
     )
+    if grounded_literals:
+        prompt += f"\n\n{grounded_literals}"
+    return prompt
+
+
+def _grounded_literal_context(
+    task: Task,
+    schema: SchemaSelection,
+    table_schemas: dict[str, TableSchema],
+) -> str | None:
+    """Render native sample-value matches for intent extraction and repair prompts."""
+
+    native_value_terms = _infer_native_value_terms(task, schema, table_schemas)
+    if not native_value_terms:
+        return None
+    lines = ["Grounded literal values:"]
+    for term in native_value_terms:
+        lines.append(f"- {term}")
+    lines.append(
+        "Use these as native column values. Do not recast them as behavioral definitions "
+        "unless the question explicitly asks for that."
+    )
+    return "\n".join(lines)
+
+
+def _grounded_literal_context_from_intent(intent: Intent) -> str | None:
+    """Render grounded literals already attached to the answer contract."""
+
+    if not intent.native_value_terms:
+        return None
+    lines = ["Grounded literal values:"]
+    for term in intent.native_value_terms:
+        lines.append(f"- {term}")
+    lines.append(
+        "Use these as native column values. Do not recast them as behavioral definitions "
+        "unless the question explicitly asks for that."
+    )
+    return "\n".join(lines)
 
 
 def _sql_generation_prompt(
@@ -2084,11 +2202,14 @@ def _sql_generation_prompt(
 ) -> str:
     """Build the SQL-generation prompt body."""
 
+    grounded_literals = _grounded_literal_context_from_intent(intent)
+    grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
     return (
         f"{sql_reference_context}\n\n"
         f"Document context:\n{docs_context}\n\n"
         f"Question: {task.question}\n\n"
         f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
+        f"{grounded_literal_block}"
         f"{_grain_guidance_block(aggregate_grain_guidance)}"
         "Write the SQL using only the reference context above."
     )
@@ -2096,6 +2217,7 @@ def _sql_generation_prompt(
 
 def _sql_repair_prompt(
     task: Task,
+    intent: Intent | None,
     attempt: dict[str, Any],
     sql_reference_context: str,
     docs_context: str,
@@ -2104,6 +2226,9 @@ def _sql_repair_prompt(
 ) -> str:
     """Build a repair prompt using validation or execution feedback."""
 
+    grounded_literals = _grounded_literal_context_from_intent(intent) if intent is not None else None
+    grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
+
     return (
         f"{sql_reference_context}\n\n"
         f"Document context:\n{docs_context}\n\n"
@@ -2111,6 +2236,7 @@ def _sql_repair_prompt(
         f"Failed SQL:\n{attempt['sql']}\n\n"
         f"Validation:\n{json.dumps(attempt['validation'], indent=2, sort_keys=True)}\n\n"
         f"Execution:\n{json.dumps(attempt['execution_result'], indent=2, sort_keys=True)}\n\n"
+        f"{grounded_literal_block}"
         f"{_grain_guidance_block(aggregate_grain_guidance)}"
     )
 
@@ -2124,11 +2250,14 @@ def _critic_prompt(
 ) -> str:
     """Build the critic prompt using the current best SQL and result profile."""
 
+    grounded_literals = _grounded_literal_context_from_intent(intent)
+    grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
     return (
         f"{sql_reference_context}\n\n"
         f"Document context:\n{docs_context}\n\n"
         f"Question: {task.question}\n\n"
         f"Answer contract:\n{intent.model_dump_json(indent=2)}\n\n"
+        f"{grounded_literal_block}"
         f"SQL:\n{attempt['sql']}\n\n"
         "Candidate assumptions:\n"
         f"{json.dumps(attempt.get('assumptions', []), indent=2, sort_keys=True)}\n\n"
@@ -2183,11 +2312,14 @@ def _candidate_comparison_prompt(
     """Build the comparison prompt for executable candidates."""
 
     comparison_candidates = [_comparison_attempt_summary(attempt) for attempt in attempts]
+    grounded_literals = _grounded_literal_context_from_intent(intent)
+    grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
     return (
         f"{sql_reference_context}\n\n"
         f"Document context:\n{docs_context}\n\n"
         f"Question: {task.question}\n\n"
         f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
+        f"{grounded_literal_block}"
         f"{_grain_guidance_block(aggregate_grain_guidance)}"
         f"Baseline stage: {baseline_stage or 'unknown'}\n\n"
         "Executable candidates:\n"
@@ -2203,12 +2335,15 @@ def _aggregate_repair_prompt(
     verification: ConfidenceReport,
     sql_reference_context: str,
     docs_context: str,
+    intent: Intent | None = None,
 ) -> str:
     """Build the repair prompt after aggregate verification fails."""
 
     verification_json = json.dumps(verification.model_dump(mode="json"), indent=2, sort_keys=True)
     execution_json = json.dumps(attempt["execution_result"], indent=2, sort_keys=True)
     profile_json = json.dumps(attempt.get("result_profile", {}), indent=2, sort_keys=True)
+    grounded_literals = _grounded_literal_context_from_intent(intent) if intent is not None else None
+    grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
     return (
         f"{sql_reference_context}\n\n"
         f"Document context:\n{docs_context}\n\n"
@@ -2216,7 +2351,8 @@ def _aggregate_repair_prompt(
         f"Current SQL:\n{attempt['sql']}\n\n"
         f"Verification:\n{verification_json}\n\n"
         f"Execution result:\n{execution_json}\n\n"
-        f"Result profile:\n{profile_json}"
+        f"Result profile:\n{profile_json}\n\n"
+        f"{grounded_literal_block}"
     )
 
 
@@ -2230,11 +2366,14 @@ def _semantic_repair_prompt(
 ) -> str:
     """Build the repair prompt for one critic-triggered retry."""
 
+    grounded_literals = _grounded_literal_context_from_intent(intent)
+    grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
     return (
         f"{sql_reference_context}\n\n"
         f"Document context:\n{docs_context}\n\n"
         f"Question: {task.question}\n\n"
         f"Current answer contract:\n{intent.model_dump_json(indent=2)}\n\n"
+        f"{grounded_literal_block}"
         f"Current SQL:\n{attempt['sql']}\n\n"
         "Candidate assumptions:\n"
         f"{json.dumps(attempt.get('assumptions', []), indent=2, sort_keys=True)}\n\n"

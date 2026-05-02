@@ -44,6 +44,8 @@ class Intent(BaseModel):
     entities: list[str] = Field(default_factory=list)
     metrics: list[str] = Field(default_factory=list)
     filters: list[str] = Field(default_factory=list)
+    native_value_terms: list[str] = Field(default_factory=list)
+    derived_behavioral_definitions: list[str] = Field(default_factory=list)
     time_constraints: list[str] = Field(default_factory=list)
     answer_grain: str | None = None
     requested_ordering: list[str] = Field(default_factory=list)

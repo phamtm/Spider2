@@ -16,6 +16,7 @@ from sol01.config import RuntimeConfig
 from sol01.coordinator import (
     _attempt_score,
     _critic_prompt,
+    _intent_user_prompt,
     _semantic_repair_prompt,
     _sql_generation_prompt,
     _sql_reference_context,
@@ -42,6 +43,7 @@ from sol01.retrieval import load_db_index
 
 SALES_TABLE = "TEST_DB.PUBLIC.SALES"
 DICOM_TEST_TABLE = "TEST_DB.PUBLIC.DICOM_PIVOT"
+BIKE_TABLE = "TEST_DB.PUBLIC.BIKESHARE_STATIONS"
 
 
 @dataclass
@@ -1133,8 +1135,53 @@ def test_sql_generation_prompt_keeps_reference_context_before_dynamic_task_conte
     assert prompt.index("Question:") < prompt.index("Intent:")
 
 
+def test_intent_prompt_surfaces_sample_value_groundings():
+    task = Task(
+        instance_id="sf_bq279",
+        db="TEST_DB",
+        question="How many active and closed stations were there in 2013 and 2014?",
+    )
+    schema = SchemaSelection(
+        db="TEST_DB",
+        selected_tables=[BIKE_TABLE],
+        expanded_tables=[BIKE_TABLE],
+        rationale="station status is needed",
+        confidence=1.0,
+    )
+    table_schemas = {
+        BIKE_TABLE: TableSchema(
+            name="BIKESHARE_STATIONS",
+            full_name=BIKE_TABLE,
+            ddl='CREATE TABLE BIKESHARE_STATIONS ("status" TEXT, "year" NUMBER);',
+            columns=[
+                ColumnSchema(name="status", type="TEXT", sample_values=["active", "closed"]),
+                ColumnSchema(name="year", type="NUMBER", sample_values=["2013", "2014"]),
+            ],
+            searchable_text="bike stations status year",
+        )
+    }
+
+    prompt = _intent_user_prompt(task, schema, "No task-linked document context.", table_schemas)
+
+    assert "Grounded literal values:" in prompt
+    assert f"{BIKE_TABLE}.status=active" in prompt
+    assert f"{BIKE_TABLE}.status=closed" in prompt
+    assert "native column values" in prompt
+
+
 def test_sql_repair_prompt_keeps_reference_context_before_failed_sql():
     task = Task(instance_id="sf_local001", db="TEST_DB", question="Show customer totals.")
+    intent = Intent(
+        summary="Find customer totals.",
+        entities=["sales"],
+        metrics=["count customers"],
+        filters=[],
+        native_value_terms=[f"{SALES_TABLE}.status=active"],
+        derived_behavioral_definitions=["active means has at least one trip"],
+        time_constraints=[],
+        output_expectation="customer totals",
+        assumptions=[],
+    )
     attempt = {
         "sql": f"SELECT missing_column FROM {SALES_TABLE}",
         "validation": {"ok": True, "errors": [], "warnings": []},
@@ -1143,6 +1190,7 @@ def test_sql_repair_prompt_keeps_reference_context_before_failed_sql():
 
     prompt = _sql_repair_prompt(
         task,
+        intent,
         attempt,
         "SQL reference context:\nDatabase: TEST_DB\nSelected tables:\n- TEST_DB.PUBLIC.SALES",
         "No task-linked document context.",
@@ -1151,6 +1199,7 @@ def test_sql_repair_prompt_keeps_reference_context_before_failed_sql():
     assert prompt.startswith("SQL reference context:")
     assert prompt.index("Question:") < prompt.index("Failed SQL:")
     assert prompt.index("Failed SQL:") < prompt.index("Validation:")
+    assert f"{SALES_TABLE}.status=active" in prompt
 
 
 def test_sql_reference_context_includes_dicom_pivot_quoted_columns():
@@ -1238,6 +1287,106 @@ def test_run_task_uses_only_external_knowledge_for_document_context(
     assert "Document context:\nWHOLE DOC FOR RFM.md" in intent_prompt
     sql_prompt = captured_prompts["sql_generation"][0]
     assert "Document context:\nWHOLE DOC FOR RFM.md" in sql_prompt
+
+
+def test_run_task_grounds_status_literals_before_sql_generation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    task = Task(
+        instance_id="sf_bq279",
+        db="TEST_DB",
+        question="How many active and closed stations were there in 2013 and 2014?",
+    )
+    run_paths = ensure_run_paths("status-grounding-run", outputs_root=tmp_path)
+    captured_prompts: dict[str, list[str]] = {}
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Count stations by status.",
+                    entities=["stations"],
+                    metrics=["count stations"],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="status and count columns",
+                    assumptions=["Use the selected station table."],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=f'SELECT "status", COUNT(*) AS station_count FROM {BIKE_TABLE} GROUP BY "status" ORDER BY "status"',
+                    explanation="Count stations by stored status.",
+                    assumptions=["status stores the station state"],
+                    confidence=0.9,
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(confidence=0.95, issues=[], should_repair=False, repair_focus=None)
+            ],
+        },
+        prompts=captured_prompts,
+    )
+
+    bike_table = TableSchema(
+        name="BIKESHARE_STATIONS",
+        full_name=BIKE_TABLE,
+        ddl='CREATE TABLE BIKESHARE_STATIONS ("status" TEXT, "year" NUMBER);',
+        columns=[
+            ColumnSchema(name="status", type="TEXT", sample_values=["active", "closed"]),
+            ColumnSchema(name="year", type="NUMBER"),
+        ],
+        searchable_text="bike stations status year",
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="TEST_DB",
+            selected_tables=[BIKE_TABLE],
+            expanded_tables=[BIKE_TABLE],
+            rationale="station status is needed",
+            confidence=0.9,
+        ),
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.load_db_index",
+        lambda *args, **kwargs: {BIKE_TABLE: bike_table},
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.fetch_query_dataframe",
+        lambda sql, db: pd.DataFrame(
+            [
+                {"status": "active", "station_count": 10},
+                {"status": "closed", "station_count": 1},
+            ]
+        ),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    assert answer.status == "success"
+    intent_prompt = captured_prompts["intent"][0]
+    assert "Grounded literal values:" in intent_prompt
+    assert f"{BIKE_TABLE}.status=active" in intent_prompt
+    assert f"{BIKE_TABLE}.status=closed" in intent_prompt
+
+    sql_prompt = captured_prompts["sql_generation"][0]
+    assert f'"native_value_terms": [' in sql_prompt
+    assert f"{BIKE_TABLE}.status=active" in sql_prompt
+    assert f"{BIKE_TABLE}.status=closed" in sql_prompt
+
+    trace = json.loads((run_paths.traces_dir / "sf_bq279.json").read_text(encoding="utf-8"))
+    assert trace["intent"]["native_value_terms"] == [
+        f"{BIKE_TABLE}.status=active",
+        f"{BIKE_TABLE}.status=closed",
+    ]
+    assert trace["intent"]["derived_behavioral_definitions"] == []
 
 
 def test_attempt_score_prefers_output_shape_over_candidate_confidence():
@@ -1666,6 +1815,8 @@ def test_critic_prompt_includes_answer_contract_and_candidate_assumptions():
         entities=["packages", "systems", "licenses"],
         metrics=["count of packages by license"],
         filters=[],
+        native_value_terms=["DEPS_DEV_V1.DEPS_DEV_V1.PACKAGEVERSIONS.System=active"],
+        derived_behavioral_definitions=["active packages means packages with recent updates"],
         time_constraints=[],
         answer_grain="one row per package system",
         requested_ordering=["rank licenses within each system by package count"],
@@ -1694,6 +1845,8 @@ def test_critic_prompt_includes_answer_contract_and_candidate_assumptions():
 
     assert "Answer contract:" in prompt
     assert "Latest snapshot is not stated." in prompt
+    assert "native_value_terms" in prompt
+    assert "active packages means packages with recent updates" in prompt
     assert "Candidate constraint ledger:" in prompt
     assert "Filter to MAX(SnapshotAt) as latest data." in prompt
     assert "Candidate unsupported assumptions:" in prompt
@@ -1710,6 +1863,8 @@ def test_semantic_repair_prompt_rederives_from_original_task_contract():
         entities=["packages", "systems", "licenses"],
         metrics=["count of packages by license"],
         filters=[],
+        native_value_terms=["DEPS_DEV_V1.DEPS_DEV_V1.PACKAGEVERSIONS.System=active"],
+        derived_behavioral_definitions=["active packages means packages with recent updates"],
         time_constraints=[],
         answer_grain="one row per system",
         output_expectation="system, license, package count",
@@ -1741,5 +1896,6 @@ def test_semantic_repair_prompt_rederives_from_original_task_contract():
     assert "Question:" in prompt
     assert "Current answer contract:" in prompt
     assert "Do not restrict to current/latest rows without task evidence." in prompt
+    assert "native_value_terms" in prompt
     assert "Candidate constraint ledger:" in prompt
     assert "SQL adds an ungrounded latest snapshot filter." in prompt

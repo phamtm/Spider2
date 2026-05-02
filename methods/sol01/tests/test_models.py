@@ -31,6 +31,8 @@ def test_task_and_intent_models_construct_from_expected_fields():
         entities=["customers"],
         metrics=["average order value"],
         filters=[],
+        native_value_terms=["orders.status=active"],
+        derived_behavioral_definitions=["active means has recent activity"],
         time_constraints=[],
         answer_grain="one row per customer",
         requested_ordering=["highest AOV first"],
@@ -44,6 +46,8 @@ def test_task_and_intent_models_construct_from_expected_fields():
     assert task.instance_id == "local003"
     assert task.external_knowledge is None
     assert intent.metrics == ["average order value"]
+    assert intent.native_value_terms == ["orders.status=active"]
+    assert intent.derived_behavioral_definitions == ["active means has recent activity"]
     assert intent.answer_grain == "one row per customer"
     assert intent.do_not_assume == ["Do not limit to active customers unless requested."]
 
