@@ -47,6 +47,12 @@ DICOM_TEST_TABLE = "TEST_DB.PUBLIC.DICOM_PIVOT"
 BIKE_TABLE = "TEST_DB.PUBLIC.BIKESHARE_STATIONS"
 
 
+def _patch_db_index(monkeypatch: pytest.MonkeyPatch, schema: dict) -> None:
+    """Patch load_db_index in both coordinator and candidate_verification."""
+    monkeypatch.setattr("sol01.coordinator.load_db_index", lambda *args, **kwargs: schema)
+    monkeypatch.setattr("sol01.candidate_verification.load_db_index", lambda *args, **kwargs: schema)
+
+
 @dataclass
 class FakeLLMClient:
     """Minimal fake LLM that returns queued outputs by prompt name."""
@@ -110,6 +116,9 @@ def fake_snowflake(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr("sol01.coordinator.fetch_query_dataframe", fake_fetch_query_dataframe)
+    monkeypatch.setattr(
+        "sol01.candidate_verification._fetch_query_dataframe", fake_fetch_query_dataframe
+    )
 
 
 def test_run_task_success_path(
@@ -866,6 +875,10 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
         fake_fetch_query_dataframe,
     )
     monkeypatch.setattr(
+        "sol01.candidate_verification._fetch_query_dataframe",
+        fake_fetch_query_dataframe,
+    )
+    monkeypatch.setattr(
         "sol01.coordinator.retrieve_schema",
         lambda *args, **kwargs: SchemaSelection(
             db="test_db",
@@ -875,26 +888,24 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
             confidence=0.9,
         ),
     )
-    monkeypatch.setattr(
-        "sol01.coordinator.load_db_index",
-        lambda *args, **kwargs: {
-            "WORLD_BANK.WORLD_BANK_INTL_DEBT.INTERNATIONAL_DEBT": TableSchema(
-                name="INTERNATIONAL_DEBT",
-                full_name="WORLD_BANK.WORLD_BANK_INTL_DEBT.INTERNATIONAL_DEBT",
-                ddl=(
-                    'create table INTERNATIONAL_DEBT ("country_name" text, '
-                    '"indicator_code" text, "indicator_name" text, "value" number);'
-                ),
-                columns=[
-                    ColumnSchema(name="country_name", type="TEXT"),
-                    ColumnSchema(name="indicator_code", type="TEXT"),
-                    ColumnSchema(name="indicator_name", type="TEXT"),
-                    ColumnSchema(name="value", type="NUMBER"),
-                ],
-                searchable_text="international debt country indicator",
-            )
-        },
-    )
+    _intl_debt_schema = {
+        "WORLD_BANK.WORLD_BANK_INTL_DEBT.INTERNATIONAL_DEBT": TableSchema(
+            name="INTERNATIONAL_DEBT",
+            full_name="WORLD_BANK.WORLD_BANK_INTL_DEBT.INTERNATIONAL_DEBT",
+            ddl=(
+                'create table INTERNATIONAL_DEBT ("country_name" text, '
+                '"indicator_code" text, "indicator_name" text, "value" number);'
+            ),
+            columns=[
+                ColumnSchema(name="country_name", type="TEXT"),
+                ColumnSchema(name="indicator_code", type="TEXT"),
+                ColumnSchema(name="indicator_name", type="TEXT"),
+                ColumnSchema(name="value", type="NUMBER"),
+            ],
+            searchable_text="international debt country indicator",
+        )
+    }
+    _patch_db_index(monkeypatch, _intl_debt_schema)
 
     answer = run_task(
         task,
@@ -1181,10 +1192,7 @@ def test_run_task_repair_prompt_includes_schema_context_for_quoted_identifier_fi
             confidence=0.9,
         ),
     )
-    monkeypatch.setattr(
-        "sol01.coordinator.load_db_index",
-        lambda *args, **kwargs: {DICOM_TEST_TABLE: table_schema},
-    )
+    _patch_db_index(monkeypatch, {DICOM_TEST_TABLE: table_schema})
 
     answer = run_task(
         task,
@@ -1567,10 +1575,7 @@ def test_run_task_grounds_status_literals_before_sql_generation(
             confidence=0.9,
         ),
     )
-    monkeypatch.setattr(
-        "sol01.coordinator.load_db_index",
-        lambda *args, **kwargs: {BIKE_TABLE: bike_table},
-    )
+    _patch_db_index(monkeypatch, {BIKE_TABLE: bike_table})
     monkeypatch.setattr(
         "sol01.coordinator.fetch_query_dataframe",
         lambda sql, db: pd.DataFrame(
@@ -1663,7 +1668,7 @@ def test_run_task_keeps_successful_critic_repair_on_score_tie(
             confidence=0.9,
         ),
     )
-    monkeypatch.setattr("sol01.coordinator.load_db_index", lambda *args, **kwargs: {})
+    _patch_db_index(monkeypatch, {})
     monkeypatch.setattr(
         "sol01.coordinator.fetch_query_dataframe",
         lambda sql, db: pd.DataFrame([{"customer": "bob", "amount": 12.0}]),
@@ -1997,13 +2002,11 @@ def test_run_task_flags_missing_grouped_identifier_in_trace(
             confidence=0.95,
         ),
     )
-    monkeypatch.setattr(
-        "sol01.coordinator.load_db_index",
-        lambda *args, **kwargs: {
-            styles_table.full_name or styles_table.name: styles_table,
-            preferences_table.full_name or preferences_table.name: preferences_table,
-        },
-    )
+    _entertainment_schema = {
+        styles_table.full_name or styles_table.name: styles_table,
+        preferences_table.full_name or preferences_table.name: preferences_table,
+    }
+    _patch_db_index(monkeypatch, _entertainment_schema)
 
     answer = run_task(
         task,
