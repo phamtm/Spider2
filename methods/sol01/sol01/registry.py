@@ -133,6 +133,30 @@ def load_latest(*, outputs_root: Path = OUTPUTS_ROOT) -> dict[str, Any]:
         return rebuild_latest(outputs_root=outputs_root)
 
 
+def resolve_llm_call_log_path(
+    task_row: dict[str, Any],
+    *,
+    outputs_root: Path = OUTPUTS_ROOT,
+) -> Path:
+    """Return the best available LLM call log path for one registry row."""
+
+    direct_path = _extra_artifact_path(task_row, "llm_call_log_path")
+    if direct_path is not None:
+        return direct_path
+
+    trace_path = _string_or_none(task_row.get("trace_path"))
+    if trace_path is not None:
+        trace_artifact = _trace_llm_call_log_path(Path(trace_path))
+        if trace_artifact is not None:
+            return trace_artifact
+
+    run_id = _string_or_none(task_row.get("run_id"))
+    instance_id = _string_or_none(task_row.get("instance_id"))
+    if run_id is None or instance_id is None:
+        raise ValueError("registry row is missing run_id or instance_id")
+    return outputs_root / run_id / "llm_calls" / f"{instance_id}.jsonl"
+
+
 def _task_result_row(record: RegistryTaskRecord) -> dict[str, Any]:
     """Convert one input record into a stable registry row."""
 
@@ -246,6 +270,36 @@ def _string_or_none(value: str | None) -> str | None:
     """Keep optional paths as strings without changing nulls."""
 
     return str(value) if value is not None else None
+
+
+def _extra_artifact_path(task_row: dict[str, Any], artifact_name: str) -> Path | None:
+    """Read one named extra artifact path from a registry row."""
+
+    extra_artifacts = task_row.get("extra_artifacts")
+    if not isinstance(extra_artifacts, dict):
+        return None
+
+    value = extra_artifacts.get(artifact_name)
+    if value in (None, ""):
+        return None
+    return Path(str(value))
+
+
+def _trace_llm_call_log_path(trace_path: Path) -> Path | None:
+    """Read the LLM call log path embedded in a trace file when present."""
+
+    try:
+        trace = json.loads(trace_path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return None
+
+    if not isinstance(trace, dict):
+        return None
+
+    value = trace.get("llm_call_log_path")
+    if value in (None, ""):
+        return None
+    return Path(str(value))
 
 
 def _utc_now() -> str:

@@ -20,6 +20,7 @@ from sol01.models import FinalAnswer, Task
 from sol01.output import (
     OUTPUTS_ROOT,
     ensure_run_paths,
+    llm_call_log_path_for,
     run_log_path_for,
     stderr_log_path_for,
     stdout_log_path_for,
@@ -303,6 +304,9 @@ def _update_registry(
                 eval_status="failed" if row_eval_failed else "success",
                 eval_error=eval_error,
                 extra_artifacts={
+                    "llm_call_log_path": str(
+                        llm_call_log_path_for(run_paths, instance_id=task.instance_id)
+                    ),
                     "solver_csv_path": result.csv_path,
                     "stdout_path": str(run_paths.logs_dir / "stdout.txt"),
                     "stderr_path": str(run_paths.logs_dir / "stderr.txt"),

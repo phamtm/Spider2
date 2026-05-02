@@ -10,6 +10,7 @@ from sol01.registry import (
     ensure_registry_paths,
     load_latest,
     record_registry_batch,
+    resolve_llm_call_log_path,
 )
 
 
@@ -26,6 +27,7 @@ def _record(
     solver_status: str | None = None,
     eval_status: str | None = None,
     eval_error: str | None = None,
+    extra_artifacts: dict[str, str | None] | None = None,
 ) -> RegistryTaskRecord:
     return RegistryTaskRecord(
         run_id=run_id,
@@ -40,6 +42,7 @@ def _record(
         solver_status=solver_status,
         eval_status=eval_status,
         eval_error=eval_error,
+        extra_artifacts=extra_artifacts or {},
     )
 
 
@@ -47,6 +50,10 @@ def _read_jsonl(path: Path) -> list[dict[str, object]]:
     return [
         json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
     ]
+
+
+def _write_json(path: Path, payload: dict[str, object]) -> None:
+    path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
 
 def test_registry_writes_first_batch_and_appends_history(tmp_path: Path):
@@ -60,6 +67,9 @@ def test_registry_writes_first_batch_and_appends_history(tmp_path: Path):
             csv_path=str(tmp_path / "run-a" / "csv" / "sf_local001.csv"),
             trace_path=str(tmp_path / "run-a" / "traces" / "sf_local001.json"),
             solver_status="success",
+            extra_artifacts={
+                "llm_call_log_path": str(tmp_path / "run-a" / "llm_calls" / "sf_local001.jsonl")
+            },
         ),
         _record(
             run_id="run-a",
@@ -89,6 +99,9 @@ def test_registry_writes_first_batch_and_appends_history(tmp_path: Path):
         "sf_local001": "pass",
         "sf_local002": "eval_failed",
     }
+    assert latest["task_results"][0]["extra_artifacts"]["llm_call_log_path"] == (
+        str(tmp_path / "run-a" / "llm_calls" / "sf_local001.jsonl")
+    )
 
 
 def test_registry_updates_latest_on_pass_to_fail(tmp_path: Path):
@@ -241,3 +254,53 @@ def test_registry_rebuilds_stale_latest_and_skips_invalid_history_rows(tmp_path:
         "sf_local041",
     }
     assert second_row in rebuilt["task_results"]
+
+
+def test_resolve_llm_call_log_path_prefers_registry_extra_artifacts(tmp_path: Path):
+    row = {
+        "run_id": "run-x",
+        "instance_id": "sf_local099",
+        "trace_path": str(tmp_path / "run-x" / "traces" / "sf_local099.json"),
+        "extra_artifacts": {
+            "llm_call_log_path": str(tmp_path / "run-x" / "llm_calls" / "sf_local099.jsonl")
+        },
+    }
+
+    assert resolve_llm_call_log_path(row, outputs_root=tmp_path) == (
+        tmp_path / "run-x" / "llm_calls" / "sf_local099.jsonl"
+    )
+
+
+def test_resolve_llm_call_log_path_falls_back_to_trace_field(tmp_path: Path):
+    trace_path = tmp_path / "run-y" / "traces" / "sf_local100.json"
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+    _write_json(
+        trace_path,
+        {
+            "instance_id": "sf_local100",
+            "llm_call_log_path": str(tmp_path / "run-y" / "llm_calls" / "sf_local100.jsonl"),
+        },
+    )
+    row = {
+        "run_id": "run-y",
+        "instance_id": "sf_local100",
+        "trace_path": str(trace_path),
+        "extra_artifacts": {},
+    }
+
+    assert resolve_llm_call_log_path(row, outputs_root=tmp_path) == (
+        tmp_path / "run-y" / "llm_calls" / "sf_local100.jsonl"
+    )
+
+
+def test_resolve_llm_call_log_path_derives_older_run_path(tmp_path: Path):
+    row = {
+        "run_id": "run-z",
+        "instance_id": "sf_local101",
+        "trace_path": str(tmp_path / "run-z" / "traces" / "sf_local101.json"),
+        "extra_artifacts": {},
+    }
+
+    assert resolve_llm_call_log_path(row, outputs_root=tmp_path) == (
+        tmp_path / "run-z" / "llm_calls" / "sf_local101.jsonl"
+    )
