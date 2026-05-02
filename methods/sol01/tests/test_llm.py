@@ -106,12 +106,17 @@ def test_default_prompt_directory_contains_packaged_prompts():
 def test_default_sql_prompts_keep_grouped_identifiers():
     client = LLMClient(RuntimeConfig(api_key="test-key"))
 
+    intent_prompt = client.load_prompt("intent")
     generation_prompt = client.load_prompt("sql_generation")
     repair_prompt = client.load_prompt("sql_repair")
     comparison_prompt = client.load_prompt("result_comparison")
 
+    assert "grouped superlatives" in intent_prompt.text
+    assert "highest number in any month" in intent_prompt.text
     assert "stable identifier and a display label" in generation_prompt.text
+    assert "winning group key plus the metric" in generation_prompt.text
     assert "stable identifier and a display label" in repair_prompt.text
+    assert "winning group key plus the metric" in repair_prompt.text
     assert "preserves a stable grouping identifier" in comparison_prompt.text
 
 

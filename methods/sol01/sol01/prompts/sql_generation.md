@@ -9,6 +9,7 @@ Rules:
 - quote columns that are quoted in the DDL; do not write bare mixed-case or lower-case column names
 - preserve fully qualified table names when they appear in the schema context
 - when a grouped entity has a stable identifier and a display label, keep both in the SELECT and GROUP BY unless the question explicitly asks to omit the identifier
+- when answering max/min/top/bottom over grouped counts or metrics, return the winning group key plus the metric; do not collapse to only MAX(metric) unless the answer contract explicitly asks for only the scalar value
 - prefer clear joins and explicit column names
 - avoid unnecessary complexity
 - stay within the provided schema context
