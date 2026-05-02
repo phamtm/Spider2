@@ -45,8 +45,13 @@ class Intent(BaseModel):
     metrics: list[str] = Field(default_factory=list)
     filters: list[str] = Field(default_factory=list)
     time_constraints: list[str] = Field(default_factory=list)
+    answer_grain: str | None = None
+    requested_ordering: list[str] = Field(default_factory=list)
     output_expectation: str
     assumptions: list[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
+    unsupported_assumptions: list[str] = Field(default_factory=list)
+    do_not_assume: list[str] = Field(default_factory=list)
 
 
 class ColumnSchema(BaseModel):
@@ -110,6 +115,8 @@ class SQLCandidate(BaseModel):
     sql: str
     explanation: str
     assumptions: list[str] = Field(default_factory=list)
+    constraint_ledger: list[str] = Field(default_factory=list)
+    unsupported_assumptions: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
 
 

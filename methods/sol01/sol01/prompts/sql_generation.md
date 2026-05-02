@@ -12,3 +12,8 @@ Rules:
 - prefer clear joins and explicit column names
 - avoid unnecessary complexity
 - stay within the provided schema context
+- use the answer contract as the task boundary
+- prefer the simplest query that satisfies the contract
+- do not add filters, current/latest rules, dedupe rules, status rules, limits, or row narrowing that the contract does not ground
+- record every row-narrowing, dedupe, ordering, and top-k choice in the constraint ledger, with its grounding
+- place any useful but ungrounded choice in unsupported_assumptions instead of silently applying it

@@ -32,13 +32,20 @@ def test_task_and_intent_models_construct_from_expected_fields():
         metrics=["average order value"],
         filters=[],
         time_constraints=[],
+        answer_grain="one row per customer",
+        requested_ordering=["highest AOV first"],
         output_expectation="customer and AOV columns",
         assumptions=["Use all orders."],
+        evidence=["Question asks for customers with highest AOV."],
+        unsupported_assumptions=[],
+        do_not_assume=["Do not limit to active customers unless requested."],
     )
 
     assert task.instance_id == "local003"
     assert task.external_knowledge is None
     assert intent.metrics == ["average order value"]
+    assert intent.answer_grain == "one row per customer"
+    assert intent.do_not_assume == ["Do not limit to active customers unless requested."]
 
 
 def test_category_metadata_model_constructs():
@@ -104,6 +111,8 @@ def test_sql_validation_execution_and_critic_models_construct():
         sql="SELECT 1 AS answer",
         explanation="Simple query.",
         assumptions=[],
+        constraint_ledger=[],
+        unsupported_assumptions=[],
         confidence=0.6,
     )
     validation = ValidationReport(
@@ -126,6 +135,7 @@ def test_sql_validation_execution_and_critic_models_construct():
     )
 
     assert candidate.sql.startswith("SELECT")
+    assert candidate.constraint_ledger == []
     assert validation.ok is True
     assert execution.error is None
     assert confidence.repair_focus is None

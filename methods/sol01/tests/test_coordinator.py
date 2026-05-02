@@ -15,6 +15,8 @@ import pytest
 from sol01.config import RuntimeConfig
 from sol01.coordinator import (
     _attempt_score,
+    _critic_prompt,
+    _semantic_repair_prompt,
     _sql_generation_prompt,
     _sql_reference_context,
     _sql_repair_prompt,
@@ -1232,6 +1234,8 @@ def test_run_task_uses_only_external_knowledge_for_document_context(
     )
 
     assert answer.status == "success"
+    intent_prompt = captured_prompts["intent"][0]
+    assert "Document context:\nWHOLE DOC FOR RFM.md" in intent_prompt
     sql_prompt = captured_prompts["sql_generation"][0]
     assert "Document context:\nWHOLE DOC FOR RFM.md" in sql_prompt
 
@@ -1645,5 +1649,97 @@ def test_run_task_without_external_knowledge_uses_no_document_context(
     )
 
     assert answer.status == "success"
+    intent_prompt = captured_prompts["intent"][0]
+    assert "Document context:\nNo task-linked document context." in intent_prompt
     sql_prompt = captured_prompts["sql_generation"][0]
     assert "Document context:\nNo task-linked document context." in sql_prompt
+
+
+def test_critic_prompt_includes_answer_contract_and_candidate_assumptions():
+    task = Task(
+        instance_id="sf_bq062",
+        db="DEPS_DEV_V1",
+        question="What is the most frequently used license by packages in each system?",
+    )
+    intent = Intent(
+        summary="Find the most frequent license per system.",
+        entities=["packages", "systems", "licenses"],
+        metrics=["count of packages by license"],
+        filters=[],
+        time_constraints=[],
+        answer_grain="one row per package system",
+        requested_ordering=["rank licenses within each system by package count"],
+        output_expectation="system, license, package count",
+        assumptions=[],
+        evidence=["Question asks by packages in each system."],
+        unsupported_assumptions=["Latest snapshot is not stated."],
+        do_not_assume=["Do not restrict to the latest snapshot."],
+    )
+    attempt = {
+        "sql": 'SELECT "System", license FROM DEPS_DEV_V1.DEPS_DEV_V1.PACKAGEVERSIONS',
+        "assumptions": ["Use latest snapshot."],
+        "constraint_ledger": ["Filter to MAX(SnapshotAt) as latest data."],
+        "unsupported_assumptions": ["Latest snapshot was chosen from schema, not task text."],
+        "execution_result": {"ok": True, "row_count": 2},
+        "result_profile": {"row_count": 2, "columns": ["System", "LICENSE"]},
+    }
+
+    prompt = _critic_prompt(
+        task,
+        intent,
+        attempt,
+        "SQL reference context:\nDatabase: DEPS_DEV_V1",
+        "No task-linked document context.",
+    )
+
+    assert "Answer contract:" in prompt
+    assert "Latest snapshot is not stated." in prompt
+    assert "Candidate constraint ledger:" in prompt
+    assert "Filter to MAX(SnapshotAt) as latest data." in prompt
+    assert "Candidate unsupported assumptions:" in prompt
+
+
+def test_semantic_repair_prompt_rederives_from_original_task_contract():
+    task = Task(
+        instance_id="sf_bq062",
+        db="DEPS_DEV_V1",
+        question="What is the most frequently used license by packages in each system?",
+    )
+    intent = Intent(
+        summary="Find the most frequent license per system.",
+        entities=["packages", "systems", "licenses"],
+        metrics=["count of packages by license"],
+        filters=[],
+        time_constraints=[],
+        answer_grain="one row per system",
+        output_expectation="system, license, package count",
+        unsupported_assumptions=["Latest snapshot is not stated."],
+        do_not_assume=["Do not restrict to current/latest rows without task evidence."],
+    )
+    attempt = {
+        "sql": 'SELECT "System" FROM DEPS_DEV_V1.DEPS_DEV_V1.PACKAGEVERSIONS',
+        "assumptions": ["Use latest snapshot."],
+        "constraint_ledger": ["Filter to MAX(SnapshotAt)."],
+        "unsupported_assumptions": ["Latest snapshot was ungrounded."],
+    }
+    critic = ConfidenceReport(
+        confidence=0.9,
+        issues=["SQL adds an ungrounded latest snapshot filter."],
+        should_repair=True,
+        repair_focus="Remove ungrounded narrowing and answer from the task text.",
+    )
+
+    prompt = _semantic_repair_prompt(
+        task,
+        intent,
+        attempt,
+        critic,
+        "SQL reference context:\nDatabase: DEPS_DEV_V1",
+        "No task-linked document context.",
+    )
+
+    assert "Question:" in prompt
+    assert "Current answer contract:" in prompt
+    assert "Do not restrict to current/latest rows without task evidence." in prompt
+    assert "Candidate constraint ledger:" in prompt
+    assert "SQL adds an ungrounded latest snapshot filter." in prompt

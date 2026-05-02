@@ -373,12 +373,17 @@ def run_task(
         expanded_tables=schema.expanded_tables,
         confidence=schema.confidence,
     )
+    if task.external_knowledge:
+        docs_context = load_document_text(task.external_knowledge)
+    else:
+        docs_context = "No task-linked document context."
+
     intent = _run_prompt(
         client,
         prompt_hashes=prompt_hashes,
         prompt_name="intent",
         output_type=Intent,
-        user_prompt=_intent_user_prompt(task, schema),
+        user_prompt=_intent_user_prompt(task, schema, docs_context),
     )
     logger.info(
         "intent extracted",
@@ -391,10 +396,6 @@ def run_task(
     table_schemas = _table_schemas_for_selection(schema)
     aggregate_grain_guidance = _aggregate_grain_guidance(task, intent, schema, table_schemas)
     sql_reference_context = _sql_reference_context(schema, table_schemas)
-    if task.external_knowledge:
-        docs_context = load_document_text(task.external_knowledge)
-    else:
-        docs_context = "No task-linked document context."
 
     logger.info(
         "generating candidates",
@@ -641,7 +642,13 @@ def run_task(
             prompt_hashes=prompt_hashes,
             prompt_name="result_critic",
             output_type=ConfidenceReport,
-            user_prompt=_critic_prompt(task, best_attempt, sql_reference_context),
+            user_prompt=_critic_prompt(
+                task,
+                intent,
+                best_attempt,
+                sql_reference_context,
+                docs_context,
+            ),
         )
         best_attempt["critic"] = critic.model_dump(mode="json")
         logger.info(
@@ -666,6 +673,7 @@ def run_task(
                 output_type=SQLCandidate,
                 user_prompt=_semantic_repair_prompt(
                     task,
+                    intent,
                     best_attempt,
                     critic,
                     sql_reference_context,
@@ -892,6 +900,8 @@ def _evaluate_candidate(
         "sql": candidate.sql,
         "explanation": candidate.explanation,
         "assumptions": candidate.assumptions,
+        "constraint_ledger": candidate.constraint_ledger,
+        "unsupported_assumptions": candidate.unsupported_assumptions,
         "candidate_confidence": candidate.confidence,
         "validation": validation.model_dump(mode="json"),
         "execution_result": execution.model_dump(mode="json"),
@@ -994,6 +1004,9 @@ def _comparison_attempt_summary(attempt: dict[str, Any]) -> dict[str, Any]:
     return {
         "stage": attempt["stage"],
         "sql": attempt["sql"],
+        "assumptions": attempt.get("assumptions", []),
+        "constraint_ledger": attempt.get("constraint_ledger", []),
+        "unsupported_assumptions": attempt.get("unsupported_assumptions", []),
         "candidate_confidence": attempt["candidate_confidence"],
         "score": attempt["score"],
         "score_breakdown": attempt.get("score_breakdown", {}),
@@ -2051,10 +2064,14 @@ def _question_preview(question: str, *, max_length: int = 120) -> str:
     return normalized[: max_length - 1].rstrip() + "…"
 
 
-def _intent_user_prompt(task: Task, schema: SchemaSelection) -> str:
+def _intent_user_prompt(task: Task, schema: SchemaSelection, docs_context: str) -> str:
     """Build the user prompt for intent extraction."""
 
-    return f"Question: {task.question}\n\nSchema context:\n{_schema_context(schema)}"
+    return (
+        f"Question: {task.question}\n\n"
+        f"Document context:\n{docs_context}\n\n"
+        f"Schema context:\n{_schema_context(schema)}"
+    )
 
 
 def _sql_generation_prompt(
@@ -2098,13 +2115,29 @@ def _sql_repair_prompt(
     )
 
 
-def _critic_prompt(task: Task, attempt: dict[str, Any], sql_reference_context: str) -> str:
+def _critic_prompt(
+    task: Task,
+    intent: Intent,
+    attempt: dict[str, Any],
+    sql_reference_context: str,
+    docs_context: str,
+) -> str:
     """Build the critic prompt using the current best SQL and result profile."""
 
     return (
         f"{sql_reference_context}\n\n"
+        f"Document context:\n{docs_context}\n\n"
         f"Question: {task.question}\n\n"
+        f"Answer contract:\n{intent.model_dump_json(indent=2)}\n\n"
         f"SQL:\n{attempt['sql']}\n\n"
+        "Candidate assumptions:\n"
+        f"{json.dumps(attempt.get('assumptions', []), indent=2, sort_keys=True)}\n\n"
+        "Candidate constraint ledger:\n"
+        f"{json.dumps(attempt.get('constraint_ledger', []), indent=2, sort_keys=True)}\n\n"
+        "Candidate unsupported assumptions:\n"
+        f"{json.dumps(attempt.get('unsupported_assumptions', []), indent=2, sort_keys=True)}\n\n"
+        "Execution result:\n"
+        f"{json.dumps(attempt.get('execution_result', {}), indent=2, sort_keys=True)}\n\n"
         "Result profile:\n"
         f"{json.dumps(attempt.get('result_profile', {}), indent=2, sort_keys=True)}"
     )
@@ -2189,6 +2222,7 @@ def _aggregate_repair_prompt(
 
 def _semantic_repair_prompt(
     task: Task,
+    intent: Intent,
     attempt: dict[str, Any],
     critic: ConfidenceReport,
     sql_reference_context: str,
@@ -2200,6 +2234,13 @@ def _semantic_repair_prompt(
         f"{sql_reference_context}\n\n"
         f"Document context:\n{docs_context}\n\n"
         f"Question: {task.question}\n\n"
+        f"Current answer contract:\n{intent.model_dump_json(indent=2)}\n\n"
         f"Current SQL:\n{attempt['sql']}\n\n"
+        "Candidate assumptions:\n"
+        f"{json.dumps(attempt.get('assumptions', []), indent=2, sort_keys=True)}\n\n"
+        "Candidate constraint ledger:\n"
+        f"{json.dumps(attempt.get('constraint_ledger', []), indent=2, sort_keys=True)}\n\n"
+        "Candidate unsupported assumptions:\n"
+        f"{json.dumps(attempt.get('unsupported_assumptions', []), indent=2, sort_keys=True)}\n\n"
         f"Critic issues:\n{json.dumps(critic.model_dump(mode='json'), indent=2, sort_keys=True)}"
     )
