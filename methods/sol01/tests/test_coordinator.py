@@ -17,6 +17,7 @@ from sol01.coordinator import (
     _attempt_score,
     _critic_prompt,
     _intent_user_prompt,
+    _metric_source_guidance,
     _semantic_repair_prompt,
     _sql_generation_prompt,
     _sql_reference_context,
@@ -1135,6 +1136,88 @@ def test_sql_generation_prompt_keeps_reference_context_before_dynamic_task_conte
     assert prompt.index("Question:") < prompt.index("Intent:")
 
 
+def test_metric_source_guidance_prefers_native_metric_at_answer_grain():
+    task = Task(
+        instance_id="sf_local141",
+        db="ADVENTUREWORKS",
+        question=(
+            "How did each salesperson's annual total sales compare to their annual sales quota?"
+        ),
+    )
+    intent = Intent(
+        summary="Compare annual sales and quota by salesperson.",
+        entities=["salesperson", "year"],
+        metrics=["total sales", "sales quota", "difference"],
+        filters=[],
+        time_constraints=["annual"],
+        output_expectation="salesperson, year, total sales, quota, difference",
+        assumptions=[],
+    )
+    table_schemas = {
+        "ADVENTUREWORKS.ADVENTUREWORKS.SALESORDERHEADER": TableSchema(
+            name="SALESORDERHEADER",
+            database_name="ADVENTUREWORKS",
+            schema_name="ADVENTUREWORKS",
+            full_name="ADVENTUREWORKS.ADVENTUREWORKS.SALESORDERHEADER",
+            ddl="",
+            columns=[
+                ColumnSchema(name="salespersonid", type="VARCHAR"),
+                ColumnSchema(name="orderdate", type="VARCHAR"),
+                ColumnSchema(name="subtotal", type="FLOAT"),
+                ColumnSchema(name="totaldue", type="FLOAT"),
+            ],
+            searchable_text="",
+        ),
+        "ADVENTUREWORKS.ADVENTUREWORKS.SALESORDERDETAIL": TableSchema(
+            name="SALESORDERDETAIL",
+            database_name="ADVENTUREWORKS",
+            schema_name="ADVENTUREWORKS",
+            full_name="ADVENTUREWORKS.ADVENTUREWORKS.SALESORDERDETAIL",
+            ddl="",
+            columns=[
+                ColumnSchema(name="salesorderid", type="NUMBER"),
+                ColumnSchema(name="orderqty", type="NUMBER"),
+                ColumnSchema(name="unitprice", type="FLOAT"),
+            ],
+            searchable_text="",
+        ),
+    }
+
+    guidance = _metric_source_guidance(task, intent, table_schemas)
+
+    assert guidance is not None
+    assert "requested answer grain" in guidance
+    assert "ADVENTUREWORKS.ADVENTUREWORKS.SALESORDERHEADER" in guidance
+    assert "subtotal" in guidance
+    assert "native metrics [totaldue, subtotal]" in guidance
+    assert "column-name semantics" in guidance
+    assert "Join lower-grain detail tables only" in guidance
+
+
+def test_sql_generation_prompt_includes_metric_source_guidance():
+    task = Task(instance_id="sf_local141", db="ADVENTUREWORKS", question="Show total sales.")
+    intent = Intent(
+        summary="Show total sales.",
+        entities=[],
+        metrics=["total sales"],
+        filters=[],
+        time_constraints=[],
+        output_expectation="total sales",
+        assumptions=[],
+    )
+
+    prompt = _sql_generation_prompt(
+        task,
+        intent,
+        "SQL reference context:\nDatabase: ADVENTUREWORKS",
+        "No task-linked document context.",
+        metric_source_guidance="Prefer SALESORDERHEADER.subtotal.",
+    )
+
+    assert "Metric source guidance:" in prompt
+    assert "Prefer SALESORDERHEADER.subtotal." in prompt
+
+
 def test_intent_prompt_surfaces_sample_value_groundings():
     task = Task(
         instance_id="sf_bq279",
@@ -1167,6 +1250,40 @@ def test_intent_prompt_surfaces_sample_value_groundings():
     assert f"{BIKE_TABLE}.status=active" in prompt
     assert f"{BIKE_TABLE}.status=closed" in prompt
     assert "native column values" in prompt
+
+
+def test_intent_prompt_does_not_ground_one_character_substrings():
+    task = Task(
+        instance_id="sf_local141",
+        db="TEST_DB",
+        question="How did each salesperson's annual total sales compare to quota?",
+    )
+    schema = SchemaSelection(
+        db="TEST_DB",
+        selected_tables=[SALES_TABLE],
+        expanded_tables=[SALES_TABLE],
+        rationale="sales is needed",
+        confidence=1.0,
+    )
+    table_schemas = {
+        SALES_TABLE: TableSchema(
+            name="SALES",
+            database_name="TEST_DB",
+            schema_name="PUBLIC",
+            full_name=SALES_TABLE,
+            ddl="",
+            columns=[
+                ColumnSchema(name="onlineorderflag", type="VARCHAR", sample_values=["f", "t"]),
+                ColumnSchema(name="amount", type="FLOAT"),
+            ],
+            searchable_text="",
+        )
+    }
+
+    prompt = _intent_user_prompt(task, schema, "No task-linked document context.", table_schemas)
+
+    assert "onlineorderflag=f" not in prompt
+    assert "Grounded literal values:" not in prompt
 
 
 def test_sql_repair_prompt_keeps_reference_context_before_failed_sql():
@@ -1387,6 +1504,80 @@ def test_run_task_grounds_status_literals_before_sql_generation(
         f"{BIKE_TABLE}.status=closed",
     ]
     assert trace["intent"]["derived_behavioral_definitions"] == []
+
+
+def test_run_task_keeps_successful_critic_repair_on_score_tie(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    task = Task(instance_id="sf_local099", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("critic-repair-tie-run", outputs_root=tmp_path)
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Find customer totals.",
+                    entities=["customers"],
+                    metrics=["total amount"],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="customer and total columns",
+                    assumptions=[],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE}",
+                    explanation="Initial answer.",
+                    assumptions=[],
+                    confidence=0.9,
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(
+                    confidence=0.9,
+                    issues=["Use the repaired source."],
+                    should_repair=True,
+                    repair_focus="replace initial SQL",
+                )
+            ],
+            "sql_repair": [
+                SQLCandidate(
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE} /* fixed */",
+                    explanation="Repaired answer.",
+                    assumptions=[],
+                    confidence=0.9,
+                )
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="TEST_DB",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+    monkeypatch.setattr("sol01.coordinator.load_db_index", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        "sol01.coordinator.fetch_query_dataframe",
+        lambda sql, db: pd.DataFrame([{"customer": "bob", "amount": 12.0}]),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    trace = json.loads((run_paths.traces_dir / "sf_local099.json").read_text(encoding="utf-8"))
+    assert answer.status == "success"
+    assert trace["final_sql"].endswith("/* fixed */")
 
 
 def test_attempt_score_prefers_output_shape_over_candidate_confidence():

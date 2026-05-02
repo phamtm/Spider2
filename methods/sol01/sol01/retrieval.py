@@ -81,6 +81,12 @@ def _retrieve_schema_with_llm(
         f"Question: {question}\n\n"
         f"Database: {db}\n\n"
         "Choose every table needed to answer the question, including join or bridge tables.\n\n"
+        "For metric questions, choose tables at the requested answer grain. If one table "
+        "already has the needed grouping keys, time key, filters, and a native metric "
+        "column whose semantics match the question, do not add lower-grain detail tables "
+        "just to reconstruct that metric. When several native metric columns exist, "
+        "choose by column-name semantics from the question; do not treat subtotal, total "
+        "due, tax, freight, or line-item formulas as interchangeable.\n\n"
         f"Schema summary:\n{schema_summary}"
     )
     decision = llm_client.run_structured_with_prompt(

@@ -16,6 +16,9 @@ Rules:
 - stay within the provided schema context
 - use the answer contract as the task boundary
 - prefer the simplest query that satisfies the contract
+- choose the metric source at the requested answer grain: if one table already has the needed grouping keys, time key, filters, and a native metric column whose semantics match the question, aggregate that native metric
+- join lower-grain detail tables only when the question requires detail-level filters, grouping, output columns, an explicit formula, or no suitable native metric exists
+- when several native metric columns exist, choose by column-name semantics from the question; do not treat subtotal, total due, tax, freight, or line-item formulas as interchangeable
 - do not add filters, current/latest rules, dedupe rules, status rules, limits, or row narrowing that the contract does not ground
 - record every row-narrowing, dedupe, ordering, and top-k choice in the constraint ledger, with its grounding
 - place any useful but ungrounded choice in unsupported_assumptions instead of silently applying it

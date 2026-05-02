@@ -401,6 +401,7 @@ def run_task(
     )
 
     aggregate_grain_guidance = _aggregate_grain_guidance(task, intent, schema, table_schemas)
+    metric_source_guidance = _metric_source_guidance(task, intent, table_schemas)
     sql_reference_context = _sql_reference_context(schema, table_schemas)
 
     logger.info(
@@ -430,6 +431,7 @@ def run_task(
                 sql_reference_context,
                 docs_context,
                 aggregate_grain_guidance=aggregate_grain_guidance,
+                metric_source_guidance=metric_source_guidance,
             ),
         )
         attempt = _evaluate_candidate(
@@ -477,6 +479,7 @@ def run_task(
                 sql_reference_context,
                 docs_context,
                 aggregate_grain_guidance=aggregate_grain_guidance,
+                metric_source_guidance=metric_source_guidance,
             ),
         )
         attempt = _evaluate_candidate(
@@ -522,6 +525,7 @@ def run_task(
                 sql_reference_context,
                 docs_context,
                 aggregate_grain_guidance=aggregate_grain_guidance,
+                metric_source_guidance=metric_source_guidance,
                 baseline_stage=best_attempt["stage"] if best_attempt is not None else None,
             ),
         )
@@ -656,6 +660,7 @@ def run_task(
                 best_attempt,
                 sql_reference_context,
                 docs_context,
+                metric_source_guidance=metric_source_guidance,
             ),
         )
         best_attempt["critic"] = critic.model_dump(mode="json")
@@ -686,6 +691,7 @@ def run_task(
                     critic,
                     sql_reference_context,
                     docs_context,
+                    metric_source_guidance=metric_source_guidance,
                 ),
             )
             attempt = _evaluate_candidate(
@@ -707,7 +713,10 @@ def run_task(
                 elapsed_seconds=attempt["elapsed_seconds"],
                 row_count=attempt["execution_result"]["row_count"],
             )
-            best_attempt = _best_attempt(attempts)
+            if attempt["execution_result"]["ok"]:
+                best_attempt = attempt
+            else:
+                best_attempt = _best_attempt(attempts)
 
     trace_payload = {
         "instance_id": task.instance_id,
@@ -1896,12 +1905,227 @@ def _aggregate_grain_guidance(
     )
 
 
+def _metric_source_guidance(
+    task: Task,
+    intent: Intent,
+    table_schemas: dict[str, TableSchema],
+) -> str | None:
+    """Return task-aware guidance for choosing metric source columns."""
+
+    if not table_schemas:
+        return None
+
+    task_text = " ".join(
+        [
+            task.question,
+            intent.summary,
+            intent.output_expectation,
+            " ".join(intent.metrics),
+            " ".join(intent.filters),
+            " ".join(intent.assumptions),
+        ]
+    )
+    if not _looks_metric_source_sensitive(task_text):
+        return None
+
+    table_lines: list[str] = []
+    for table_name in sorted(table_schemas):
+        table = table_schemas[table_name]
+        metric_columns = [
+            column for column in table.columns if _column_looks_native_metric(column)
+        ]
+        if not metric_columns:
+            continue
+        metric_columns = sorted(
+            metric_columns,
+            key=lambda column: _metric_column_sort_key(column, task_text),
+        )
+        grain_columns = [
+            column.name for column in table.columns if _column_looks_grain_or_filter_column(column)
+        ]
+        table_identity = table.full_name or table_name
+        metrics_preview = ", ".join(column.name for column in metric_columns[:6])
+        if grain_columns:
+            grain_preview = ", ".join(grain_columns[:8])
+            table_lines.append(
+                f"- {table_identity}: native metrics [{metrics_preview}]; "
+                f"grain/filter/time columns [{grain_preview}]"
+            )
+        else:
+            table_lines.append(f"- {table_identity}: native metrics [{metrics_preview}]")
+        if len(table_lines) >= 8:
+            break
+
+    if not table_lines:
+        return None
+
+    return (
+        "Choose the metric source at the requested answer grain. Prefer a native metric "
+        "column on a table that already has the needed grouping keys, time key, and "
+        "filters when its semantics match the question. Join lower-grain detail tables "
+        "only when the task requires detail-level filters, grouping, output columns, an "
+        "explicit formula, or no suitable native metric exists.\n"
+        "When several native metric columns exist, choose by column-name semantics from "
+        "the question; do not treat subtotal, total due, tax, freight, or line-item "
+        "formulas as interchangeable. Candidate metric columns below are ordered by "
+        "semantic fit to the task text.\n"
+        "Native metric candidates in selected tables:\n"
+        + "\n".join(table_lines)
+    )
+
+
+def _looks_metric_source_sensitive(text: str) -> bool:
+    """Return True when the task likely depends on choosing the right metric source."""
+
+    normalized = text.lower()
+    return any(
+        token in normalized
+        for token in (
+            "amount",
+            "annual",
+            "average",
+            "balance",
+            "compare",
+            "cost",
+            "difference",
+            "fee",
+            "freight",
+            "metric",
+            "payment",
+            "price",
+            "quota",
+            "rate",
+            "revenue",
+            "sales",
+            "sum",
+            "tax",
+            "total",
+            "value",
+        )
+    )
+
+
+def _column_looks_native_metric(column: Any) -> bool:
+    """Return True for columns that look like stored business metrics."""
+
+    if not _column_looks_numeric_like(column.type):
+        return False
+    if _column_looks_key_like(column.name):
+        return False
+    normalized = column.name.lower().replace("_", "")
+    return any(
+        token in normalized
+        for token in (
+            "amount",
+            "amt",
+            "balance",
+            "cost",
+            "due",
+            "fare",
+            "fee",
+            "freight",
+            "price",
+            "quota",
+            "rate",
+            "revenue",
+            "sales",
+            "subtotal",
+            "tax",
+            "total",
+            "value",
+        )
+    )
+
+
+def _metric_column_sort_key(column: Any, task_text: str) -> tuple[int, str]:
+    """Rank metric columns so prompt candidates lead with better semantic matches."""
+
+    normalized_text = task_text.lower()
+    normalized_name = column.name.lower().replace("_", "")
+    score = 0
+
+    if "quota" in normalized_text and "quota" in normalized_name:
+        score += 8
+    if "sales" in normalized_text and "sales" in normalized_name:
+        score += 6
+    if "revenue" in normalized_text and "revenue" in normalized_name:
+        score += 6
+    if "total" in normalized_text and "total" in normalized_name:
+        score += 5
+    if "amount" in normalized_text and ("amount" in normalized_name or "amt" in normalized_name):
+        score += 5
+    if "due" in normalized_text and "due" in normalized_name:
+        score += 5
+    if "tax" in normalized_text and "tax" in normalized_name:
+        score += 5
+    if any(token in normalized_text for token in ("freight", "shipping")) and "freight" in normalized_name:
+        score += 5
+
+    if "subtotal" in normalized_name and not any(
+        token in normalized_text for token in ("subtotal", "sub total", "net", "pre-tax", "pretax")
+    ):
+        score -= 3
+    if any(token in normalized_name for token in ("tax", "freight")) and not any(
+        token in normalized_text for token in ("tax", "freight", "shipping")
+    ):
+        score -= 4
+
+    return (-score, normalized_name)
+
+
+def _column_looks_numeric_like(column_type: str | None) -> bool:
+    """Return True when a schema type appears numeric."""
+
+    if column_type is None:
+        return False
+    lowered = column_type.lower()
+    return any(
+        token in lowered
+        for token in ("number", "numeric", "decimal", "int", "float", "double", "real")
+    )
+
+
+def _column_looks_grain_or_filter_column(column: Any) -> bool:
+    """Return True for columns likely to define grouping, time, joins, or filters."""
+
+    normalized = column.name.lower()
+    return any(
+        token in normalized
+        for token in (
+            "date",
+            "time",
+            "year",
+            "month",
+            "day",
+            "week",
+            "quarter",
+            "period",
+            "id",
+            "key",
+            "code",
+            "name",
+            "type",
+            "status",
+            "category",
+            "group",
+        )
+    )
+
+
 def _grain_guidance_block(guidance: str | None) -> str:
     """Render an optional grain hint as a prompt section."""
 
     if not guidance:
         return ""
     return f"Grain guidance:\n{guidance}\n\n"
+
+
+def _metric_source_guidance_block(guidance: str | None) -> str:
+    """Render optional metric source guidance as a prompt section."""
+
+    if not guidance:
+        return ""
+    return f"Metric source guidance:\n{guidance}\n\n"
 
 
 def _count_distinct_target(sql: str) -> str | None:
@@ -2033,14 +2257,17 @@ def _question_mentions_literal(question_text: str, literal: str) -> bool:
     normalized_literal = _normalized_text(literal)
     if not normalized_literal:
         return False
-    if normalized_literal in question_text:
-        return True
 
     literal_tokens = re.findall(r"[a-z0-9]+", normalized_literal)
     if not literal_tokens:
         return False
-
     question_tokens = set(re.findall(r"[a-z0-9]+", question_text))
+    if len(normalized_literal) < 3 or any(len(token) < 3 for token in literal_tokens):
+        return all(token in question_tokens for token in literal_tokens)
+
+    if normalized_literal in question_text:
+        return True
+
     return all(token in question_tokens for token in literal_tokens)
 
 
@@ -2199,6 +2426,7 @@ def _sql_generation_prompt(
     docs_context: str,
     *,
     aggregate_grain_guidance: str | None = None,
+    metric_source_guidance: str | None = None,
 ) -> str:
     """Build the SQL-generation prompt body."""
 
@@ -2211,6 +2439,7 @@ def _sql_generation_prompt(
         f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
         f"{grounded_literal_block}"
         f"{_grain_guidance_block(aggregate_grain_guidance)}"
+        f"{_metric_source_guidance_block(metric_source_guidance)}"
         "Write the SQL using only the reference context above."
     )
 
@@ -2223,6 +2452,7 @@ def _sql_repair_prompt(
     docs_context: str,
     *,
     aggregate_grain_guidance: str | None = None,
+    metric_source_guidance: str | None = None,
 ) -> str:
     """Build a repair prompt using validation or execution feedback."""
 
@@ -2238,6 +2468,7 @@ def _sql_repair_prompt(
         f"Execution:\n{json.dumps(attempt['execution_result'], indent=2, sort_keys=True)}\n\n"
         f"{grounded_literal_block}"
         f"{_grain_guidance_block(aggregate_grain_guidance)}"
+        f"{_metric_source_guidance_block(metric_source_guidance)}"
     )
 
 
@@ -2247,6 +2478,8 @@ def _critic_prompt(
     attempt: dict[str, Any],
     sql_reference_context: str,
     docs_context: str,
+    *,
+    metric_source_guidance: str | None = None,
 ) -> str:
     """Build the critic prompt using the current best SQL and result profile."""
 
@@ -2258,6 +2491,7 @@ def _critic_prompt(
         f"Question: {task.question}\n\n"
         f"Answer contract:\n{intent.model_dump_json(indent=2)}\n\n"
         f"{grounded_literal_block}"
+        f"{_metric_source_guidance_block(metric_source_guidance)}"
         f"SQL:\n{attempt['sql']}\n\n"
         "Candidate assumptions:\n"
         f"{json.dumps(attempt.get('assumptions', []), indent=2, sort_keys=True)}\n\n"
@@ -2307,6 +2541,7 @@ def _candidate_comparison_prompt(
     docs_context: str,
     *,
     aggregate_grain_guidance: str | None = None,
+    metric_source_guidance: str | None = None,
     baseline_stage: str | None,
 ) -> str:
     """Build the comparison prompt for executable candidates."""
@@ -2321,6 +2556,7 @@ def _candidate_comparison_prompt(
         f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
         f"{grounded_literal_block}"
         f"{_grain_guidance_block(aggregate_grain_guidance)}"
+        f"{_metric_source_guidance_block(metric_source_guidance)}"
         f"Baseline stage: {baseline_stage or 'unknown'}\n\n"
         "Executable candidates:\n"
         f"{json.dumps(comparison_candidates, indent=2, sort_keys=True)}\n\n"
@@ -2363,6 +2599,8 @@ def _semantic_repair_prompt(
     critic: ConfidenceReport,
     sql_reference_context: str,
     docs_context: str,
+    *,
+    metric_source_guidance: str | None = None,
 ) -> str:
     """Build the repair prompt for one critic-triggered retry."""
 
@@ -2374,6 +2612,7 @@ def _semantic_repair_prompt(
         f"Question: {task.question}\n\n"
         f"Current answer contract:\n{intent.model_dump_json(indent=2)}\n\n"
         f"{grounded_literal_block}"
+        f"{_metric_source_guidance_block(metric_source_guidance)}"
         f"Current SQL:\n{attempt['sql']}\n\n"
         "Candidate assumptions:\n"
         f"{json.dumps(attempt.get('assumptions', []), indent=2, sort_keys=True)}\n\n"

@@ -9,6 +9,8 @@ Look for:
 - wrong shape
 - missing filters
 - suspicious aggregations
+- metric-source mismatches, such as reconstructing a business metric from lower-grain detail rows when a native metric exists at the requested answer grain
+- metric columns whose semantics do not match the question, such as confusing subtotal, total due, tax, freight, or line-item formulas
 - empty or obviously incorrect results
 
 Recommend repair only when there is a concrete reason.
