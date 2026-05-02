@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from progress_ui import (
+from sol01.progress_ui import (
     Record,
     _status_dot_label,
     _status_dot_style,

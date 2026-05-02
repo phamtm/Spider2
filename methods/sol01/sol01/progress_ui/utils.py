@@ -1,0 +1,28 @@
+from __future__ import annotations
+
+from typing import Any
+
+import pandas as pd
+
+
+def is_missing_value(value: Any) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value == ""
+    missing = pd.isna(value)
+    return bool(missing) if isinstance(missing, (bool, int)) else False
+
+
+def missing_to_na(value: Any) -> Any:
+    if is_missing_value(value):
+        return pd.NA
+    return value
+
+
+def normalize_tag_values(value: Any) -> list[str]:
+    if isinstance(value, (list, tuple, set)):
+        return [str(tag) for tag in value if str(tag)]
+    if is_missing_value(value):
+        return []
+    return [str(value)]
