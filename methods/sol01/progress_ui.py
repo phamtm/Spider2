@@ -1176,9 +1176,15 @@ def render_question_detail(row: dict[str, Any] | None) -> None:
         if not _is_missing_value(row.get("diagnostics")):
             _render_question_field("Diagnostics", row["diagnostics"])
 
-        _render_question_field(
-            "Source",
-            f"`{row['source_path'] if not _is_missing_value(row['source_path']) else '—'}`",
+        source_path = row["source_path"] if not _is_missing_value(row["source_path"]) else "—"
+        st.markdown(
+            f"""
+            <div class="question-source">
+              <span class="question-source-label">Source</span>
+              <span class="question-source-value">{html.escape(str(source_path))}</span>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
     st.markdown('<div class="section-spacer"></div>', unsafe_allow_html=True)
     render_llm_call_log_panel(row)
@@ -1500,6 +1506,12 @@ def apply_page_style() -> None:
         .stApp {
             background: #080808;
             color: #f3f4f6;
+            overflow-x: hidden;
+        }
+        [data-testid="stAppViewContainer"],
+        [data-testid="stMainBlockContainer"],
+        [data-testid="stVerticalBlock"] {
+            overflow-x: hidden;
         }
         [data-testid="stHeader"] {
             background: rgba(8, 8, 8, 0.85);
@@ -1573,6 +1585,26 @@ def apply_page_style() -> None:
         .question-tag-empty {
             background: rgba(255, 255, 255, 0.04);
             color: rgba(255, 255, 255, 0.6);
+        }
+        .question-source {
+            margin: 8px 0 0 0;
+        }
+        .question-source-label {
+            display: block;
+            font-size: 0.78rem;
+            color: rgba(255, 255, 255, 0.65);
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0;
+        }
+        .question-source-value {
+            display: block;
+            font-family: monospace;
+            font-size: 0.9rem;
+            color: #dbeafe;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            white-space: normal;
         }
         @media (max-width: 1100px) {
             .question-summary {
