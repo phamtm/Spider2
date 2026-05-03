@@ -1524,7 +1524,8 @@ def test_metric_source_guidance_prefers_native_metric_at_answer_grain():
     assert "subtotal" in guidance
     assert "native metrics [totaldue, subtotal]" in guidance
     assert "column-name semantics" in guidance
-    assert "Join lower-grain detail tables only" in guidance
+    assert "Join lower-grain detail tables when" in guidance
+    assert "clearly grounded" in guidance
 
 
 def test_sql_generation_prompt_includes_metric_source_guidance():

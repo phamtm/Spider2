@@ -755,9 +755,10 @@ def _metric_source_guidance(
     return (
         "Choose the metric source at the requested answer grain. Prefer a native metric "
         "column on a table that already has the needed grouping keys, time key, and "
-        "filters when its semantics match the question. Join lower-grain detail tables "
-        "only when the task requires detail-level filters, grouping, output columns, an "
-        "explicit formula, or no suitable native metric exists.\n"
+        "filters only when that column is clearly grounded in the answer contract or its "
+        "semantics unambiguously match the question. Join lower-grain detail tables when "
+        "the task requires detail-level filters, grouping, output columns, an explicit "
+        "formula, or no clearly grounded native metric exists.\n"
         "When several native metric columns exist, choose by column-name semantics from "
         "the question; do not treat subtotal, total due, tax, freight, or line-item "
         "formulas as interchangeable. Candidate metric columns below are ordered by "

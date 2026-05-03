@@ -98,9 +98,13 @@ def test_retrieve_schema_llm_only_uses_schema_selector_and_filters_unknown_table
     assert selection.candidate_table_count == 11
     assert llm.calls[0]["prompt_name"] == "schema_selection"
     assert "Schema summary:" in llm.calls[0]["user_prompt"]
-    assert "Choose every table needed" in llm.calls[0]["user_prompt"]
-    assert "requested answer grain" in llm.calls[0]["user_prompt"]
+    assert "plausibly required" in llm.calls[0]["user_prompt"]
+    assert "join and bridge tables" in llm.calls[0]["user_prompt"]
+    assert "clearly irrelevant" in llm.calls[0]["user_prompt"]
+    assert "clearly grounded" in llm.calls[0]["user_prompt"]
+    assert "unambiguously match" in llm.calls[0]["user_prompt"]
     assert "column-name semantics" in llm.calls[0]["user_prompt"]
+    assert "smallest" not in llm.calls[0]["user_prompt"].lower()
     assert "at most" not in llm.calls[0]["user_prompt"].lower()
     assert "missing_table" not in selection.selected_tables
 

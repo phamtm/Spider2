@@ -3,8 +3,8 @@ Compare the executable SQL candidates and pick the one that is closest to the an
 Use the question, reference context, and result profiles to decide which candidate should win.
 Prefer the candidate that best matches the requested output shape, grain, filters, and table usage.
 Prefer the candidate whose assumptions and constraint ledger are best grounded in the answer contract.
-For metric questions, prefer candidates that use a native metric column at the requested answer grain when its semantics match the question.
-Do not prefer a lower-grain detail reconstruction unless the task needs detail filters, grouping, output fields, an explicit formula, or no suitable native metric exists.
+For metric questions, prefer candidates that use a native metric column at the requested answer grain only when that column is clearly grounded in the answer contract or its semantics unambiguously match the question.
+Do not penalize a lower-grain detail reconstruction when no clearly grounded native metric exists.
 When several native metric columns exist, choose by column-name semantics from the question; do not treat subtotal, total due, tax, freight, or line-item formulas as interchangeable.
 Do not reward an executable candidate for adding unrequested filters, current/latest rules, dedupe rules, status rules, limits, or row narrowing.
 If the contract includes `native_value_terms`, prefer candidates that use those values as native column values instead of inventing a derived business class.

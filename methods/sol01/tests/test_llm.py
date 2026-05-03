@@ -111,6 +111,7 @@ def test_default_sql_prompts_keep_grouped_identifiers():
     repair_prompt = client.load_prompt("sql_repair")
     critic_prompt = client.load_prompt("result_critic")
     comparison_prompt = client.load_prompt("result_comparison")
+    schema_selection_prompt = client.load_prompt("schema_selection")
 
     assert "grouped superlatives" in intent_prompt.text
     assert "highest number in any month" in intent_prompt.text
@@ -119,15 +120,24 @@ def test_default_sql_prompts_keep_grouped_identifiers():
     assert "winning group key plus the metric" in generation_prompt.text
     assert "requested answer grain" in generation_prompt.text
     assert "column-name semantics" in generation_prompt.text
+    assert "clearly grounded" in generation_prompt.text
     assert "stable identifier and a display label" in repair_prompt.text
     assert "winning group key plus the metric" in repair_prompt.text
     assert "native metric column" in repair_prompt.text
     assert "column-name semantics" in repair_prompt.text
+    assert "clearly grounded" in repair_prompt.text
     assert "metric-source mismatches" in critic_prompt.text
     assert "line-item formulas" in critic_prompt.text
+    assert "clearly grounded" in critic_prompt.text
+    assert "unambiguously match" in critic_prompt.text
     assert "preserves a stable grouping identifier" in comparison_prompt.text
     assert "native metric column" in comparison_prompt.text
     assert "column-name semantics" in comparison_prompt.text
+    assert "clearly grounded" in comparison_prompt.text
+    assert "plausibly required" in schema_selection_prompt.text
+    assert "join and bridge tables" in schema_selection_prompt.text
+    assert "clearly grounded" in schema_selection_prompt.text
+    assert "clearly irrelevant" in schema_selection_prompt.text
 
 
 def test_build_model_uses_openrouter_wrapper_for_string_override():

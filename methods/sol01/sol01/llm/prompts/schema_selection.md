@@ -1,15 +1,15 @@
 # Schema Selection
 
-Choose the smallest useful set of tables for the question.
+Include all tables that are plausibly required to answer the question, including join and bridge tables.
 
 Use:
 - the question
 - the retrieved schema candidates
 - any metric or document context already provided
 
-Prefer the tables that are directly needed for joins, filters, and final output.
+Include every table that could plausibly be needed for joins, filters, or final output. Omit only tables that are clearly irrelevant to the question.
 
-For metric questions, choose tables at the requested answer grain:
-- if a table already has the needed grouping keys, time key, filters, and a native metric column whose semantics match the question, prefer that table as the metric source
-- include lower-grain detail tables only when the question needs detail-level filters, grouping, output columns, an explicit formula, or no suitable native metric exists
+For metric questions, include tables at every grain that may be needed:
+- if a table has the needed grouping keys, time key, filters, and a native metric column that is clearly grounded in the answer contract or whose semantics unambiguously match the question, that table is the preferred metric source
+- always also include lower-grain detail tables when the question may need detail-level filters, grouping, output columns, an explicit formula, or when no clearly grounded native metric exists
 - when several native metric columns exist, choose by column-name semantics from the question; do not treat subtotal, total due, tax, freight, or line-item formulas as interchangeable

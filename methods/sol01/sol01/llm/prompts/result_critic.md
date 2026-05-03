@@ -9,7 +9,7 @@ Look for:
 - wrong shape
 - missing filters
 - suspicious aggregations
-- metric-source mismatches, such as reconstructing a business metric from lower-grain detail rows when a native metric exists at the requested answer grain
+- metric-source mismatches, such as reconstructing a business metric from lower-grain detail rows when a clearly grounded native metric exists at the requested answer grain, or conversely using a native metric column whose semantics do not unambiguously match the question when a detail reconstruction would be more accurate
 - metric columns whose semantics do not match the question, such as confusing subtotal, total due, tax, freight, or line-item formulas
 - empty or obviously incorrect results
 
