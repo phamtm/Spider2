@@ -678,6 +678,49 @@ def _verify_aggregates(
     return best_attempt, verification_payload, aggregate_comparison_payload
 
 
+def _run_critic_review(
+    ctx: _TaskCtx,
+    attempt: dict[str, Any],
+    *,
+    log_label: str = "critic",
+) -> ConfidenceReport:
+    """Run a critic review on *attempt* and store the result in place.
+
+    Mutates ``attempt["critic"]`` with the serialised ConfidenceReport.
+    """
+
+    logger.info(
+        "critic requested",
+        instance_id=ctx.task.instance_id,
+        stage=log_label,
+        best_stage=attempt["stage"],
+    )
+    critic = _run_prompt(
+        ctx.client,
+        prompt_hashes=ctx.prompt_hashes,
+        prompt_name="result_critic",
+        output_type=ConfidenceReport,
+        user_prompt=_critic_prompt(
+            ctx.task,
+            ctx.intent,
+            attempt,
+            ctx.sql_reference_context,
+            ctx.docs_context,
+            metric_source_guidance=ctx.metric_source_guidance,
+        ),
+    )
+    attempt["critic"] = critic.model_dump(mode="json")
+    logger.info(
+        "critic reviewed",
+        instance_id=ctx.task.instance_id,
+        stage=log_label,
+        should_repair=critic.should_repair,
+        confidence=critic.confidence,
+        issues=critic.issues,
+    )
+    return critic
+
+
 def _apply_critic_repair(
     ctx: _TaskCtx,
     attempts: list[dict[str, Any]],
@@ -689,47 +732,37 @@ def _apply_critic_repair(
     """Run the critic and apply a semantic repair if needed; appends to attempts in place.
 
     Also sets best_attempt["critic"] in place when the critic runs.
-    semantic_repairs acts as a budget: 0 skips the critic entirely, 1 (default) runs it once.
+    semantic_repairs acts as a budget: 0 skips the critic entirely; >= 1 enables
+    the initial critic review.  When a critic repair succeeds and changes the
+    selected candidate, a second no-repair traceability review runs on the new
+    candidate.
+
+    The review itself always runs on the final executable candidate, even when
+    the attempt budget is exhausted.  Only the repair step is budget-gated.
+    When the budget is exhausted the critic report is still saved alongside a
+    ``repair_skipped_reason`` string for traceability.
     """
 
     if (
         best_attempt is None
         or not best_attempt["execution_result"]["ok"]
         or semantic_repairs < 1
-        or len(attempts) >= max_attempts
     ):
         return best_attempt
 
-    logger.info(
-        "critic requested",
-        instance_id=ctx.task.instance_id,
-        stage="critic",
-        best_stage=best_attempt["stage"],
-    )
-    critic = _run_prompt(
-        ctx.client,
-        prompt_hashes=ctx.prompt_hashes,
-        prompt_name="result_critic",
-        output_type=ConfidenceReport,
-        user_prompt=_critic_prompt(
-            ctx.task,
-            ctx.intent,
-            best_attempt,
-            ctx.sql_reference_context,
-            ctx.docs_context,
-            metric_source_guidance=ctx.metric_source_guidance,
-        ),
-    )
-    best_attempt["critic"] = critic.model_dump(mode="json")
-    logger.info(
-        "critic reviewed",
-        instance_id=ctx.task.instance_id,
-        should_repair=critic.should_repair,
-        confidence=critic.confidence,
-        issues=critic.issues,
-    )
+    critic = _run_critic_review(ctx, best_attempt)
 
     if not critic.should_repair:
+        return best_attempt
+
+    budget_exhausted = len(attempts) >= max_attempts
+    if budget_exhausted:
+        best_attempt["repair_skipped_reason"] = "attempt budget exhausted"
+        logger.info(
+            "critic repair skipped",
+            instance_id=ctx.task.instance_id,
+            reason="attempt budget exhausted",
+        )
         return best_attempt
 
     logger.info(
@@ -763,9 +796,24 @@ def _apply_critic_repair(
     )
     attempts.append(attempt)
     _log_candidate(ctx.task.instance_id, attempt)
-    if attempt["execution_result"]["ok"]:
-        return attempt
-    return _best_attempt(attempts)
+
+    new_best = attempt if attempt["execution_result"]["ok"] else _best_attempt(attempts)
+
+    if new_best is not attempt:
+        return new_best
+
+    try:
+        final_critic = _run_critic_review(ctx, new_best, log_label="critic_final_review")
+        if final_critic.should_repair:
+            new_best["repair_skipped_reason"] = "final review after critic repair"
+    except Exception:
+        logger.warning(
+            "final critic review failed",
+            instance_id=ctx.task.instance_id,
+            exc_info=True,
+        )
+
+    return new_best
 
 
 def _write_task_output(

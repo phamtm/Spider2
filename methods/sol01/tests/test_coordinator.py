@@ -1887,7 +1887,12 @@ def test_run_task_keeps_successful_critic_repair_on_score_tie(
                     issues=["Use the repaired source."],
                     should_repair=True,
                     repair_focus="replace initial SQL",
-                )
+                ),
+                ConfidenceReport(
+                    confidence=0.95,
+                    issues=[],
+                    should_repair=False,
+                ),
             ],
             "sql_repair": [
                 SQLCandidate(
@@ -1927,6 +1932,10 @@ def test_run_task_keeps_successful_critic_repair_on_score_tie(
     trace = json.loads((run_paths.traces_dir / "sf_local099.json").read_text(encoding="utf-8"))
     assert answer.status == "success"
     assert trace["final_sql"].endswith("/* fixed */")
+    critic_repair_attempt = next(
+        a for a in trace["attempts"] if a["stage"] == "critic_repair"
+    )
+    assert critic_repair_attempt["critic"]["confidence"] == 0.95
 
 
 def test_attempt_score_prefers_output_shape_over_candidate_confidence():
@@ -2439,3 +2448,370 @@ def test_semantic_repair_prompt_rederives_from_original_task_contract():
     assert "native_value_terms" in prompt
     assert "Candidate constraint ledger:" in prompt
     assert "SQL adds an ungrounded latest snapshot filter." in prompt
+
+
+def test_critic_review_runs_when_budget_exhausted(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    task = Task(instance_id="sf_local200", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("critic-exhausted-budget-run", outputs_root=tmp_path)
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Find customer totals.",
+                    entities=["customers"],
+                    metrics=["total amount"],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="customer and total columns",
+                    assumptions=[],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE}",
+                    explanation="Initial answer.",
+                    assumptions=[],
+                    confidence=0.9,
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(
+                    confidence=0.5,
+                    issues=["Suspicious aggregation."],
+                    should_repair=True,
+                    repair_focus="fix aggregation",
+                ),
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="TEST_DB",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+    _patch_db_index(monkeypatch, {})
+    monkeypatch.setattr(
+        "sol01.candidates.evaluator.fetch_query_dataframe",
+        lambda sql, db: pd.DataFrame([{"customer": "bob", "amount": 12.0}]),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+        max_attempts=1,
+    )
+
+    trace = json.loads((run_paths.traces_dir / "sf_local200.json").read_text(encoding="utf-8"))
+    assert answer.status == "success"
+    initial_attempt = trace["attempts"][0]
+    assert initial_attempt["critic"]["confidence"] == 0.5
+    assert initial_attempt["critic"]["should_repair"] is True
+    assert initial_attempt["repair_skipped_reason"] == "attempt budget exhausted"
+    assert trace["final_sql"] == f"SELECT customer, amount FROM {SALES_TABLE}"
+
+
+def test_critic_no_repair_still_saves_report(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    task = Task(instance_id="sf_local201", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("critic-no-repair-run", outputs_root=tmp_path)
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Find customer totals.",
+                    entities=["customers"],
+                    metrics=["total amount"],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="customer and total columns",
+                    assumptions=[],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE}",
+                    explanation="Initial answer.",
+                    assumptions=[],
+                    confidence=0.9,
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(
+                    confidence=0.95,
+                    issues=[],
+                    should_repair=False,
+                ),
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="TEST_DB",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+    _patch_db_index(monkeypatch, {})
+    monkeypatch.setattr(
+        "sol01.candidates.evaluator.fetch_query_dataframe",
+        lambda sql, db: pd.DataFrame([{"customer": "bob", "amount": 12.0}]),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+        max_attempts=1,
+    )
+
+    trace = json.loads((run_paths.traces_dir / "sf_local201.json").read_text(encoding="utf-8"))
+    assert answer.status == "success"
+    initial_attempt = trace["attempts"][0]
+    assert initial_attempt["critic"]["confidence"] == 0.95
+    assert initial_attempt["critic"]["should_repair"] is False
+    assert "repair_skipped_reason" not in initial_attempt
+
+
+def test_critic_review_after_repair_marks_skipped_when_should_repair(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    task = Task(instance_id="sf_local202", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("critic-repair-final-review-run", outputs_root=tmp_path)
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Find customer totals.",
+                    entities=["customers"],
+                    metrics=["total amount"],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="customer and total columns",
+                    assumptions=[],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE}",
+                    explanation="Initial answer.",
+                    assumptions=[],
+                    confidence=0.9,
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(
+                    confidence=0.6,
+                    issues=["Missing GROUP BY."],
+                    should_repair=True,
+                    repair_focus="add group by",
+                ),
+                ConfidenceReport(
+                    confidence=0.7,
+                    issues=["Still could be improved."],
+                    should_repair=True,
+                    repair_focus="minor tweak",
+                ),
+            ],
+            "sql_repair": [
+                SQLCandidate(
+                    sql=f"SELECT customer, SUM(amount) FROM {SALES_TABLE} GROUP BY customer",
+                    explanation="Repaired with GROUP BY.",
+                    assumptions=[],
+                    confidence=0.9,
+                )
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="TEST_DB",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+    _patch_db_index(monkeypatch, {})
+    monkeypatch.setattr(
+        "sol01.candidates.evaluator.fetch_query_dataframe",
+        lambda sql, db: pd.DataFrame([{"customer": "bob", "SUM(AMOUNT)": 12.0}]),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    trace = json.loads((run_paths.traces_dir / "sf_local202.json").read_text(encoding="utf-8"))
+    assert answer.status == "success"
+    critic_repair_attempt = next(
+        a for a in trace["attempts"] if a["stage"] == "critic_repair"
+    )
+    assert critic_repair_attempt["critic"]["should_repair"] is True
+    assert critic_repair_attempt["repair_skipped_reason"] == "final review after critic repair"
+
+
+def test_critic_review_preserves_original_when_repair_fails_execution(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    task = Task(instance_id="sf_local203", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("critic-repair-fails-run", outputs_root=tmp_path)
+
+    call_count = {"fetch": 0}
+
+    def _fetch(sql, db):
+        call_count["fetch"] += 1
+        if call_count["fetch"] == 1:
+            return pd.DataFrame([{"customer": "bob", "amount": 12.0}])
+        raise RuntimeError("SQL execution error")
+
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Find customer totals.",
+                    entities=["customers"],
+                    metrics=["total amount"],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="customer and total columns",
+                    assumptions=[],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE}",
+                    explanation="Initial answer.",
+                    assumptions=[],
+                    confidence=0.9,
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(
+                    confidence=0.5,
+                    issues=["Needs GROUP BY."],
+                    should_repair=True,
+                    repair_focus="add group by",
+                ),
+            ],
+            "sql_repair": [
+                SQLCandidate(
+                    sql=f"SELECT customer, SUM(amount) FROM {SALES_TABLE} GROUP BY customer",
+                    explanation="Repaired.",
+                    assumptions=[],
+                    confidence=0.9,
+                )
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="TEST_DB",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+    _patch_db_index(monkeypatch, {})
+    monkeypatch.setattr("sol01.candidates.evaluator.fetch_query_dataframe", _fetch)
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    trace = json.loads((run_paths.traces_dir / "sf_local203.json").read_text(encoding="utf-8"))
+    assert answer.status == "success"
+    initial_attempt = trace["attempts"][0]
+    assert initial_attempt["stage"] == "initial_1"
+    assert initial_attempt["critic"]["should_repair"] is True
+    assert "repair_skipped_reason" not in initial_attempt
+    assert trace["final_sql"] == f"SELECT customer, amount FROM {SALES_TABLE}"
+
+
+def test_semantic_repairs_zero_produces_no_critic_in_trace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    task = Task(instance_id="sf_local204", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("no-semantic-repairs-run", outputs_root=tmp_path)
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Find customer totals.",
+                    entities=["customers"],
+                    metrics=["total amount"],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="customer and total columns",
+                    assumptions=[],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE}",
+                    explanation="Initial answer.",
+                    assumptions=[],
+                    confidence=0.9,
+                )
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="TEST_DB",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+    _patch_db_index(monkeypatch, {})
+    monkeypatch.setattr(
+        "sol01.candidates.evaluator.fetch_query_dataframe",
+        lambda sql, db: pd.DataFrame([{"customer": "bob", "amount": 12.0}]),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+        semantic_repairs=0,
+    )
+
+    trace = json.loads((run_paths.traces_dir / "sf_local204.json").read_text(encoding="utf-8"))
+    assert answer.status == "success"
+    assert "critic" not in trace["attempts"][0]
