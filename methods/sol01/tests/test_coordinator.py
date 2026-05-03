@@ -866,6 +866,16 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
                     confidence=0.7,
                 )
             ],
+            "result_comparison": [
+                CandidateComparisonReport(
+                    baseline_stage="aggregate_repair",
+                    preferred_stage="aggregate_repair",
+                    compared_stages=["initial_1", "aggregate_repair"],
+                    reasons=[
+                        "aggregate_repair widens the country filter and returns a plausible count."
+                    ],
+                )
+            ],
             "result_critic": [
                 ConfidenceReport(confidence=0.9, issues=[], should_repair=False, repair_focus=None)
             ],
@@ -946,6 +956,235 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
     assert "value variants" in captured_prompts["aggregate_verification"][0]
     assert "grain" in captured_prompts["aggregate_verification"][0]
     assert "Verification:" in captured_prompts["sql_repair"][0]
+    assert trace["candidate_comparisons"][0]["phase"] == "aggregate_repair"
+    assert trace["candidate_comparisons"][0]["preferred_stage"] == "aggregate_repair"
+
+
+def test_run_task_aggregate_repair_loses_comparison(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
+):
+    task = Task(
+        instance_id="sf_agg_lose",
+        db="TEST_DB",
+        question="Total sales per customer.",
+    )
+    run_paths = ensure_run_paths("agg-lose-run", outputs_root=tmp_path)
+    captured_prompts: dict[str, list[str]] = {}
+
+    call_count = 0
+
+    def fake_fetch(sql: str, *, db: str) -> pd.DataFrame:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return pd.DataFrame([{"TOTAL": 0}])
+        return pd.DataFrame(
+            [
+                {"customer": "bob", "amount": 12.0},
+                {"customer": "alice", "amount": 10.5},
+            ]
+        )
+
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Total sales per customer.",
+                    entities=["sales"],
+                    metrics=["sum amount"],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="customer and total",
+                    assumptions=[],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=(
+                        f"SELECT customer, SUM(amount) AS total "
+                        f"FROM {SALES_TABLE} GROUP BY customer"
+                    ),
+                    explanation="Group by customer.",
+                    assumptions=[],
+                    confidence=0.9,
+                )
+            ],
+            "aggregate_verification": [
+                ConfidenceReport(
+                    confidence=0.3,
+                    issues=["Zero total looks wrong."],
+                    should_repair=True,
+                    repair_focus="fix the aggregation",
+                )
+            ],
+            "sql_repair": [
+                SQLCandidate(
+                    sql=(
+                        f"SELECT customer, SUM(amount) AS total FROM {SALES_TABLE} "
+                        "GROUP BY customer HAVING SUM(amount) > 20"
+                    ),
+                    explanation="Filter to high-value customers.",
+                    assumptions=[],
+                    confidence=0.5,
+                )
+            ],
+            "result_comparison": [
+                CandidateComparisonReport(
+                    baseline_stage="aggregate_repair",
+                    preferred_stage="initial_1",
+                    compared_stages=["initial_1", "aggregate_repair"],
+                    reasons=[
+                        "initial_1 returns all customers; "
+                        "aggregate_repair drops rows arbitrarily."
+                    ],
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(confidence=0.9, issues=[], should_repair=False, repair_focus=None)
+            ],
+        },
+        prompts=captured_prompts,
+    )
+
+    monkeypatch.setattr(
+        "sol01.candidates.evaluator.fetch_query_dataframe", fake_fetch
+    )
+    monkeypatch.setattr(
+        "sol01.candidates.verification._fetch_query_dataframe", fake_fetch
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="test_db",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="sales",
+            confidence=0.9,
+        ),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    assert answer.status == "success"
+    trace = json.loads((run_paths.traces_dir / "sf_agg_lose.json").read_text(encoding="utf-8"))
+    assert trace["attempts"][0]["stage"] == "initial_1"
+    assert trace["attempts"][1]["stage"] == "aggregate_repair"
+    assert "GROUP BY customer" in trace["final_sql"]
+    assert "HAVING" not in trace["final_sql"]
+    assert trace["candidate_comparisons"][0]["phase"] == "aggregate_repair"
+    assert trace["candidate_comparisons"][0]["preferred_stage"] == "initial_1"
+    assert "initial_1" in captured_prompts["result_comparison"][0]
+    assert "aggregate_repair" in captured_prompts["result_comparison"][0]
+
+
+def test_run_task_aggregate_repair_falls_back_when_execution_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
+):
+    task = Task(
+        instance_id="sf_agg_fail",
+        db="TEST_DB",
+        question="Total sales.",
+    )
+    run_paths = ensure_run_paths("agg-fail-run", outputs_root=tmp_path)
+
+    call_count = 0
+
+    def fake_fetch(sql: str, *, db: str) -> pd.DataFrame:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return pd.DataFrame([{"TOTAL": 0}])
+        raise RuntimeError("invalid identifier 'BAD_COL'")
+
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Total sales.",
+                    entities=["sales"],
+                    metrics=["sum amount"],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="single total",
+                    assumptions=[],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=(
+                        f"SELECT SUM(amount) AS total FROM {SALES_TABLE}"
+                    ),
+                    explanation="Sum all amounts.",
+                    assumptions=[],
+                    confidence=0.9,
+                )
+            ],
+            "aggregate_verification": [
+                ConfidenceReport(
+                    confidence=0.2,
+                    issues=["Zero total looks wrong."],
+                    should_repair=True,
+                    repair_focus="fix the aggregation",
+                )
+            ],
+            "sql_repair": [
+                SQLCandidate(
+                    sql=(
+                        f"SELECT SUM(amount) AS total FROM {SALES_TABLE} "
+                        "GROUP BY BAD_COL"
+                    ),
+                    explanation="Group by bad column.",
+                    assumptions=[],
+                    confidence=0.3,
+                )
+            ],
+            "result_critic": [
+                ConfidenceReport(confidence=0.8, issues=[], should_repair=False, repair_focus=None)
+            ],
+        },
+    )
+
+    monkeypatch.setattr(
+        "sol01.candidates.evaluator.fetch_query_dataframe", fake_fetch
+    )
+    monkeypatch.setattr(
+        "sol01.candidates.verification._fetch_query_dataframe", fake_fetch
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="test_db",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="sales",
+            confidence=0.9,
+        ),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    assert answer.status == "success"
+    trace = json.loads(
+        (run_paths.traces_dir / "sf_agg_fail.json").read_text(encoding="utf-8")
+    )
+    assert trace["attempts"][0]["stage"] == "initial_1"
+    assert trace["attempts"][1]["stage"] == "aggregate_repair"
+    assert trace["attempts"][1]["execution_result"]["ok"] is False
+    assert trace["final_sql"] == f"SELECT SUM(amount) AS total FROM {SALES_TABLE}"
+    assert "candidate_comparisons" not in trace
+    assert "candidate_comparison" not in trace
 
 
 def test_run_task_prefers_row_count_over_distinct_entity_count(

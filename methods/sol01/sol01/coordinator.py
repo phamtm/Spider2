@@ -527,18 +527,18 @@ def _repair_failed_execution(
 def _compare_candidates(
     ctx: _TaskCtx,
     attempts: list[dict[str, Any]],
-    best_attempt: dict[str, Any] | None,
+    baseline_attempt: dict[str, Any] | None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Compare all executable candidates and return (updated_best, comparison_payload)."""
 
     executable_attempts = [a for a in attempts if a["execution_result"]["ok"]]
     if len(executable_attempts) <= 1:
-        return best_attempt, None
+        return baseline_attempt, None
 
     logger.info(
         "candidate comparison requested",
         instance_id=ctx.task.instance_id,
-        baseline_stage=best_attempt["stage"] if best_attempt is not None else None,
+        baseline_stage=baseline_attempt["stage"] if baseline_attempt is not None else None,
         executable_attempts=len(executable_attempts),
     )
     comparison = _run_prompt(
@@ -554,7 +554,7 @@ def _compare_candidates(
             ctx.docs_context,
             aggregate_grain_guidance=ctx.aggregate_grain_guidance,
             metric_source_guidance=ctx.metric_source_guidance,
-            baseline_stage=best_attempt["stage"] if best_attempt is not None else None,
+            baseline_stage=baseline_attempt["stage"] if baseline_attempt is not None else None,
         ),
     )
     comparison_payload = {
@@ -569,6 +569,7 @@ def _compare_candidates(
         compared_stages=comparison.compared_stages,
         reasons=comparison.reasons,
     )
+    best_attempt = baseline_attempt
     if comparison.preferred_stage:
         preferred_attempt = next(
             (a for a in executable_attempts if a["stage"] == comparison.preferred_stage),
@@ -585,10 +586,10 @@ def _verify_aggregates(
     best_attempt: dict[str, Any] | None,
     *,
     max_attempts: int,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
     """Verify aggregate result quality and repair if needed; appends to attempts in place.
 
-    Returns (updated_best_attempt, verification_payload).
+    Returns (updated_best_attempt, verification_payload, aggregate_comparison_payload).
     Also sets best_attempt["aggregate_verification"] in place when verification runs.
     """
 
@@ -597,11 +598,11 @@ def _verify_aggregates(
         or not best_attempt["execution_result"]["ok"]
         or len(attempts) >= max_attempts
     ):
-        return best_attempt, None
+        return best_attempt, None, None
 
     verification_reason = _aggregate_verification_reason(best_attempt)
     if verification_reason is None:
-        return best_attempt, None
+        return best_attempt, None, None
 
     logger.info(
         "aggregate verification requested",
@@ -637,7 +638,7 @@ def _verify_aggregates(
     )
 
     if not aggregate_verification.should_repair:
-        return best_attempt, verification_payload
+        return best_attempt, verification_payload, None
 
     logger.info(
         "aggregate repair requested",
@@ -669,11 +670,12 @@ def _verify_aggregates(
     )
     attempts.append(attempt)
     _log_candidate(ctx.task.instance_id, attempt)
+    aggregate_comparison_payload = None
     if attempt["execution_result"]["ok"]:
-        best_attempt = attempt
+        best_attempt, aggregate_comparison_payload = _compare_candidates(ctx, attempts, attempt)
     else:
         best_attempt = _best_attempt(attempts)
-    return best_attempt, verification_payload
+    return best_attempt, verification_payload, aggregate_comparison_payload
 
 
 def _apply_critic_repair(
@@ -776,6 +778,7 @@ def _write_task_output(
     *,
     candidate_comparison_payload: dict[str, Any] | None,
     aggregate_verification_payload: dict[str, Any] | None,
+    aggregate_comparison_payload: dict[str, Any] | None,
     live_logging_enabled: bool,
     started_at: float,
 ) -> FinalAnswer:
@@ -792,10 +795,16 @@ def _write_task_output(
         "prompt_hashes": ctx.prompt_hashes,
         "attempts": attempts,
     }
+    candidate_comparisons: list[dict[str, Any]] = []
     if candidate_comparison_payload is not None:
         trace_payload["candidate_comparison"] = candidate_comparison_payload
+        candidate_comparisons.append({"phase": "initial", **candidate_comparison_payload})
     if aggregate_verification_payload is not None:
         trace_payload["aggregate_verification"] = aggregate_verification_payload
+    if aggregate_comparison_payload is not None:
+        candidate_comparisons.append({"phase": "aggregate_repair", **aggregate_comparison_payload})
+    if candidate_comparisons:
+        trace_payload["candidate_comparisons"] = candidate_comparisons
     if live_logging_enabled:
         trace_payload["llm_call_log_path"] = str(task_llm_log_path)
 
@@ -914,7 +923,7 @@ def run_task(
     )
     best_attempt = _repair_failed_execution(ctx, attempts, best_attempt, max_attempts=max_attempts)
     best_attempt, candidate_comparison_payload = _compare_candidates(ctx, attempts, best_attempt)
-    best_attempt, aggregate_verification_payload = _verify_aggregates(
+    best_attempt, aggregate_verification_payload, aggregate_comparison_payload = _verify_aggregates(
         ctx, attempts, best_attempt, max_attempts=max_attempts
     )
     best_attempt = _apply_critic_repair(
@@ -930,6 +939,7 @@ def run_task(
         task_llm_log_path,
         candidate_comparison_payload=candidate_comparison_payload,
         aggregate_verification_payload=aggregate_verification_payload,
+        aggregate_comparison_payload=aggregate_comparison_payload,
         live_logging_enabled=live_logging_enabled,
         started_at=started_at,
     )
