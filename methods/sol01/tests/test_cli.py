@@ -88,6 +88,7 @@ def test_run_command_dispatches_expected_filters(monkeypatch):
     assert result.exit_code == 0
     assert called == {
         "run_id": "smoke-local003",
+        "selectors": [],
         "instance_id": "local003",
         "db": None,
         "question_contains": None,
@@ -98,6 +99,40 @@ def test_run_command_dispatches_expected_filters(monkeypatch):
     assert "Eval summary: 1/1 correct, missing CSV 0" in result.output
     assert "Exec time:" in result.output
     assert "- local003: PASS | task success | Question text" in result.output
+
+
+def test_run_command_dispatches_positional_selectors(monkeypatch):
+    """The run command should pass positional task selectors to the run handler."""
+
+    called: dict[str, Any] = {}
+
+    def fake_handle_run(**kwargs: Any) -> dict[str, Any]:
+        called.update(kwargs)
+        return {
+            "tasks": [
+                Task(instance_id="sf035", db="db", question="Question one"),
+                Task(instance_id="sf_bq135", db="db", question="Question two"),
+            ],
+            "results": [],
+            "eval_summary": {
+                "correct_tasks": 0,
+                "attempted_tasks": 0,
+                "missing_csv_count": 2,
+                "per_instance": [],
+            },
+        }
+
+    monkeypatch.setattr(cli, "handle_run", fake_handle_run)
+
+    result = runner.invoke(
+        cli.app,
+        ["run", "sf035", "sf_bq135", "--run-id", "selected-bugs", "--force"],
+    )
+
+    assert result.exit_code == 0
+    assert called["selectors"] == ["sf035", "sf_bq135"]
+    assert called["run_id"] == "selected-bugs"
+    assert called["force"] is True
 
 
 def test_run_command_forwards_explicit_concurrency(monkeypatch):
@@ -204,6 +239,7 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
     result = cli.handle_run(
         concurrency=None,
         run_id="smoke-local003",
+        selectors=None,
         instance_id="local003",
         db=None,
         question_contains=None,
@@ -279,6 +315,7 @@ def test_handle_run_forwards_all_expected_ids_to_persisted_eval(monkeypatch, tmp
     cli.handle_run(
         concurrency=None,
         run_id="smoke-local003",
+        selectors=None,
         instance_id=None,
         db=None,
         question_contains=None,
@@ -288,6 +325,72 @@ def test_handle_run_forwards_all_expected_ids_to_persisted_eval(monkeypatch, tmp
     )
 
     assert called["expected_instance_ids"] == ["local003", "local004"]
+
+
+def test_handle_run_uses_positional_selectors(monkeypatch):
+    """Selector runs should use select_tasks and preserve expected eval IDs."""
+
+    called: dict[str, Any] = {}
+
+    monkeypatch.setattr(
+        cli,
+        "select_tasks",
+        lambda selectors: [
+            Task(instance_id="sf035", db="db", question="q1"),
+            Task(instance_id="sf_bq135", db="db", question="q2"),
+        ],
+    )
+    monkeypatch.setattr(
+        cli.RuntimeConfig,
+        "from_env",
+        classmethod(
+            lambda cls, require_api_key=False, dotenv_path=None, concurrency=None: RuntimeConfig(
+                api_key="k"
+            )
+        ),
+    )
+
+    def fake_run_tasks(tasks, *, run_id, config, force, skip_failed):
+        called["task_ids"] = [task.instance_id for task in tasks]
+        return []
+
+    def fake_run_persisted_eval(run_id, *, expected_instance_ids=None, **kwargs):
+        called["expected_instance_ids"] = expected_instance_ids
+        return {
+            "correct_tasks": 0,
+            "attempted_tasks": 0,
+            "missing_csv_count": 2,
+            "per_instance": [],
+        }
+
+    monkeypatch.setattr(cli, "run_tasks", fake_run_tasks)
+    monkeypatch.setattr(cli, "run_persisted_eval", fake_run_persisted_eval)
+
+    cli.handle_run(
+        concurrency=None,
+        run_id="selected-bugs",
+        selectors=["sf035", "sf_bq135"],
+        instance_id=None,
+        db=None,
+        question_contains=None,
+        limit=None,
+        force=True,
+        skip_failed=False,
+    )
+
+    assert called["task_ids"] == ["sf035", "sf_bq135"]
+    assert called["expected_instance_ids"] == ["sf035", "sf_bq135"]
+
+
+def test_selector_run_rejects_instance_id_filter_combo():
+    with pytest.raises(typer.BadParameter, match="--instance-id"):
+        cli._load_run_tasks(
+            selectors=["sf035"],
+            instance_id="sf_bq135",
+            db=None,
+            question_contains=None,
+            limit=None,
+        )
 
 
 def test_eval_command_dispatches_filters(monkeypatch):

@@ -2,7 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from sol01.infra.config import DEFAULT_BASE_URL, DEFAULT_MODEL, RuntimeConfig
+from sol01.infra.config import DEFAULT_BASE_URL, DEFAULT_DOTENV_PATH, DEFAULT_MODEL, RuntimeConfig
+
+
+def test_default_dotenv_path_points_to_method_root():
+    assert DEFAULT_DOTENV_PATH == Path(__file__).resolve().parents[1] / ".env"
 
 
 def test_default_config_uses_deepseek_openrouter_policy(monkeypatch):

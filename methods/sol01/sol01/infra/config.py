@@ -11,7 +11,7 @@ DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "deepseek/deepseek-v4-pro"
 DEFAULT_PROVIDER_ONLY = "deepseek"
 DEFAULT_CONCURRENCY = 4
-METHOD_ROOT = Path(__file__).resolve().parents[1]
+METHOD_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DOTENV_PATH = METHOD_ROOT / ".env"
 
 

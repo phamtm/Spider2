@@ -59,14 +59,19 @@ uv run sol01 eval --run-id <run_id>
 uv run sol01 analyze --run-id <run_id>
 uv run sol01 ask --db E_COMMERCE "Which customers have the highest AOV?"
 uv run sol01 run --instance-id sf_bq320
+uv run sol01 run sf035 sf_bq135 sf_bq084
 uv run sol01 run --db E_COMMERCE --question-contains revenue
+just run-selected sf035 sf_bq135
 just gold sf_bq320
 ```
 
 `sol01 run` accepts `--concurrency <n>`. If omitted, the CLI uses
 `SOL01_CONCURRENCY` or the default value of `4`.
+`sol01 run <selector>...` accepts exact IDs, globs, `tier:<n>`,
+`tag:<name>`, or `all`.
 
 `just run` runs the default solver CLI.
+`just run-selected` runs one or more selected solver tasks.
 `just gold` is only for exact instance IDs and runs the persisted gold SQL path.
 Gold runs reuse the same outputs root, but they do not populate
 `eval/scored_csv/` because the gold CSV is already the scored input.

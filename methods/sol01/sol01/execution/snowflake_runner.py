@@ -15,7 +15,7 @@ import pandas as pd
 from sol01.infra.logging import get_logger
 from sol01.models import ExecutionResult
 
-METHOD_ROOT = Path(__file__).resolve().parents[1]
+METHOD_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CREDENTIAL_PATH = METHOD_ROOT / "snowflake_credential.json"
 logger = get_logger(__name__)
 

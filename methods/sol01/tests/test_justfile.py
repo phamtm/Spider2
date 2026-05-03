@@ -31,6 +31,14 @@ def test_just_run_dispatches_to_solver_cli():
     assert "run_mode" not in output
 
 
+def test_just_run_selected_dispatches_selectors_to_solver_cli():
+    completed = _run_just("run-selected", "sf035", "sf_bq135")
+
+    assert completed.returncode == 0
+    output = _combined_output(completed)
+    assert "uv run sol01 run sf035 sf_bq135" in output
+
+
 def test_just_gold_remains_separate_from_solver_cli():
     completed = _run_just("gold", "sf_bq320")
 
@@ -40,7 +48,7 @@ def test_just_gold_remains_separate_from_solver_cli():
     assert "uv run sol01 run" not in output
 
 
-def test_justfile_no_longer_exposes_selector_recipes():
+def test_justfile_no_longer_exposes_legacy_selector_shortcuts():
     text = JUSTFILE.read_text(encoding="utf-8")
 
     assert "run_mode" not in text

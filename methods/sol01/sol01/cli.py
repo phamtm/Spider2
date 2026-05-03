@@ -25,7 +25,7 @@ from sol01.llm.llm_call_logs import (
     format_llm_call_value,
     load_llm_call_log,
 )
-from sol01.loading.tasks import load_tasks
+from sol01.loading.tasks import load_tasks, select_tasks
 from sol01.models import FinalAnswer, Task
 from sol01.output.output import (
     OUTPUTS_ROOT,
@@ -87,6 +87,14 @@ def run(
         bool,
         typer.Option(help="Skip failed traces during resume mode."),
     ] = False,
+    selectors: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help=(
+                "Optional task/category selectors: exact IDs, globs, tier:<n>, tag:<name>, or all."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Run the solver over the selected Spider2-snow tasks."""
 
@@ -100,9 +108,11 @@ def run(
         limit=limit,
         force=force,
         skip_failed=skip_failed,
+        selectors=selectors or [],
     )
     handle_run_kwargs: dict[str, Any] = {
         "run_id": run_id,
+        "selectors": selectors or [],
         "instance_id": instance_id,
         "db": db,
         "question_contains": question_contains,
@@ -366,10 +376,12 @@ def handle_run(
     limit: int | None,
     force: bool,
     skip_failed: bool,
+    selectors: list[str] | None = None,
 ) -> dict[str, Any]:
     """Load tasks, then pass them to the batch coordinator."""
 
-    tasks = _load_filtered_tasks(
+    tasks = _load_run_tasks(
+        selectors=selectors,
         instance_id=instance_id,
         db=db,
         question_contains=question_contains,
@@ -522,6 +534,38 @@ def _load_filtered_tasks(
         question_contains=question_contains,
         limit=limit,
     )
+
+
+def _load_run_tasks(
+    *,
+    selectors: list[str] | None,
+    instance_id: str | None,
+    db: str | None,
+    question_contains: str | None,
+    limit: int | None,
+) -> list[Task]:
+    """Load tasks from either explicit selectors or the legacy filter options."""
+
+    normalized_selectors = [selector.strip() for selector in selectors or [] if selector.strip()]
+    if not normalized_selectors:
+        return _load_filtered_tasks(
+            instance_id=instance_id,
+            db=db,
+            question_contains=question_contains,
+            limit=limit,
+        )
+    if instance_id is not None:
+        raise typer.BadParameter("positional selectors cannot be combined with --instance-id")
+
+    tasks = select_tasks(normalized_selectors)
+    if db is not None:
+        tasks = [task for task in tasks if task.db == db]
+    if question_contains:
+        needle = question_contains.casefold()
+        tasks = [task for task in tasks if needle in task.question.casefold()]
+    if limit is not None:
+        tasks = tasks[:limit]
+    return tasks
 
 
 def _default_run_id(prefix: str) -> str:

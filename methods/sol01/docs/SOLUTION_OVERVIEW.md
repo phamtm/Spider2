@@ -47,6 +47,8 @@ Spider2-Snow task
 ## Main Entry Points
 
 - `just run` runs the solver CLI with its default batch settings.
+- `just run-selected <selector>...` runs selected solver tasks by exact ID,
+  glob, tier, tag, or `all` selector.
 - `just gold <instance_id>` runs the benchmark gold SQL for one exact question.
 - `just progress` opens the local progress dashboard.
 - `uv run sol01 ...` exposes lower-level commands for indexing, running, eval,
@@ -57,7 +59,9 @@ Common examples:
 ```bash
 uv run sol01 run
 uv run sol01 run --instance-id sf_bq320
+uv run sol01 run sf035 sf_bq135 sf_bq084
 uv run sol01 run --db E_COMMERCE --question-contains revenue
+just run-selected sf035 sf_bq135
 just gold sf_bq320
 ```
 
