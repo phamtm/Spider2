@@ -183,6 +183,15 @@ class AggregateGrainReport(BaseModel):
     selected_tables: list[str] = Field(default_factory=list)
 
 
+class SchemaExpansionDecision(BaseModel):
+    """LLM decision on whether to widen the table selection after a failure."""
+
+    should_expand: bool
+    additional_tables: list[str] = Field(default_factory=list)
+    rationale: str
+    confidence: float = Field(ge=0.0, le=1.0)
+
+
 class CandidateComparisonReport(BaseModel):
     """Comparator output that picks the executable candidate to inspect next."""
 

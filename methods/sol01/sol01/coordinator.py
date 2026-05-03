@@ -29,10 +29,12 @@ from sol01.llm.prompt_builders import (
     _critic_prompt,
     _intent_user_prompt,
     _question_preview,
+    _schema_expansion_prompt,
     _semantic_repair_prompt,
     _sql_generation_prompt,
     _sql_reference_context,
     _sql_repair_prompt,
+    schema_expansion_trigger,
 )
 from sol01.models import (
     CandidateComparisonReport,
@@ -40,6 +42,7 @@ from sol01.models import (
     ExecutionResult,
     FinalAnswer,
     Intent,
+    SchemaExpansionDecision,
     SchemaSelection,
     SQLCandidate,
     Task,
@@ -743,11 +746,7 @@ def _apply_critic_repair(
     ``repair_skipped_reason`` string for traceability.
     """
 
-    if (
-        best_attempt is None
-        or not best_attempt["execution_result"]["ok"]
-        or semantic_repairs < 1
-    ):
+    if best_attempt is None or not best_attempt["execution_result"]["ok"] or semantic_repairs < 1:
         return best_attempt
 
     critic = _run_critic_review(ctx, best_attempt)
@@ -816,6 +815,191 @@ def _apply_critic_repair(
     return new_best
 
 
+def _expand_schema_selection(
+    schema: SchemaSelection,
+    additional_tables: list[str],
+    db_index: dict[str, Any],
+) -> tuple[SchemaSelection, list[str]]:
+    """Return an expanded SchemaSelection and the list of tables actually added."""
+
+    from sol01.schema.retrieval import _sanitize_llm_tables
+
+    sanitized = _sanitize_llm_tables(additional_tables, db_index)
+    combined = list(schema.expanded_tables)
+    added: list[str] = []
+    for table in sanitized:
+        if table not in combined:
+            combined.append(table)
+            added.append(table)
+    return (
+        schema.model_copy(update={"expanded_tables": combined, "selected_tables": combined}),
+        added,
+    )
+
+
+def _rebuild_context_for_expansion(
+    ctx: _TaskCtx,
+    expanded_schema: SchemaSelection,
+) -> _TaskCtx:
+    """Rebuild the task context with an expanded schema and a fresh intent extraction."""
+
+    new_table_schemas = _table_schemas_for_selection(expanded_schema)
+    new_intent = _run_prompt(
+        ctx.client,
+        prompt_hashes=ctx.prompt_hashes,
+        prompt_name="intent",
+        output_type=Intent,
+        user_prompt=_intent_user_prompt(
+            ctx.task, expanded_schema, ctx.docs_context, new_table_schemas
+        ),
+    )
+    new_intent = _augment_intent_with_value_groundings(
+        new_intent, task=ctx.task, schema=expanded_schema, table_schemas=new_table_schemas
+    )
+    return _TaskCtx(
+        task=ctx.task,
+        client=ctx.client,
+        intent=new_intent,
+        schema=expanded_schema,
+        table_schemas=new_table_schemas,
+        sql_reference_context=_sql_reference_context(expanded_schema, new_table_schemas),
+        docs_context=ctx.docs_context,
+        aggregate_grain_guidance=_aggregate_grain_guidance(
+            ctx.task, new_intent, expanded_schema, new_table_schemas
+        ),
+        metric_source_guidance=_metric_source_guidance(ctx.task, new_intent, new_table_schemas),
+        prompt_hashes=ctx.prompt_hashes,
+    )
+
+
+def _attempt_schema_expansion(
+    ctx: _TaskCtx,
+    attempts: list[dict[str, Any]],
+    best_attempt: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, _TaskCtx | None]:
+    """Run one schema-expansion recovery attempt when evidence warrants it.
+
+    Returns (updated_best_attempt, schema_expansion_payload, expanded_ctx).
+    expanded_ctx is non-None only when new tables were actually added.  The
+    expansion attempt is outside the normal max_attempts budget.
+    """
+
+    if best_attempt is None:
+        return best_attempt, None, None
+
+    trigger = schema_expansion_trigger(best_attempt)
+    if trigger is None:
+        return best_attempt, None, None
+
+    logger.info(
+        "schema expansion triggered",
+        instance_id=ctx.task.instance_id,
+        trigger=trigger,
+    )
+
+    try:
+        db_index = load_db_index(ctx.task.db)
+    except Exception:
+        logger.warning(
+            "schema expansion skipped: db_index unavailable",
+            instance_id=ctx.task.instance_id,
+            exc_info=True,
+        )
+        return best_attempt, None, None
+
+    from sol01.schema.retrieval import _db_schema_summary
+
+    decision = _run_prompt(
+        ctx.client,
+        prompt_hashes=ctx.prompt_hashes,
+        prompt_name="schema_expansion",
+        output_type=SchemaExpansionDecision,
+        user_prompt=_schema_expansion_prompt(
+            ctx.task,
+            best_attempt,
+            trigger,
+            ctx.schema,
+            _db_schema_summary(db_index),
+        ),
+    )
+    expansion_payload: dict[str, Any] = {
+        "trigger": trigger,
+        "decision": decision.model_dump(mode="json"),
+        "added_tables": [],
+        "outcome": "model_declined",
+    }
+
+    if not decision.should_expand:
+        logger.info(
+            "schema expansion declined by model",
+            instance_id=ctx.task.instance_id,
+        )
+        return best_attempt, expansion_payload, None
+
+    expanded_schema, added_tables = _expand_schema_selection(
+        ctx.schema, decision.additional_tables, db_index
+    )
+    expansion_payload["added_tables"] = added_tables
+
+    if not added_tables:
+        expansion_payload["outcome"] = "no_new_tables"
+        logger.info(
+            "schema expansion skipped: no new valid tables",
+            instance_id=ctx.task.instance_id,
+            requested=decision.additional_tables,
+        )
+        return best_attempt, expansion_payload, None
+
+    logger.info(
+        "schema expanding",
+        instance_id=ctx.task.instance_id,
+        added_tables=added_tables,
+        confidence=decision.confidence,
+    )
+
+    expanded_ctx = _rebuild_context_for_expansion(ctx, expanded_schema)
+
+    expansion_stage = "schema_expansion"
+    expansion_payload["expansion_attempt_stage"] = expansion_stage
+    logger.info(
+        "candidate request",
+        instance_id=ctx.task.instance_id,
+        stage=expansion_stage,
+        prompt_name="sql_generation",
+    )
+    candidate = _run_prompt(
+        expanded_ctx.client,
+        prompt_hashes=expanded_ctx.prompt_hashes,
+        prompt_name="sql_generation",
+        output_type=SQLCandidate,
+        user_prompt=_sql_generation_prompt(
+            expanded_ctx.task,
+            expanded_ctx.intent,
+            expanded_ctx.sql_reference_context,
+            expanded_ctx.docs_context,
+            aggregate_grain_guidance=expanded_ctx.aggregate_grain_guidance,
+            metric_source_guidance=expanded_ctx.metric_source_guidance,
+        ),
+    )
+    expansion_attempt = evaluate_candidate(
+        task=expanded_ctx.task,
+        candidate=candidate,
+        intent=expanded_ctx.intent,
+        schema=expanded_ctx.schema,
+        table_schemas=expanded_ctx.table_schemas,
+        stage=expansion_stage,
+    )
+    attempts.append(expansion_attempt)
+    _log_candidate(ctx.task.instance_id, expansion_attempt)
+
+    if expansion_attempt["execution_result"]["ok"]:
+        expansion_payload["outcome"] = "expanded"
+    else:
+        expansion_payload["outcome"] = "expanded_failed"
+
+    return _best_attempt(attempts), expansion_payload, expanded_ctx
+
+
 def _write_task_output(
     ctx: _TaskCtx,
     attempts: list[dict[str, Any]],
@@ -827,19 +1011,22 @@ def _write_task_output(
     candidate_comparison_payload: dict[str, Any] | None,
     aggregate_verification_payload: dict[str, Any] | None,
     aggregate_comparison_payload: dict[str, Any] | None,
+    schema_expansion_payload: dict[str, Any] | None,
+    expanded_ctx: _TaskCtx | None,
     live_logging_enabled: bool,
     started_at: float,
 ) -> FinalAnswer:
     """Write final SQL, CSV, and trace; return the FinalAnswer."""
 
     task = ctx.task
+    final_ctx = expanded_ctx if expanded_ctx is not None else ctx
     trace_payload: dict[str, Any] = {
         "instance_id": task.instance_id,
         "db": task.db,
         "question": task.question,
-        "retrieval_mode": ctx.schema.retrieval_mode,
-        "schema_selection": ctx.schema.model_dump(mode="json"),
-        "intent": ctx.intent.model_dump(mode="json"),
+        "retrieval_mode": final_ctx.schema.retrieval_mode,
+        "schema_selection": final_ctx.schema.model_dump(mode="json"),
+        "intent": final_ctx.intent.model_dump(mode="json"),
         "prompt_hashes": ctx.prompt_hashes,
         "attempts": attempts,
     }
@@ -853,6 +1040,8 @@ def _write_task_output(
         candidate_comparisons.append({"phase": "aggregate_repair", **aggregate_comparison_payload})
     if candidate_comparisons:
         trace_payload["candidate_comparisons"] = candidate_comparisons
+    if schema_expansion_payload is not None:
+        trace_payload["schema_expansion"] = schema_expansion_payload
     if live_logging_enabled:
         trace_payload["llm_call_log_path"] = str(task_llm_log_path)
 
@@ -977,6 +1166,9 @@ def run_task(
     best_attempt = _apply_critic_repair(
         ctx, attempts, best_attempt, max_attempts=max_attempts, semantic_repairs=semantic_repairs
     )
+    best_attempt, schema_expansion_payload, expanded_ctx = _attempt_schema_expansion(
+        ctx, attempts, best_attempt
+    )
 
     return _write_task_output(
         ctx,
@@ -988,6 +1180,8 @@ def run_task(
         candidate_comparison_payload=candidate_comparison_payload,
         aggregate_verification_payload=aggregate_verification_payload,
         aggregate_comparison_payload=aggregate_comparison_payload,
+        schema_expansion_payload=schema_expansion_payload,
+        expanded_ctx=expanded_ctx,
         live_logging_enabled=live_logging_enabled,
         started_at=started_at,
     )

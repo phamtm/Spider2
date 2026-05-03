@@ -1034,8 +1034,7 @@ def test_run_task_aggregate_repair_loses_comparison(
                     preferred_stage="initial_1",
                     compared_stages=["initial_1", "aggregate_repair"],
                     reasons=[
-                        "initial_1 returns all customers; "
-                        "aggregate_repair drops rows arbitrarily."
+                        "initial_1 returns all customers; aggregate_repair drops rows arbitrarily."
                     ],
                 )
             ],
@@ -1046,12 +1045,8 @@ def test_run_task_aggregate_repair_loses_comparison(
         prompts=captured_prompts,
     )
 
-    monkeypatch.setattr(
-        "sol01.candidates.evaluator.fetch_query_dataframe", fake_fetch
-    )
-    monkeypatch.setattr(
-        "sol01.candidates.verification._fetch_query_dataframe", fake_fetch
-    )
+    monkeypatch.setattr("sol01.candidates.evaluator.fetch_query_dataframe", fake_fetch)
+    monkeypatch.setattr("sol01.candidates.verification._fetch_query_dataframe", fake_fetch)
     monkeypatch.setattr(
         "sol01.coordinator.retrieve_schema",
         lambda *args, **kwargs: SchemaSelection(
@@ -1117,9 +1112,7 @@ def test_run_task_aggregate_repair_falls_back_when_execution_fails(
             ],
             "sql_generation": [
                 SQLCandidate(
-                    sql=(
-                        f"SELECT SUM(amount) AS total FROM {SALES_TABLE}"
-                    ),
+                    sql=(f"SELECT SUM(amount) AS total FROM {SALES_TABLE}"),
                     explanation="Sum all amounts.",
                     assumptions=[],
                     confidence=0.9,
@@ -1135,10 +1128,7 @@ def test_run_task_aggregate_repair_falls_back_when_execution_fails(
             ],
             "sql_repair": [
                 SQLCandidate(
-                    sql=(
-                        f"SELECT SUM(amount) AS total FROM {SALES_TABLE} "
-                        "GROUP BY BAD_COL"
-                    ),
+                    sql=(f"SELECT SUM(amount) AS total FROM {SALES_TABLE} GROUP BY BAD_COL"),
                     explanation="Group by bad column.",
                     assumptions=[],
                     confidence=0.3,
@@ -1150,12 +1140,8 @@ def test_run_task_aggregate_repair_falls_back_when_execution_fails(
         },
     )
 
-    monkeypatch.setattr(
-        "sol01.candidates.evaluator.fetch_query_dataframe", fake_fetch
-    )
-    monkeypatch.setattr(
-        "sol01.candidates.verification._fetch_query_dataframe", fake_fetch
-    )
+    monkeypatch.setattr("sol01.candidates.evaluator.fetch_query_dataframe", fake_fetch)
+    monkeypatch.setattr("sol01.candidates.verification._fetch_query_dataframe", fake_fetch)
     monkeypatch.setattr(
         "sol01.coordinator.retrieve_schema",
         lambda *args, **kwargs: SchemaSelection(
@@ -1176,9 +1162,7 @@ def test_run_task_aggregate_repair_falls_back_when_execution_fails(
     )
 
     assert answer.status == "success"
-    trace = json.loads(
-        (run_paths.traces_dir / "sf_agg_fail.json").read_text(encoding="utf-8")
-    )
+    trace = json.loads((run_paths.traces_dir / "sf_agg_fail.json").read_text(encoding="utf-8"))
     assert trace["attempts"][0]["stage"] == "initial_1"
     assert trace["attempts"][1]["stage"] == "aggregate_repair"
     assert trace["attempts"][1]["execution_result"]["ok"] is False
@@ -1932,9 +1916,7 @@ def test_run_task_keeps_successful_critic_repair_on_score_tie(
     trace = json.loads((run_paths.traces_dir / "sf_local099.json").read_text(encoding="utf-8"))
     assert answer.status == "success"
     assert trace["final_sql"].endswith("/* fixed */")
-    critic_repair_attempt = next(
-        a for a in trace["attempts"] if a["stage"] == "critic_repair"
-    )
+    critic_repair_attempt = next(a for a in trace["attempts"] if a["stage"] == "critic_repair")
     assert critic_repair_attempt["critic"]["confidence"] == 0.95
 
 
@@ -2450,9 +2432,7 @@ def test_semantic_repair_prompt_rederives_from_original_task_contract():
     assert "SQL adds an ungrounded latest snapshot filter." in prompt
 
 
-def test_critic_review_runs_when_budget_exhausted(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_critic_review_runs_when_budget_exhausted(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     task = Task(instance_id="sf_local200", db="TEST_DB", question="Show customer totals.")
     run_paths = ensure_run_paths("critic-exhausted-budget-run", outputs_root=tmp_path)
     llm = FakeLLMClient(
@@ -2521,9 +2501,7 @@ def test_critic_review_runs_when_budget_exhausted(
     assert trace["final_sql"] == f"SELECT customer, amount FROM {SALES_TABLE}"
 
 
-def test_critic_no_repair_still_saves_report(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-):
+def test_critic_no_repair_still_saves_report(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     task = Task(instance_id="sf_local201", db="TEST_DB", question="Show customer totals.")
     run_paths = ensure_run_paths("critic-no-repair-run", outputs_root=tmp_path)
     llm = FakeLLMClient(
@@ -2667,9 +2645,7 @@ def test_critic_review_after_repair_marks_skipped_when_should_repair(
 
     trace = json.loads((run_paths.traces_dir / "sf_local202.json").read_text(encoding="utf-8"))
     assert answer.status == "success"
-    critic_repair_attempt = next(
-        a for a in trace["attempts"] if a["stage"] == "critic_repair"
-    )
+    critic_repair_attempt = next(a for a in trace["attempts"] if a["stage"] == "critic_repair")
     assert critic_repair_attempt["critic"]["should_repair"] is True
     assert critic_repair_attempt["repair_skipped_reason"] == "final review after critic repair"
 
@@ -2815,3 +2791,482 @@ def test_semantic_repairs_zero_produces_no_critic_in_trace(
     trace = json.loads((run_paths.traces_dir / "sf_local204.json").read_text(encoding="utf-8"))
     assert answer.status == "success"
     assert "critic" not in trace["attempts"][0]
+
+
+# ---------------------------------------------------------------------------
+# Schema expansion recovery path tests
+# ---------------------------------------------------------------------------
+
+
+BRIDGE_TABLE = "TEST_DB.PUBLIC.ORDERS"
+
+
+def _make_expansion_db_index() -> dict:
+    """Return a two-table db_index for expansion tests."""
+    return {
+        SALES_TABLE: TableSchema(
+            name="SALES",
+            full_name=SALES_TABLE,
+            ddl="CREATE TABLE SALES (id INTEGER, amount FLOAT)",
+            searchable_text="sales id amount",
+            columns=[
+                ColumnSchema(name="ID", type="INTEGER"),
+                ColumnSchema(name="AMOUNT", type="FLOAT"),
+            ],
+        ),
+        BRIDGE_TABLE: TableSchema(
+            name="ORDERS",
+            full_name=BRIDGE_TABLE,
+            ddl="CREATE TABLE ORDERS (id INTEGER, customer TEXT)",
+            searchable_text="orders id customer",
+            columns=[
+                ColumnSchema(name="ID", type="INTEGER"),
+                ColumnSchema(name="CUSTOMER", type="TEXT"),
+            ],
+        ),
+    }
+
+
+def test_schema_expansion_adds_missing_table_and_records_trace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """Validation unknown-table error triggers expansion, adds the bridge table."""
+    from sol01.models import SchemaExpansionDecision
+
+    task = Task(instance_id="sf_expand001", db="TEST_DB", question="Show amounts.")
+    run_paths = ensure_run_paths("expand-run", outputs_root=tmp_path)
+
+    initial_sql = f"SELECT amount FROM {SALES_TABLE} JOIN missing_bridge ON 1=1"
+    expansion_sql = f"SELECT s.AMOUNT FROM {SALES_TABLE} s JOIN {BRIDGE_TABLE} o ON s.ID = o.ID"
+    intent = Intent(
+        summary="Find amounts.",
+        entities=["sales"],
+        metrics=[],
+        filters=[],
+        time_constraints=[],
+        output_expectation="amount column",
+        assumptions=[],
+    )
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [intent, intent],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=initial_sql,
+                    explanation="Initial attempt.",
+                    assumptions=[],
+                    confidence=0.7,
+                ),
+                SQLCandidate(
+                    sql=expansion_sql,
+                    explanation="Expanded attempt.",
+                    assumptions=[],
+                    confidence=0.9,
+                ),
+            ],
+            "schema_expansion": [
+                SchemaExpansionDecision(
+                    should_expand=True,
+                    additional_tables=[BRIDGE_TABLE],
+                    rationale="Bridge table needed.",
+                    confidence=0.85,
+                )
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="TEST_DB",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="only sales initially",
+            confidence=0.7,
+        ),
+    )
+    _patch_db_index(monkeypatch, _make_expansion_db_index())
+    monkeypatch.setattr(
+        "sol01.candidates.evaluator.fetch_query_dataframe",
+        lambda sql, db: pd.DataFrame([{"amount": 10.0}]),
+    )
+    monkeypatch.setattr(
+        "sol01.candidates.verification._fetch_query_dataframe",
+        lambda sql, db: pd.DataFrame([{"amount": 10.0}]),
+    )
+
+    # max_attempts=1 skips the repair step so we only queue 1 sql_generation
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+        max_attempts=1,
+        semantic_repairs=0,
+    )
+
+    trace = json.loads((run_paths.traces_dir / "sf_expand001.json").read_text(encoding="utf-8"))
+    assert "schema_expansion" in trace
+    exp = trace["schema_expansion"]
+    assert "validation_unknown_table" in exp["trigger"]
+    assert exp["decision"]["should_expand"] is True
+    assert BRIDGE_TABLE in exp["added_tables"]
+    assert exp["outcome"] == "expanded"
+    assert answer.status == "success"
+    assert "schema_expansion" in trace["prompt_hashes"]
+    assert trace["schema_selection"]["expanded_tables"] == [SALES_TABLE, BRIDGE_TABLE]
+
+
+def test_schema_expansion_does_not_fire_without_trigger(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake_snowflake: None
+):
+    """When the best attempt succeeds cleanly there is no schema_expansion key in the trace."""
+
+    task = Task(instance_id="sf_expand002", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("no-expand-run", outputs_root=tmp_path)
+
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [
+                Intent(
+                    summary="Find totals.",
+                    entities=["sales"],
+                    metrics=[],
+                    filters=[],
+                    time_constraints=[],
+                    output_expectation="customer and total columns",
+                    assumptions=[],
+                )
+            ],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=f"SELECT customer, amount FROM {SALES_TABLE}",
+                    explanation="Direct read.",
+                    assumptions=[],
+                    confidence=0.9,
+                )
+            ],
+            "result_critic": [ConfidenceReport(confidence=0.95, issues=[], should_repair=False)],
+        }
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="TEST_DB",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+    _patch_db_index(monkeypatch, {})
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    trace = json.loads((run_paths.traces_dir / "sf_expand002.json").read_text(encoding="utf-8"))
+    assert "schema_expansion" not in trace
+    assert answer.status == "success"
+
+
+def test_schema_expansion_skips_when_model_declines(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """When should_expand=False the trace records model_declined and attempt count stays put."""
+    from sol01.models import SchemaExpansionDecision
+
+    task = Task(instance_id="sf_expand003", db="TEST_DB", question="Show amounts.")
+    run_paths = ensure_run_paths("decline-expand-run", outputs_root=tmp_path)
+
+    initial_sql = f"SELECT amount FROM {SALES_TABLE} JOIN missing_bridge ON 1=1"
+    intent = Intent(
+        summary="Find amounts.",
+        entities=["sales"],
+        metrics=[],
+        filters=[],
+        time_constraints=[],
+        output_expectation="amount column",
+        assumptions=[],
+    )
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [intent],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=initial_sql,
+                    explanation="Attempt.",
+                    assumptions=[],
+                    confidence=0.7,
+                )
+            ],
+            "schema_expansion": [
+                SchemaExpansionDecision(
+                    should_expand=False,
+                    additional_tables=[],
+                    rationale="Current schema is sufficient.",
+                    confidence=0.9,
+                )
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="TEST_DB",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="only sales initially",
+            confidence=0.7,
+        ),
+    )
+    _patch_db_index(monkeypatch, {})
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+        max_attempts=1,
+        semantic_repairs=0,
+    )
+
+    trace = json.loads((run_paths.traces_dir / "sf_expand003.json").read_text(encoding="utf-8"))
+    assert "schema_expansion" in trace
+    assert trace["schema_expansion"]["outcome"] == "model_declined"
+    assert len(trace["attempts"]) == 1
+
+
+def test_schema_expansion_ignores_unknown_tables_from_model(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """When the model returns only unknown table names the outcome is no_new_tables."""
+    from sol01.models import SchemaExpansionDecision
+
+    task = Task(instance_id="sf_expand004", db="TEST_DB", question="Show amounts.")
+    run_paths = ensure_run_paths("no-new-tables-run", outputs_root=tmp_path)
+
+    initial_sql = f"SELECT amount FROM {SALES_TABLE} JOIN missing_bridge ON 1=1"
+    intent = Intent(
+        summary="Find amounts.",
+        entities=["sales"],
+        metrics=[],
+        filters=[],
+        time_constraints=[],
+        output_expectation="amount column",
+        assumptions=[],
+    )
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [intent],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=initial_sql,
+                    explanation="Attempt.",
+                    assumptions=[],
+                    confidence=0.7,
+                )
+            ],
+            "schema_expansion": [
+                SchemaExpansionDecision(
+                    should_expand=True,
+                    additional_tables=["TEST_DB.PUBLIC.NONEXISTENT"],
+                    rationale="Need bridge.",
+                    confidence=0.8,
+                )
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="TEST_DB",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="only sales initially",
+            confidence=0.7,
+        ),
+    )
+    _patch_db_index(
+        monkeypatch,
+        {
+            SALES_TABLE: TableSchema(
+                name="SALES",
+                full_name=SALES_TABLE,
+                ddl="CREATE TABLE SALES (id INTEGER, amount FLOAT)",
+                searchable_text="sales",
+            )
+        },
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+        max_attempts=1,
+        semantic_repairs=0,
+    )
+
+    trace = json.loads((run_paths.traces_dir / "sf_expand004.json").read_text(encoding="utf-8"))
+    assert trace["schema_expansion"]["outcome"] == "no_new_tables"
+    assert trace["schema_expansion"]["added_tables"] == []
+    assert len(trace["attempts"]) == 1
+
+
+def test_schema_expansion_keeps_existing_tables():
+    """Expansion never drops existing tables from the schema."""
+    from sol01.coordinator import _expand_schema_selection
+
+    sales_schema = TableSchema(
+        name="SALES",
+        full_name=SALES_TABLE,
+        ddl="CREATE TABLE SALES (id INTEGER, amount FLOAT)",
+        searchable_text="sales",
+    )
+    bridge_schema = TableSchema(
+        name="ORDERS",
+        full_name=BRIDGE_TABLE,
+        ddl="CREATE TABLE ORDERS (id INTEGER, customer TEXT)",
+        searchable_text="orders",
+    )
+    db_index = {SALES_TABLE: sales_schema, BRIDGE_TABLE: bridge_schema}
+    schema = SchemaSelection(
+        db="TEST_DB",
+        selected_tables=[SALES_TABLE],
+        expanded_tables=[SALES_TABLE],
+        rationale="initial",
+        confidence=0.8,
+    )
+
+    new_schema, added = _expand_schema_selection(schema, [BRIDGE_TABLE], db_index)
+
+    assert SALES_TABLE in new_schema.expanded_tables
+    assert BRIDGE_TABLE in new_schema.expanded_tables
+    assert added == [BRIDGE_TABLE]
+
+
+def test_schema_expansion_does_not_duplicate_existing_tables():
+    """Passing an already-selected table as additional_tables produces no duplicates."""
+    from sol01.coordinator import _expand_schema_selection
+
+    sales_schema = TableSchema(
+        name="SALES",
+        full_name=SALES_TABLE,
+        ddl="CREATE TABLE SALES (id INTEGER, amount FLOAT)",
+        searchable_text="sales",
+    )
+    db_index = {SALES_TABLE: sales_schema}
+    schema = SchemaSelection(
+        db="TEST_DB",
+        selected_tables=[SALES_TABLE],
+        expanded_tables=[SALES_TABLE],
+        rationale="initial",
+        confidence=0.8,
+    )
+
+    new_schema, added = _expand_schema_selection(schema, [SALES_TABLE], db_index)
+
+    assert new_schema.expanded_tables.count(SALES_TABLE) == 1
+    assert added == []
+
+
+def test_schema_expansion_triggers_on_critic_repair_focus(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    """When critic repair_focus contains 'schema_selection', expansion fires."""
+    from sol01.models import SchemaExpansionDecision
+
+    task = Task(instance_id="sf_expand005", db="TEST_DB", question="Show amounts.")
+    run_paths = ensure_run_paths("critic-trigger-expand-run", outputs_root=tmp_path)
+
+    # Use uppercase Snowflake column names matching _make_expansion_db_index
+    initial_sql = f"SELECT AMOUNT FROM {SALES_TABLE}"
+    expansion_sql = f"SELECT s.AMOUNT FROM {SALES_TABLE} s JOIN {BRIDGE_TABLE} o ON s.ID = o.ID"
+    intent = Intent(
+        summary="Find amounts.",
+        entities=["sales"],
+        metrics=[],
+        filters=[],
+        time_constraints=[],
+        output_expectation="amount column",
+        assumptions=[],
+    )
+    llm = FakeLLMClient(
+        outputs={
+            "intent": [intent, intent],
+            "sql_generation": [
+                SQLCandidate(
+                    sql=initial_sql,
+                    explanation="Initial.",
+                    assumptions=[],
+                    confidence=0.7,
+                ),
+                SQLCandidate(
+                    sql=expansion_sql,
+                    explanation="Expanded.",
+                    assumptions=[],
+                    confidence=0.9,
+                ),
+            ],
+            "result_critic": [
+                ConfidenceReport(
+                    confidence=0.4,
+                    issues=["missing_join: need to join orders table"],
+                    should_repair=False,
+                    repair_focus="schema_selection: orders table not included",
+                )
+            ],
+            "schema_expansion": [
+                SchemaExpansionDecision(
+                    should_expand=True,
+                    additional_tables=[BRIDGE_TABLE],
+                    rationale="Orders table needed for join.",
+                    confidence=0.85,
+                )
+            ],
+        }
+    )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema",
+        lambda *args, **kwargs: SchemaSelection(
+            db="TEST_DB",
+            selected_tables=[SALES_TABLE],
+            expanded_tables=[SALES_TABLE],
+            rationale="sales is enough",
+            confidence=0.9,
+        ),
+    )
+    _patch_db_index(monkeypatch, _make_expansion_db_index())
+    monkeypatch.setattr(
+        "sol01.candidates.evaluator.fetch_query_dataframe",
+        lambda sql, db: pd.DataFrame([{"AMOUNT": 10.0}]),
+    )
+    monkeypatch.setattr(
+        "sol01.candidates.verification._fetch_query_dataframe",
+        lambda sql, db: pd.DataFrame([{"AMOUNT": 10.0}]),
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    trace = json.loads((run_paths.traces_dir / "sf_expand005.json").read_text(encoding="utf-8"))
+    assert "schema_expansion" in trace
+    assert "critic_repair_focus" in trace["schema_expansion"]["trigger"]
+    assert trace["schema_expansion"]["decision"]["should_expand"] is True
+    assert answer.status == "success"

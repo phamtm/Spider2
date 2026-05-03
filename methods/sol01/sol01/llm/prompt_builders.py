@@ -14,6 +14,17 @@ from sol01.models import (
     Task,
 )
 
+# Execution error substrings that suggest a missing table in the schema.
+_EXEC_TABLE_MISSING_SUBSTRINGS = (
+    "does not exist",
+    "invalid identifier",
+    "object does not exist",
+    "table not found",
+    "unknown table",
+    "002003",
+    "000904",
+)
+
 
 def _comparison_attempt_summary(attempt: dict[str, Any]) -> dict[str, Any]:
     """Render one attempt in a compact, comparison-friendly format."""
@@ -445,4 +456,61 @@ def _semantic_repair_prompt(
         "Candidate unsupported assumptions:\n"
         f"{json.dumps(attempt.get('unsupported_assumptions', []), indent=2, sort_keys=True)}\n\n"
         f"Critic issues:\n{json.dumps(critic.model_dump(mode='json'), indent=2, sort_keys=True)}"
+    )
+
+
+def schema_expansion_trigger(attempt: dict[str, Any]) -> str | None:
+    """Return why schema expansion is warranted for this attempt, or None.
+
+    Only returns a non-None value when there is explicit evidence that the
+    selected schema is incomplete: an unknown-table validation error, a
+    column-absent-from-selected-tables validation warning, an
+    object/table-not-found execution error, or a critic repair_focus that
+    names schema_selection or missing_join.
+    """
+    validation = attempt.get("validation", {})
+    for error in validation.get("errors", []):
+        if "unknown table referenced" in error.lower():
+            return f"validation_unknown_table: {error}"
+
+    for warning in validation.get("warnings", []):
+        if "no selected table has it" in warning.lower():
+            return f"validation_missing_column: {warning}"
+
+    exec_error = (attempt.get("execution_result", {}).get("error") or "").lower()
+    if exec_error and any(t in exec_error for t in _EXEC_TABLE_MISSING_SUBSTRINGS):
+        raw_error = attempt.get("execution_result", {}).get("error") or ""
+        return f"execution_error: {raw_error[:300]}"
+
+    critic = attempt.get("critic") or {}
+    repair_focus = (critic.get("repair_focus") or "").lower()
+    if "schema_selection" in repair_focus or "missing_join" in repair_focus:
+        return f"critic_repair_focus: {critic.get('repair_focus')}"
+    for issue in critic.get("issues", []):
+        issue_lower = issue.lower()
+        if any(kw in issue_lower for kw in ("schema_selection", "missing_join", "missing table")):
+            return f"critic_issue: {issue}"
+
+    return None
+
+
+def _schema_expansion_prompt(
+    task: Task,
+    attempt: dict[str, Any],
+    trigger: str,
+    schema: SchemaSelection,
+    db_schema_summary: str,
+) -> str:
+    """Build the prompt that asks the LLM which tables to add."""
+
+    return (
+        f"Question: {task.question}\n\n"
+        f"Current selected tables: {', '.join(schema.expanded_tables)}\n\n"
+        f"Evidence that the schema may be incomplete:\n{trigger}\n\n"
+        f"Failed SQL:\n{attempt['sql']}\n\n"
+        f"Validation:\n{json.dumps(attempt['validation'], indent=2, sort_keys=True)}\n\n"
+        f"Execution error: {attempt.get('execution_result', {}).get('error') or 'none'}\n\n"
+        f"All available tables in this database:\n{db_schema_summary}\n\n"
+        "List only tables that genuinely fix the identified gap and exist in the database above. "
+        "If the current schema already covers every table needed, set should_expand=false."
     )
