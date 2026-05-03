@@ -1973,7 +1973,9 @@ def test_attempt_score_prefers_output_shape_over_candidate_confidence():
     bad_score = sum(
         _attempt_score_breakdown(
             candidate=SQLCandidate(
-                sql="SELECT customer, COUNT(*) AS total FROM TEST_DB.PUBLIC.SALES GROUP BY customer",
+                sql=(
+                    "SELECT customer, COUNT(*) AS total FROM TEST_DB.PUBLIC.SALES GROUP BY customer"
+                ),
                 explanation="Too many columns for the contract.",
                 assumptions=[],
                 confidence=0.99,
@@ -2044,7 +2046,10 @@ def test_attempt_score_penalizes_ungrounded_filters_that_return_no_rows():
     empty_score = sum(
         _attempt_score_breakdown(
             candidate=SQLCandidate(
-                sql="SELECT COUNT(*) AS total FROM TEST_DB.PUBLIC.COUNTRIES WHERE country = 'Russia'",
+                sql=(
+                    "SELECT COUNT(*) AS total "
+                    "FROM TEST_DB.PUBLIC.COUNTRIES WHERE country = 'Russia'"
+                ),
                 explanation="Exact string filter returns nothing.",
                 assumptions=[],
                 confidence=0.99,

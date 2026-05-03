@@ -26,7 +26,7 @@ gold instance_id:
 
 # Run the progress dashboard.
 progress:
-    uv run --group dev streamlit run ./progress_ui.py
+    uv run --group dev streamlit run ./sol01/progress_ui/app.py
 
 # Run format, lint, and tests together.
 check:
