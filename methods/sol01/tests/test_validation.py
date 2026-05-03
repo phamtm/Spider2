@@ -240,3 +240,29 @@ def test_validate_sql_accepts_quoted_snowflake_columns():
     assert report.ok is True
     assert report.errors == []
     assert report.warnings == []
+
+
+def test_validate_sql_reports_scope_resolution_errors():
+    report = validate_sql(
+        """
+        SELECT bt.board_type, AVG(sc.score) AS avg_score
+        FROM FIREBASE.ANALYTICS_153293282.EVENTS_20180915 e,
+        LATERAL (
+            SELECT value:string_value::string AS board_type
+            FROM FLATTEN(input => e.event_params)
+            WHERE key = 'board_type'
+        ) bt,
+        LATERAL (
+            SELECT COALESCE(value:int_value, value:double_value, value:float_value)::float AS score
+            FROM FLATTEN(input => e.event_params)
+            WHERE key = 'score'
+        ) sc
+        WHERE e.event_name = 'level_complete_quickplay'
+        GROUP BY bt.board_type
+        ORDER BY avg_score DESC
+        """,
+        allowed_tables={"FIREBASE.ANALYTICS_153293282.EVENTS_20180915"},
+    )
+
+    assert report.ok is False
+    assert report.errors == ["SQL scope could not be resolved: Alias already used."]

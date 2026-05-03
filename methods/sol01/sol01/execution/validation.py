@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import sqlglot
 from sqlglot import exp
-from sqlglot.errors import ParseError
+from sqlglot.errors import OptimizeError, ParseError
 from sqlglot.optimizer.scope import Scope, build_scope
 
 from sol01.models import TableSchema, ValidationReport
@@ -56,19 +56,25 @@ def validate_sql(
     if extension_error is not None:
         return ValidationReport(ok=False, errors=[extension_error])
 
-    referenced_tables, table_errors, warnings = _resolve_referenced_tables(
-        statement,
-        allowed_tables=allowed_tables,
-    )
+    try:
+        referenced_tables, table_errors, warnings = _resolve_referenced_tables(
+            statement,
+            allowed_tables=allowed_tables,
+        )
+    except OptimizeError as exc:
+        return ValidationReport(ok=False, errors=[_scope_resolution_error(exc)])
     column_errors: list[str] = []
     schema_lookup = _schema_lookup(table_schemas)
     if schema_lookup and not table_errors:
-        column_errors, column_warnings = _validate_columns(
-            statement,
-            allowed_tables=allowed_tables,
-            schema_lookup=schema_lookup,
-        )
-        warnings.extend(column_warnings)
+        try:
+            column_errors, column_warnings = _validate_columns(
+                statement,
+                allowed_tables=allowed_tables,
+                schema_lookup=schema_lookup,
+            )
+            warnings.extend(column_warnings)
+        except OptimizeError as exc:
+            column_errors.append(_scope_resolution_error(exc))
 
     return ValidationReport(
         ok=not table_errors and not column_errors,
@@ -94,6 +100,13 @@ def _parse_statements(sql: str) -> tuple[list[exp.Expression], str | None]:
         return sqlglot.parse(sql, read="snowflake"), None
     except ParseError as exc:
         return [], f"SQL could not be parsed: {exc}"
+
+
+def _scope_resolution_error(error: OptimizeError) -> str:
+    """Return a validation error when sqlglot cannot resolve query scopes."""
+
+    detail = str(error).strip().rstrip(".").rstrip(":").strip() or error.__class__.__name__
+    return f"SQL scope could not be resolved: {detail}."
 
 
 def _statement_error(statement: exp.Expression) -> str | None:
