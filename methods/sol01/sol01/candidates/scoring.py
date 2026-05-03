@@ -16,33 +16,6 @@ from sol01.models import (
 )
 
 
-def _attempt_score(
-    *,
-    candidate: SQLCandidate,
-    intent: Intent | None = None,
-    validation: ValidationReport,
-    execution: ExecutionResult,
-    aggregate_grain: AggregateGrainReport | None = None,
-    result_profile: dict[str, Any] | None = None,
-    shape_report: OutputShapeReport | None = None,
-    filter_grounding_report: FilterGroundingReport | None = None,
-) -> float:
-    """Rank candidates by verification evidence first and confidence last."""
-
-    return sum(
-        _attempt_score_breakdown(
-            intent=intent,
-            candidate=candidate,
-            validation=validation,
-            execution=execution,
-            aggregate_grain=aggregate_grain,
-            result_profile=result_profile,
-            shape_report=shape_report,
-            filter_grounding_report=filter_grounding_report,
-        ).values()
-    )
-
-
 def _attempt_score_breakdown(
     *,
     intent: Intent | None,
@@ -68,8 +41,53 @@ def _attempt_score_breakdown(
         ),
         "aggregate_grain": _aggregate_grain_adjustment(aggregate_grain),
         "cardinality": _cardinality_plausibility_adjustment(execution, result_profile),
+        "verification_penalty": sum(
+            _verification_penalty_reasons(
+                execution=execution,
+                shape_report=shape_report,
+                filter_grounding_report=filter_grounding_report,
+                aggregate_grain=aggregate_grain,
+            ).values()
+        ),
         "confidence_tiebreaker": candidate.confidence * 0.01,
     }
+
+
+def _verification_penalty_reasons(
+    *,
+    execution: ExecutionResult,
+    shape_report: OutputShapeReport | None = None,
+    filter_grounding_report: FilterGroundingReport | None = None,
+    aggregate_grain: AggregateGrainReport | None = None,
+) -> dict[str, float]:
+    """Named penalty contributions for known-bad verification patterns.
+
+    Only fires on executable candidates. Penalties are bounded so that
+    execution and validation still dominate non-executable SQL.
+    """
+    if not execution.ok:
+        return {}
+
+    reasons: dict[str, float] = {}
+
+    if shape_report is not None:
+        grouped_key_count = sum(1 for v in shape_report.violations if "grouped key" in v)
+        if grouped_key_count:
+            reasons["missing_grouped_key"] = max(-8.0 * grouped_key_count, -16.0)
+
+    if filter_grounding_report is not None:
+        if filter_grounding_report.zero_like_result and not filter_grounding_report.value_rewrites:
+            reasons["zero_like_ungrounded_filter"] = -10.0
+
+    if aggregate_grain is not None:
+        clear_mismatch = (
+            aggregate_grain.inferred_grain == "distinct_entity_count"
+            and not aggregate_grain.uses_distinct
+        ) or (aggregate_grain.inferred_grain == "row_count" and aggregate_grain.uses_distinct)
+        if clear_mismatch:
+            reasons["aggregate_grain_mismatch"] = -5.0
+
+    return reasons
 
 
 def _best_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -201,7 +219,7 @@ def _filter_grounding_adjustment(
     if not execution.ok:
         return -30.0
     if report is not None and report.zero_like_result:
-        if report is not None and report.value_rewrites:
+        if report.value_rewrites:
             return 16.0
         return -22.0
     score = 14.0

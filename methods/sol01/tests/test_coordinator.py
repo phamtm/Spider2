@@ -12,7 +12,7 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from sol01.candidates.scoring import _attempt_score
+from sol01.candidates.scoring import _attempt_score_breakdown, _verification_penalty_reasons
 from sol01.candidates.verification import _metric_source_guidance
 from sol01.coordinator import run_task, run_tasks
 from sol01.infra.config import RuntimeConfig
@@ -26,12 +26,15 @@ from sol01.llm.prompt_builders import (
     _sql_repair_prompt,
 )
 from sol01.models import (
+    AggregateGrainReport,
     CandidateComparisonReport,
     ColumnSchema,
     ConfidenceReport,
     ExecutionResult,
+    FilterGroundingReport,
     FinalAnswer,
     Intent,
+    OutputShapeReport,
     SchemaSelection,
     SQLCandidate,
     TableSchema,
@@ -1949,7 +1952,7 @@ def test_attempt_score_prefers_output_shape_over_candidate_confidence():
         error=None,
     )
 
-    good_score = _attempt_score(
+    good_score = sum(_attempt_score_breakdown(
         candidate=SQLCandidate(
             sql="SELECT COUNT(*) AS total FROM TEST_DB.PUBLIC.SALES",
             explanation="Scalar count.",
@@ -1964,8 +1967,8 @@ def test_attempt_score_prefers_output_shape_over_candidate_confidence():
             "columns": ["total"],
             "sample_rows": [{"total": 12}],
         },
-    )
-    bad_score = _attempt_score(
+    ).values())
+    bad_score = sum(_attempt_score_breakdown(
         candidate=SQLCandidate(
             sql="SELECT customer, COUNT(*) AS total FROM TEST_DB.PUBLIC.SALES GROUP BY customer",
             explanation="Too many columns for the contract.",
@@ -1980,7 +1983,7 @@ def test_attempt_score_prefers_output_shape_over_candidate_confidence():
             "columns": ["customer", "total"],
             "sample_rows": [{"customer": "bob", "total": 12}],
         },
-    )
+    ).values())
 
     assert good_score > bad_score
 
@@ -2013,7 +2016,7 @@ def test_attempt_score_penalizes_ungrounded_filters_that_return_no_rows():
         error=None,
     )
 
-    grounded_score = _attempt_score(
+    grounded_score = sum(_attempt_score_breakdown(
         candidate=SQLCandidate(
             sql=(
                 "SELECT COUNT(*) AS total FROM TEST_DB.PUBLIC.COUNTRIES "
@@ -2031,8 +2034,8 @@ def test_attempt_score_penalizes_ungrounded_filters_that_return_no_rows():
             "columns": ["total"],
             "sample_rows": [{"total": 4}],
         },
-    )
-    empty_score = _attempt_score(
+    ).values())
+    empty_score = sum(_attempt_score_breakdown(
         candidate=SQLCandidate(
             sql="SELECT COUNT(*) AS total FROM TEST_DB.PUBLIC.COUNTRIES WHERE country = 'Russia'",
             explanation="Exact string filter returns nothing.",
@@ -2047,9 +2050,127 @@ def test_attempt_score_penalizes_ungrounded_filters_that_return_no_rows():
             "columns": ["total"],
             "sample_rows": [],
         },
-    )
+    ).values())
 
     assert grounded_score > empty_score
+
+
+def test_verification_penalty_fires_for_missing_grouped_key():
+    execution = ExecutionResult(ok=True, row_count=3, columns=["style", "cnt"], error=None)
+    shape_report = OutputShapeReport(
+        violations=["missing grouped key: style_id"],
+        expected_columns=["style_id", "style", "cnt"],
+        observed_columns=["style", "cnt"],
+        missing_columns=["style_id"],
+    )
+    reasons = _verification_penalty_reasons(execution=execution, shape_report=shape_report)
+    assert "missing_grouped_key" in reasons
+    assert reasons["missing_grouped_key"] < 0
+
+
+def test_verification_penalty_fires_for_zero_like_ungrounded_filter():
+    execution = ExecutionResult(ok=True, row_count=0, columns=["total"], error=None)
+    report = FilterGroundingReport(
+        zero_like_result=True,
+        value_rewrites=[],
+        reason="No matching rows found and no value rewrites discovered.",
+    )
+    reasons = _verification_penalty_reasons(execution=execution, filter_grounding_report=report)
+    assert "zero_like_ungrounded_filter" in reasons
+    assert reasons["zero_like_ungrounded_filter"] < 0
+
+
+def test_verification_penalty_fires_for_aggregate_grain_mismatch():
+    execution = ExecutionResult(ok=True, row_count=5, columns=["cnt"], error=None)
+
+    # distinct_entity_count without uses_distinct
+    grain = AggregateGrainReport(
+        inferred_grain="distinct_entity_count",
+        reason="Counting unique customers across joined tables.",
+        uses_distinct=False,
+    )
+    reasons = _verification_penalty_reasons(execution=execution, aggregate_grain=grain)
+    assert "aggregate_grain_mismatch" in reasons
+    assert reasons["aggregate_grain_mismatch"] < 0
+
+    # row_count with uses_distinct (unnecessary DISTINCT)
+    grain_rc = AggregateGrainReport(
+        inferred_grain="row_count",
+        reason="Simple row count, no joins.",
+        uses_distinct=True,
+    )
+    reasons_rc = _verification_penalty_reasons(execution=execution, aggregate_grain=grain_rc)
+    assert "aggregate_grain_mismatch" in reasons_rc
+    assert reasons_rc["aggregate_grain_mismatch"] < 0
+
+
+def test_verification_penalty_absent_for_unsupported_evidence():
+    execution = ExecutionResult(ok=True, row_count=3, columns=["a", "b"], error=None)
+
+    # No reports → no penalty
+    assert _verification_penalty_reasons(execution=execution) == {}
+
+    # Filter grounding with rewrites → not ungrounded
+    report_with_rewrites = FilterGroundingReport(
+        zero_like_result=True,
+        value_rewrites=[{"original": "Russia", "rewrite": "Russian Federation"}],
+        reason="Probe found a stored label variant.",
+    )
+    reasons = _verification_penalty_reasons(
+        execution=execution, filter_grounding_report=report_with_rewrites
+    )
+    assert "zero_like_ungrounded_filter" not in reasons
+
+    # Grain mismatch rule does not fire for matching grain
+    grain_ok = AggregateGrainReport(
+        inferred_grain="distinct_entity_count",
+        reason="Counting unique customers.",
+        uses_distinct=True,
+    )
+    reasons = _verification_penalty_reasons(execution=execution, aggregate_grain=grain_ok)
+    assert "aggregate_grain_mismatch" not in reasons
+
+    # No penalty when execution failed
+    failed = ExecutionResult(ok=False, row_count=0, columns=[], error="SQL error")
+    shape_report = OutputShapeReport(violations=["missing grouped key: id"])
+    reasons = _verification_penalty_reasons(execution=failed, shape_report=shape_report)
+    assert reasons == {}
+
+
+def test_verification_penalty_included_in_score_breakdown():
+    intent = Intent(
+        summary="Count items.",
+        entities=["items"],
+        metrics=["count"],
+        filters=[],
+        time_constraints=[],
+        output_expectation="one count",
+        assumptions=[],
+    )
+    validation = ValidationReport(ok=True, errors=[], warnings=[])
+    execution = ExecutionResult(ok=True, row_count=1, columns=["cnt"], error=None)
+    candidate = SQLCandidate(
+        sql="SELECT COUNT(*) AS cnt FROM T",
+        explanation="Simple count.",
+        assumptions=[],
+        confidence=0.5,
+    )
+
+    score = sum(_attempt_score_breakdown(
+        candidate=candidate,
+        intent=intent,
+        validation=validation,
+        execution=execution,
+        shape_report=OutputShapeReport(violations=["missing grouped key: id"]),
+    ).values())
+    score_no_violation = sum(_attempt_score_breakdown(
+        candidate=candidate,
+        intent=intent,
+        validation=validation,
+        execution=execution,
+    ).values())
+
+    assert score < score_no_violation
 
 
 def test_run_task_flags_missing_grouped_identifier_in_trace(
@@ -3029,7 +3150,7 @@ def test_schema_expansion_skips_when_model_declines(
     )
     _patch_db_index(monkeypatch, {})
 
-    answer = run_task(
+    run_task(
         task,
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
@@ -3108,7 +3229,7 @@ def test_schema_expansion_ignores_unknown_tables_from_model(
         },
     )
 
-    answer = run_task(
+    run_task(
         task,
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),

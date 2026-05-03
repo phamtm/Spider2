@@ -5,7 +5,7 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any
 
-from sol01.candidates.scoring import _attempt_score_breakdown
+from sol01.candidates.scoring import _attempt_score_breakdown, _verification_penalty_reasons
 from sol01.candidates.verification import (
     _infer_aggregate_grain,
     _infer_filter_grounding_report,
@@ -134,6 +134,12 @@ def evaluate_candidate(
             result_profile=result_profile,
             shape_report=shape_report,
             filter_grounding_report=filter_grounding_report,
+        ),
+        "verification_penalty_reasons": _verification_penalty_reasons(
+            execution=execution,
+            shape_report=shape_report,
+            filter_grounding_report=filter_grounding_report,
+            aggregate_grain=aggregate_grain,
         ),
     }
     attempt["score"] = sum(attempt["score_breakdown"].values())
