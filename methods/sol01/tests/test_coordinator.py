@@ -1952,38 +1952,42 @@ def test_attempt_score_prefers_output_shape_over_candidate_confidence():
         error=None,
     )
 
-    good_score = sum(_attempt_score_breakdown(
-        candidate=SQLCandidate(
-            sql="SELECT COUNT(*) AS total FROM TEST_DB.PUBLIC.SALES",
-            explanation="Scalar count.",
-            assumptions=[],
-            confidence=0.2,
-        ),
-        intent=intent,
-        validation=validation,
-        execution=good_execution,
-        result_profile={
-            "row_count": 1,
-            "columns": ["total"],
-            "sample_rows": [{"total": 12}],
-        },
-    ).values())
-    bad_score = sum(_attempt_score_breakdown(
-        candidate=SQLCandidate(
-            sql="SELECT customer, COUNT(*) AS total FROM TEST_DB.PUBLIC.SALES GROUP BY customer",
-            explanation="Too many columns for the contract.",
-            assumptions=[],
-            confidence=0.99,
-        ),
-        intent=intent,
-        validation=validation,
-        execution=bad_execution,
-        result_profile={
-            "row_count": 1,
-            "columns": ["customer", "total"],
-            "sample_rows": [{"customer": "bob", "total": 12}],
-        },
-    ).values())
+    good_score = sum(
+        _attempt_score_breakdown(
+            candidate=SQLCandidate(
+                sql="SELECT COUNT(*) AS total FROM TEST_DB.PUBLIC.SALES",
+                explanation="Scalar count.",
+                assumptions=[],
+                confidence=0.2,
+            ),
+            intent=intent,
+            validation=validation,
+            execution=good_execution,
+            result_profile={
+                "row_count": 1,
+                "columns": ["total"],
+                "sample_rows": [{"total": 12}],
+            },
+        ).values()
+    )
+    bad_score = sum(
+        _attempt_score_breakdown(
+            candidate=SQLCandidate(
+                sql="SELECT customer, COUNT(*) AS total FROM TEST_DB.PUBLIC.SALES GROUP BY customer",
+                explanation="Too many columns for the contract.",
+                assumptions=[],
+                confidence=0.99,
+            ),
+            intent=intent,
+            validation=validation,
+            execution=bad_execution,
+            result_profile={
+                "row_count": 1,
+                "columns": ["customer", "total"],
+                "sample_rows": [{"customer": "bob", "total": 12}],
+            },
+        ).values()
+    )
 
     assert good_score > bad_score
 
@@ -2016,41 +2020,45 @@ def test_attempt_score_penalizes_ungrounded_filters_that_return_no_rows():
         error=None,
     )
 
-    grounded_score = sum(_attempt_score_breakdown(
-        candidate=SQLCandidate(
-            sql=(
-                "SELECT COUNT(*) AS total FROM TEST_DB.PUBLIC.COUNTRIES "
-                "WHERE country = 'Russian Federation'"
+    grounded_score = sum(
+        _attempt_score_breakdown(
+            candidate=SQLCandidate(
+                sql=(
+                    "SELECT COUNT(*) AS total FROM TEST_DB.PUBLIC.COUNTRIES "
+                    "WHERE country = 'Russian Federation'"
+                ),
+                explanation="Uses the stored value variant.",
+                assumptions=[],
+                confidence=0.3,
             ),
-            explanation="Uses the stored value variant.",
-            assumptions=[],
-            confidence=0.3,
-        ),
-        intent=intent,
-        validation=validation,
-        execution=grounded_execution,
-        result_profile={
-            "row_count": 4,
-            "columns": ["total"],
-            "sample_rows": [{"total": 4}],
-        },
-    ).values())
-    empty_score = sum(_attempt_score_breakdown(
-        candidate=SQLCandidate(
-            sql="SELECT COUNT(*) AS total FROM TEST_DB.PUBLIC.COUNTRIES WHERE country = 'Russia'",
-            explanation="Exact string filter returns nothing.",
-            assumptions=[],
-            confidence=0.99,
-        ),
-        intent=intent,
-        validation=validation,
-        execution=empty_execution,
-        result_profile={
-            "row_count": 0,
-            "columns": ["total"],
-            "sample_rows": [],
-        },
-    ).values())
+            intent=intent,
+            validation=validation,
+            execution=grounded_execution,
+            result_profile={
+                "row_count": 4,
+                "columns": ["total"],
+                "sample_rows": [{"total": 4}],
+            },
+        ).values()
+    )
+    empty_score = sum(
+        _attempt_score_breakdown(
+            candidate=SQLCandidate(
+                sql="SELECT COUNT(*) AS total FROM TEST_DB.PUBLIC.COUNTRIES WHERE country = 'Russia'",
+                explanation="Exact string filter returns nothing.",
+                assumptions=[],
+                confidence=0.99,
+            ),
+            intent=intent,
+            validation=validation,
+            execution=empty_execution,
+            result_profile={
+                "row_count": 0,
+                "columns": ["total"],
+                "sample_rows": [],
+            },
+        ).values()
+    )
 
     assert grounded_score > empty_score
 
@@ -2156,19 +2164,23 @@ def test_verification_penalty_included_in_score_breakdown():
         confidence=0.5,
     )
 
-    score = sum(_attempt_score_breakdown(
-        candidate=candidate,
-        intent=intent,
-        validation=validation,
-        execution=execution,
-        shape_report=OutputShapeReport(violations=["missing grouped key: id"]),
-    ).values())
-    score_no_violation = sum(_attempt_score_breakdown(
-        candidate=candidate,
-        intent=intent,
-        validation=validation,
-        execution=execution,
-    ).values())
+    score = sum(
+        _attempt_score_breakdown(
+            candidate=candidate,
+            intent=intent,
+            validation=validation,
+            execution=execution,
+            shape_report=OutputShapeReport(violations=["missing grouped key: id"]),
+        ).values()
+    )
+    score_no_violation = sum(
+        _attempt_score_breakdown(
+            candidate=candidate,
+            intent=intent,
+            validation=validation,
+            execution=execution,
+        ).values()
+    )
 
     assert score < score_no_violation
 
