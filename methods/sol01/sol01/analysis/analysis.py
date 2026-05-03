@@ -7,16 +7,16 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sol01.category_metadata import (
+from sol01.analysis.trace_diagnostics import summarize_failed_question
+from sol01.infra.logging import get_logger
+from sol01.loading.category_metadata import (
     CATEGORY_BATCHES_DIR,
     SPIDER2_SNOW_PATH,
     CategoryMetadata,
     load_category_metadata,
 )
-from sol01.logging import get_logger
-from sol01.output import RunPaths, ensure_run_paths
-from sol01.tasks import REPO_ROOT
-from sol01.trace_diagnostics import summarize_failed_question
+from sol01.loading.tasks import REPO_ROOT
+from sol01.output.output import RunPaths, ensure_run_paths
 
 OUTPUTS_ROOT = REPO_ROOT / "methods" / "sol01" / "outputs"
 FAILURE_CATEGORIES = (

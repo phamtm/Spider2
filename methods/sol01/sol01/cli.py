@@ -11,30 +11,30 @@ from typing import Annotated, Any
 
 import typer
 
-from sol01.analysis import analyze_run
-from sol01.config import DEFAULT_DOTENV_PATH, RuntimeConfig
+from sol01.analysis.analysis import analyze_run
+from sol01.analysis.eval_runner import run_official_eval, run_persisted_eval
 from sol01.coordinator import run_task, run_tasks
-from sol01.eval_runner import run_official_eval, run_persisted_eval
-from sol01.index import CACHE_PATH, build_index_cache
-from sol01.llm_call_logs import (
+from sol01.infra.config import DEFAULT_DOTENV_PATH, RuntimeConfig
+from sol01.infra.logging import configure_logging, get_logger
+from sol01.infra.observability import configure_logfire
+from sol01.infra.time_utils import format_duration
+from sol01.llm.llm_call_logs import (
     build_llm_call_detail_sections,
     build_llm_call_summary_row,
     build_llm_call_summary_rows,
     format_llm_call_value,
     load_llm_call_log,
 )
-from sol01.logging import configure_logging, get_logger
+from sol01.loading.tasks import load_tasks
 from sol01.models import FinalAnswer, Task
-from sol01.observability import configure_logfire
-from sol01.output import (
+from sol01.output.output import (
     OUTPUTS_ROOT,
     ensure_ask_paths,
     ensure_run_paths,
     eval_input_csv_dir_for,
 )
-from sol01.registry import resolve_llm_call_log_path
-from sol01.tasks import load_tasks
-from sol01.time_utils import format_duration
+from sol01.output.registry import resolve_llm_call_log_path
+from sol01.schema.index import CACHE_PATH, build_index_cache
 
 app = typer.Typer(
     help="Snowflake Spider2-snow solver.",

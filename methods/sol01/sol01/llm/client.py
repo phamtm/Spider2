@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from pydantic import BaseModel
 
-from sol01.config import RuntimeConfig
-from sol01.llm_logging import (
+from sol01.infra.config import RuntimeConfig
+from sol01.infra.logging import get_logger
+from sol01.llm.llm_logging import (
     SCHEMA_VERSION,
     LLMCallLogger,
     duration_ms,
@@ -22,7 +23,6 @@ from sol01.llm_logging import (
     serialize_output,
     utc_now,
 )
-from sol01.logging import get_logger
 
 PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 OutputT = TypeVar("OutputT", bound=BaseModel)

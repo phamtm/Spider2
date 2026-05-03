@@ -8,9 +8,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from sol01 import gold_run
+import sol01.analysis.gold_run as gold_run
 from sol01.models import ExecutionResult
-from sol01.output import (
+from sol01.output.output import (
     csv_path_for,
     eval_input_csv_dir_for,
     eval_workspace_suite_dir_for,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sol01 import observability
+from sol01.infra import observability
 
 
 def test_configure_logfire_enables_pydantic_ai_instrumentation(monkeypatch):

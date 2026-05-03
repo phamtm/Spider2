@@ -5,13 +5,16 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any
 
-from sol01.candidate_scoring import _attempt_score_breakdown
-from sol01.candidate_verification import (
+from sol01.candidates.scoring import _attempt_score_breakdown
+from sol01.candidates.verification import (
     _infer_aggregate_grain,
     _infer_filter_grounding_report,
     _infer_output_shape_report,
 )
-from sol01.logging import get_logger
+from sol01.execution.profiling import profile_dataframe
+from sol01.execution.snowflake_runner import _dataframe_records, fetch_query_dataframe
+from sol01.execution.validation import validate_sql
+from sol01.infra.logging import get_logger
 from sol01.models import (
     ExecutionResult,
     Intent,
@@ -20,9 +23,6 @@ from sol01.models import (
     TableSchema,
     Task,
 )
-from sol01.profiling import profile_dataframe
-from sol01.snowflake_runner import _dataframe_records, fetch_query_dataframe
-from sol01.validation import validate_sql
 
 logger = get_logger(__name__)
 

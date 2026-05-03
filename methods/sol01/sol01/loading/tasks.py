@@ -9,7 +9,9 @@ from collections.abc import Sequence
 from functools import cache
 from pathlib import Path
 
-from sol01.category_metadata import (  # noqa: F401
+from sol01.infra.logging import get_logger
+from sol01.infra.paths import REPO_ROOT
+from sol01.loading.category_metadata import (  # noqa: F401
     CATEGORY_BATCHES_DIR,
     KNOWN_CATEGORY_TAGS,
     CategoryMetadata,
@@ -17,10 +19,8 @@ from sol01.category_metadata import (  # noqa: F401
     load_category_metadata,
     load_category_metadata_map,
 )
-from sol01.logging import get_logger
 from sol01.models import Task
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
 SPIDER2_SNOW_PATH = REPO_ROOT / "spider2-snow" / "spider2-snow.jsonl"
 ALL_TASK_SELECTOR = "all"
 logger = get_logger(__name__)

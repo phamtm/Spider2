@@ -13,9 +13,12 @@ from time import perf_counter
 from typing import Protocol
 from uuid import uuid4
 
-from sol01.eval_runner import GOLD_DIR, run_official_eval
+from sol01.analysis.eval_runner import GOLD_DIR, run_official_eval
+from sol01.execution.snowflake_runner import execute_sql
+from sol01.infra.time_utils import format_duration
+from sol01.loading.tasks import load_tasks
 from sol01.models import ExecutionResult, Task
-from sol01.output import (
+from sol01.output.output import (
     OUTPUTS_ROOT,
     RunPaths,
     ensure_run_paths,
@@ -25,9 +28,6 @@ from sol01.output import (
     write_manifest,
     write_sql,
 )
-from sol01.snowflake_runner import execute_sql
-from sol01.tasks import load_tasks
-from sol01.time_utils import format_duration
 
 GOLD_SQL_DIR = GOLD_DIR / "sql"
 

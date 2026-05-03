@@ -12,8 +12,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from sol01.logging import get_logger
-from sol01.tasks import REPO_ROOT
+from sol01.infra.logging import get_logger
+from sol01.loading.tasks import REPO_ROOT
 
 OUTPUTS_ROOT = REPO_ROOT / "methods" / "sol01" / "outputs"
 REGISTRY_ROOT = OUTPUTS_ROOT / "registry"

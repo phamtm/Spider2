@@ -7,10 +7,10 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
-from sol01.logging import get_logger
+from sol01.infra.logging import get_logger
+from sol01.infra.paths import REPO_ROOT
 from sol01.models import ColumnSchema, TableSchema
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
 SNOW_METADATA_ROOT = REPO_ROOT / "spider2-snow" / "resource" / "databases"
 CACHE_PATH = (REPO_ROOT / "methods" / "sol01" / ".cache" / "snow_index.json").resolve()
 logger = get_logger(__name__)

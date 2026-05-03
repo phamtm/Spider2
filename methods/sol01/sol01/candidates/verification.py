@@ -10,13 +10,14 @@ import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError
 
-from sol01.candidate_scoring import (
+from sol01.candidates.scoring import (
     _coerce_number,
     _expects_scalar_output,
     _normalized_output_expectation,
 )
-from sol01.index import CACHE_PATH
-from sol01.logging import get_logger
+from sol01.execution.snowflake_runner import fetch_query_dataframe as _fetch_query_dataframe
+from sol01.infra.logging import get_logger
+from sol01.llm.prompt_builders import _infer_native_value_terms
 from sol01.models import (
     AggregateGrainReport,
     ExecutionResult,
@@ -29,9 +30,8 @@ from sol01.models import (
     Task,
     ValidationReport,
 )
-from sol01.prompt_builders import _infer_native_value_terms
-from sol01.retrieval import load_db_index
-from sol01.snowflake_runner import fetch_query_dataframe as _fetch_query_dataframe
+from sol01.schema.index import CACHE_PATH
+from sol01.schema.retrieval import load_db_index
 
 logger = get_logger(__name__)
 

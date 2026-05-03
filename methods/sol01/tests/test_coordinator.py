@@ -12,11 +12,19 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from sol01.candidate_scoring import _attempt_score
-from sol01.candidate_verification import _metric_source_guidance
-from sol01.config import RuntimeConfig
+from sol01.candidates.scoring import _attempt_score
+from sol01.candidates.verification import _metric_source_guidance
 from sol01.coordinator import run_task, run_tasks
-from sol01.llm import PromptSpec
+from sol01.infra.config import RuntimeConfig
+from sol01.llm.client import PromptSpec
+from sol01.llm.prompt_builders import (
+    _critic_prompt,
+    _intent_user_prompt,
+    _semantic_repair_prompt,
+    _sql_generation_prompt,
+    _sql_reference_context,
+    _sql_repair_prompt,
+)
 from sol01.models import (
     CandidateComparisonReport,
     ColumnSchema,
@@ -30,16 +38,8 @@ from sol01.models import (
     Task,
     ValidationReport,
 )
-from sol01.output import ensure_run_paths
-from sol01.prompt_builders import (
-    _critic_prompt,
-    _intent_user_prompt,
-    _semantic_repair_prompt,
-    _sql_generation_prompt,
-    _sql_reference_context,
-    _sql_repair_prompt,
-)
-from sol01.retrieval import load_db_index
+from sol01.output.output import ensure_run_paths
+from sol01.schema.retrieval import load_db_index
 
 SALES_TABLE = "TEST_DB.PUBLIC.SALES"
 DICOM_TEST_TABLE = "TEST_DB.PUBLIC.DICOM_PIVOT"
@@ -50,7 +50,7 @@ def _patch_db_index(monkeypatch: pytest.MonkeyPatch, schema: dict) -> None:
     """Patch load_db_index in both coordinator and candidate_verification."""
     monkeypatch.setattr("sol01.coordinator.load_db_index", lambda *args, **kwargs: schema)
     monkeypatch.setattr(
-        "sol01.candidate_verification.load_db_index", lambda *args, **kwargs: schema
+        "sol01.candidates.verification.load_db_index", lambda *args, **kwargs: schema
     )
 
 
@@ -117,10 +117,10 @@ def fake_snowflake(monkeypatch: pytest.MonkeyPatch) -> None:
         )
 
     monkeypatch.setattr(
-        "sol01.candidate_evaluator.fetch_query_dataframe", fake_fetch_query_dataframe
+        "sol01.candidates.evaluator.fetch_query_dataframe", fake_fetch_query_dataframe
     )
     monkeypatch.setattr(
-        "sol01.candidate_verification._fetch_query_dataframe", fake_fetch_query_dataframe
+        "sol01.candidates.verification._fetch_query_dataframe", fake_fetch_query_dataframe
     )
 
 
@@ -874,11 +874,11 @@ def test_run_task_verifies_zero_aggregate_results_before_finalizing(
     )
 
     monkeypatch.setattr(
-        "sol01.candidate_evaluator.fetch_query_dataframe",
+        "sol01.candidates.evaluator.fetch_query_dataframe",
         fake_fetch_query_dataframe,
     )
     monkeypatch.setattr(
-        "sol01.candidate_verification._fetch_query_dataframe",
+        "sol01.candidates.verification._fetch_query_dataframe",
         fake_fetch_query_dataframe,
     )
     monkeypatch.setattr(
@@ -1007,7 +1007,7 @@ def test_run_task_prefers_row_count_over_distinct_entity_count(
     )
 
     monkeypatch.setattr(
-        "sol01.candidate_evaluator.fetch_query_dataframe",
+        "sol01.candidates.evaluator.fetch_query_dataframe",
         lambda sql, *, db: pd.DataFrame(
             [
                 {"age_bucket": "18-25", "users": 7},
@@ -1580,7 +1580,7 @@ def test_run_task_grounds_status_literals_before_sql_generation(
     )
     _patch_db_index(monkeypatch, {BIKE_TABLE: bike_table})
     monkeypatch.setattr(
-        "sol01.candidate_evaluator.fetch_query_dataframe",
+        "sol01.candidates.evaluator.fetch_query_dataframe",
         lambda sql, db: pd.DataFrame(
             [
                 {"status": "active", "station_count": 10},
@@ -1673,7 +1673,7 @@ def test_run_task_keeps_successful_critic_repair_on_score_tie(
     )
     _patch_db_index(monkeypatch, {})
     monkeypatch.setattr(
-        "sol01.candidate_evaluator.fetch_query_dataframe",
+        "sol01.candidates.evaluator.fetch_query_dataframe",
         lambda sql, db: pd.DataFrame([{"customer": "bob", "amount": 12.0}]),
     )
 
@@ -1989,7 +1989,7 @@ def test_run_task_flags_missing_grouped_identifier_in_trace(
         )
 
     monkeypatch.setattr(
-        "sol01.candidate_evaluator.fetch_query_dataframe", fake_fetch_query_dataframe
+        "sol01.candidates.evaluator.fetch_query_dataframe", fake_fetch_query_dataframe
     )
     monkeypatch.setattr(
         "sol01.coordinator.retrieve_schema",

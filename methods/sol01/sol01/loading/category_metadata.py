@@ -8,10 +8,10 @@ from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
 
-from sol01.logging import get_logger
+from sol01.infra.logging import get_logger
+from sol01.infra.paths import REPO_ROOT
 from sol01.models import CategoryMetadata
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
 SPIDER2_SNOW_PATH = REPO_ROOT / "spider2-snow" / "spider2-snow.jsonl"
 CATEGORY_BATCHES_DIR = REPO_ROOT / "methods" / "sol01" / "metadata" / "category_batches"
 CATEGORY_METADATA_PATH = REPO_ROOT / "methods" / "sol01" / "metadata" / "category_metadata.jsonl"

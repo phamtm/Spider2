@@ -12,9 +12,9 @@ import typer
 from typer.testing import CliRunner
 
 from sol01 import cli
-from sol01.config import RuntimeConfig
+from sol01.infra.config import RuntimeConfig
 from sol01.models import FinalAnswer, Task
-from sol01.output import AskPaths, ensure_run_paths, eval_input_csv_dir_for
+from sol01.output.output import AskPaths, ensure_run_paths, eval_input_csv_dir_for
 
 runner = CliRunner()
 

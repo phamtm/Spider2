@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from sol01.output import (
+from sol01.output.output import (
     csv_path_for,
     ensure_ask_paths,
     ensure_run_paths,

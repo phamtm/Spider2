@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from sol01.snowflake_runner import _clean_value, _dataframe_records, _record_keys
+from sol01.execution.snowflake_runner import _clean_value, _dataframe_records, _record_keys
 
 
 def profile_dataframe(

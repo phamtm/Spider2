@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from sol01.llm import PromptSpec
+from sol01.llm.client import PromptSpec
 from sol01.models import SchemaSelection, TableSelectionDecision
-from sol01.retrieval import retrieve_schema
+from sol01.schema.retrieval import retrieve_schema
 
 CUSTOMERS = "E_COMMERCE.E_COMMERCE.CUSTOMERS"
 ORDERS = "E_COMMERCE.E_COMMERCE.ORDERS"

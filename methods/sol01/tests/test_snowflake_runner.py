@@ -10,8 +10,8 @@ from typing import Any
 import pandas as pd
 import pytest
 
-from sol01.profiling import profile_dataframe
-from sol01.snowflake_runner import execute_sql, load_snowflake_credentials
+from sol01.execution.profiling import profile_dataframe
+from sol01.execution.snowflake_runner import execute_sql, load_snowflake_credentials
 
 
 def test_load_snowflake_credentials_normalizes_username_and_keeps_session_parameters(

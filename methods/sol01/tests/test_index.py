@@ -1,14 +1,14 @@
 import json
 from pathlib import Path
 
-from sol01.index import (
+from sol01.schema.index import (
     CACHE_PATH,
     REPO_ROOT,
     SNOW_METADATA_ROOT,
     build_db_index,
     build_index_cache,
 )
-from sol01.retrieval import load_db_index
+from sol01.schema.retrieval import load_db_index
 
 CUSTOMERS = "E_COMMERCE.E_COMMERCE.CUSTOMERS"
 ORDERS = "E_COMMERCE.E_COMMERCE.ORDERS"

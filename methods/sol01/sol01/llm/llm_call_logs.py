@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sol01.time_utils import format_duration
+from sol01.infra.time_utils import format_duration
 
 
 @dataclass(frozen=True)

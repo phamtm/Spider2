@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from io import StringIO
 
-from sol01.logging import configure_logging, get_logger
+from sol01.infra.logging import configure_logging, get_logger
 
 
 def test_configure_logging_renders_structured_fields():

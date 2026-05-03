@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from sol01.category_metadata import TIER_COMPLEXITY, tier_complexity_summary
+from sol01.loading.category_metadata import TIER_COMPLEXITY, tier_complexity_summary
 from sol01.progress_ui.constants import STATUS_COLORS, STATUS_LABELS, STATUS_ORDER
 
 

@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sol01.analysis import analyze_run
-from sol01.output import ensure_run_paths, write_trace
+from sol01.analysis.analysis import analyze_run
+from sol01.output.output import ensure_run_paths, write_trace
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:

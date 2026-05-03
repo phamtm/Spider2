@@ -7,11 +7,11 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from sol01.category_metadata import (
+from sol01.infra.logging import get_logger
+from sol01.loading.category_metadata import (
     CategoryMetadataValidationError,
     load_category_metadata_map,
 )
-from sol01.logging import get_logger
 from sol01.progress_ui.models import Record
 from sol01.progress_ui.parsing import (
     normalize_item,

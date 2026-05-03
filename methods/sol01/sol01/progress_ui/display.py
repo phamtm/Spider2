@@ -6,14 +6,14 @@ from typing import Any
 
 import pandas as pd
 
-from sol01.category_metadata import tier_complexity_summary
+from sol01.loading.category_metadata import tier_complexity_summary
+from sol01.output.registry import resolve_llm_call_log_path as resolve_task_llm_call_log_path
 from sol01.progress_ui.constants import (
     OUTPUTS_ROOT,
     STATUS_COLORS,
     STATUS_LABELS,
 )
 from sol01.progress_ui.utils import is_missing_value, normalize_tag_values
-from sol01.registry import resolve_llm_call_log_path as resolve_task_llm_call_log_path
 
 
 def _truncate_text(value: Any, limit: int) -> str:

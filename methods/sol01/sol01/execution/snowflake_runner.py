@@ -11,7 +11,7 @@ from typing import Any
 
 import pandas as pd
 
-from sol01.logging import get_logger
+from sol01.infra.logging import get_logger
 from sol01.models import ExecutionResult
 
 METHOD_ROOT = Path(__file__).resolve().parents[1]

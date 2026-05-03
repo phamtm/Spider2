@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from sol01.llm_call_logs import (
+from sol01.llm.llm_call_logs import (
     build_llm_call_detail_sections,
     build_llm_call_summary_rows,
     format_llm_call_value,

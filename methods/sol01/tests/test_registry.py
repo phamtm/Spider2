@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from sol01.registry import (
+from sol01.output.registry import (
     RegistryTaskRecord,
     ensure_registry_paths,
     load_latest,

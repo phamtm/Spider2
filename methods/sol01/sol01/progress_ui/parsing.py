@@ -6,10 +6,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sol01.logging import get_logger
+from sol01.analysis.trace_diagnostics import summarize_trace_diagnostics
+from sol01.infra.logging import get_logger
 from sol01.progress_ui.constants import DEFAULT_DATASET, DEFAULT_SOURCE, ROOT
 from sol01.progress_ui.models import Record
-from sol01.trace_diagnostics import summarize_trace_diagnostics
 
 logger = get_logger(__name__)
 

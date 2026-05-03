@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from sol01.category_metadata import (
+from sol01.loading.category_metadata import (
     CategoryMetadataValidationError,
     load_category_metadata,
     load_category_metadata_map,

@@ -1,7 +1,7 @@
 """Tests for the read-only SQL validator."""
 
+from sol01.execution.validation import validate_sql
 from sol01.models import ColumnSchema, TableSchema
-from sol01.validation import validate_sql
 
 ALLOWED_TABLES = {"customers", "orders", "order_items"}
 SNOW_ALLOWED_TABLES = {

@@ -6,7 +6,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sol01.llm_call_logs import build_llm_call_summary_rows, load_llm_call_log
+from sol01.llm.llm_call_logs import build_llm_call_summary_rows, load_llm_call_log
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:

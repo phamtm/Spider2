@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from sol01.tasks import ALL_TASK_SELECTOR, SPIDER2_SNOW_PATH, load_tasks, select_tasks
+from sol01.loading.tasks import ALL_TASK_SELECTOR, SPIDER2_SNOW_PATH, load_tasks, select_tasks
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:

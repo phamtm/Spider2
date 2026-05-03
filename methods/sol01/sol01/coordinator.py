@@ -9,42 +9,19 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Protocol
 
-from sol01.candidate_evaluator import _dataframe_records, evaluate_candidate
-from sol01.candidate_scoring import _best_attempt
-from sol01.candidate_verification import (
+from sol01.candidates.evaluator import _dataframe_records, evaluate_candidate
+from sol01.candidates.scoring import _best_attempt
+from sol01.candidates.verification import (
     _aggregate_grain_guidance,
     _aggregate_verification_reason,
     _augment_intent_with_value_groundings,
     _metric_source_guidance,
     _table_schemas_for_selection,
 )
-from sol01.config import RuntimeConfig
-from sol01.index import CACHE_PATH
-from sol01.llm_logging import LLMCallLogger
-from sol01.logging import get_logger
-from sol01.models import (
-    CandidateComparisonReport,
-    ConfidenceReport,
-    ExecutionResult,
-    FinalAnswer,
-    Intent,
-    SchemaSelection,
-    SQLCandidate,
-    Task,
-)
-from sol01.output import (
-    OUTPUTS_ROOT,
-    RunPaths,
-    csv_path_for,
-    ensure_run_paths,
-    llm_call_log_path_for,
-    should_skip_task,
-    trace_path_for,
-    write_manifest,
-    write_sql,
-    write_trace,
-)
-from sol01.prompt_builders import (
+from sol01.infra.config import RuntimeConfig
+from sol01.infra.logging import get_logger
+from sol01.llm.llm_logging import LLMCallLogger
+from sol01.llm.prompt_builders import (
     _aggregate_repair_prompt,
     _aggregate_verification_prompt,
     _candidate_comparison_prompt,
@@ -57,7 +34,30 @@ from sol01.prompt_builders import (
     _sql_reference_context,
     _sql_repair_prompt,
 )
-from sol01.retrieval import load_db_index, retrieve_schema
+from sol01.models import (
+    CandidateComparisonReport,
+    ConfidenceReport,
+    ExecutionResult,
+    FinalAnswer,
+    Intent,
+    SchemaSelection,
+    SQLCandidate,
+    Task,
+)
+from sol01.output.output import (
+    OUTPUTS_ROOT,
+    RunPaths,
+    csv_path_for,
+    ensure_run_paths,
+    llm_call_log_path_for,
+    should_skip_task,
+    trace_path_for,
+    write_manifest,
+    write_sql,
+    write_trace,
+)
+from sol01.schema.index import CACHE_PATH
+from sol01.schema.retrieval import load_db_index, retrieve_schema
 
 logger = get_logger(__name__)
 LLMClient: Any | None = None
@@ -68,7 +68,7 @@ __all__ = ["run_task", "run_tasks"]
 def load_document_text(file_name: str) -> str:
     """Load task-linked document text without importing the docs module at startup."""
 
-    from sol01.docs import load_document_text as _load_document_text
+    from sol01.loading.docs import load_document_text as _load_document_text
 
     return _load_document_text(file_name)
 
@@ -78,7 +78,7 @@ def _llm_client_class() -> Any:
 
     global LLMClient
     if LLMClient is None:
-        from sol01.llm import LLMClient as _LLMClient
+        from sol01.llm.client import LLMClient as _LLMClient
 
         LLMClient = _LLMClient
     return LLMClient

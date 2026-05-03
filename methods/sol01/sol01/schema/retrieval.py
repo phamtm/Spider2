@@ -7,13 +7,13 @@ from functools import cache
 from pathlib import Path
 from typing import Any, Protocol
 
-from sol01.index import CACHE_PATH, build_db_index, build_index_cache
-from sol01.logging import get_logger
+from sol01.infra.logging import get_logger
 from sol01.models import (
     SchemaSelection,
     TableSchema,
     TableSelectionDecision,
 )
+from sol01.schema.index import CACHE_PATH, build_db_index, build_index_cache
 
 logger = get_logger(__name__)
 

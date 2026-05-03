@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from functools import cache
 
-from sol01.tasks import REPO_ROOT
+from sol01.loading.tasks import REPO_ROOT
 
 DOCUMENTS_ROOT = REPO_ROOT / "spider2-snow" / "resource" / "documents"
 HEADING_RE = re.compile(r"^(#{1,6})\s+(.*)$")

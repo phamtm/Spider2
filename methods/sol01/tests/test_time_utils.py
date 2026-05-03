@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sol01.time_utils import format_duration
+from sol01.infra.time_utils import format_duration
 
 
 def test_format_duration_uses_short_human_readable_units():

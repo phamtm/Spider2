@@ -1,4 +1,4 @@
-from sol01.docs import (
+from sol01.loading.docs import (
     DOCUMENTS_ROOT,
     load_document_chunks,
     load_document_text,

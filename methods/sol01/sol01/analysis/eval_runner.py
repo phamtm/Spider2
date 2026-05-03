@@ -12,8 +12,10 @@ from pathlib import Path
 from shutil import copy2, rmtree
 from typing import Any
 
-from sol01.logging import get_logger
-from sol01.output import (
+from sol01.execution.snowflake_runner import DEFAULT_CREDENTIAL_PATH
+from sol01.infra.logging import get_logger
+from sol01.loading.tasks import REPO_ROOT, load_tasks
+from sol01.output.output import (
     RunPaths,
     ensure_run_paths,
     eval_command_path_for,
@@ -30,8 +32,6 @@ from sol01.output import (
     per_instance_eval_path_for,
     scored_csv_dir_for,
 )
-from sol01.snowflake_runner import DEFAULT_CREDENTIAL_PATH
-from sol01.tasks import REPO_ROOT, load_tasks
 
 EVALUATION_SUITE_DIR = REPO_ROOT / "spider2-snow" / "evaluation_suite"
 EVALUATE_SCRIPT = EVALUATION_SUITE_DIR / "evaluate.py"

@@ -7,7 +7,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from sol01.eval_runner import (
+from sol01.analysis.eval_runner import (
     BENCHMARK_TOTAL,
     EVALUATE_SCRIPT,
     GOLD_DIR,
@@ -16,7 +16,7 @@ from sol01.eval_runner import (
     run_official_eval,
     run_persisted_eval,
 )
-from sol01.output import (
+from sol01.output.output import (
     ensure_run_paths,
     eval_command_path_for,
     eval_input_csv_dir_for,

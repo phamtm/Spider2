@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
+from sol01.infra.paths import REPO_ROOT
 
-ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_DATASET = ROOT / "spider2-snow" / "spider2-snow.jsonl"
-DEFAULT_SOURCE = ROOT / "methods" / "sol01" / "outputs" / "registry" / "latest.json"
-OUTPUTS_ROOT = ROOT / "methods" / "sol01" / "outputs"
+ROOT = REPO_ROOT
+DEFAULT_DATASET = REPO_ROOT / "spider2-snow" / "spider2-snow.jsonl"
+DEFAULT_SOURCE = REPO_ROOT / "methods" / "sol01" / "outputs" / "registry" / "latest.json"
+OUTPUTS_ROOT = REPO_ROOT / "methods" / "sol01" / "outputs"
 
 STATUS_ORDER = ("correct", "incorrect", "answered", "unanswered")
 STATUS_LABELS = {
