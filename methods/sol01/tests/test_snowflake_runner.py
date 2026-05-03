@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -147,6 +148,31 @@ def test_profile_dataframe_serializes_decimal_values():
         {"value": "78.15", "count": 2},
         {"value": "80.00", "count": 1},
     ]
+    json.dumps(profile, sort_keys=True)
+
+
+def test_profile_dataframe_serializes_python_dates():
+    dataframe = pd.DataFrame(
+        [
+            {"day": date(2023, 6, 1), "seen_at": datetime(2023, 6, 1, 12, 30, 5)},
+            {"day": date(2023, 6, 2), "seen_at": datetime(2023, 6, 2, 8, 15, 0)},
+        ]
+    )
+
+    profile = profile_dataframe(dataframe)
+
+    assert profile["sample_rows"] == [
+        {"day": "2023-06-01", "seen_at": "2023-06-01T12:30:05"},
+        {"day": "2023-06-02", "seen_at": "2023-06-02T08:15:00"},
+    ]
+    assert profile["min_values"] == {
+        "day": "2023-06-01",
+        "seen_at": "2023-06-01T12:30:05",
+    }
+    assert profile["max_values"] == {
+        "day": "2023-06-02",
+        "seen_at": "2023-06-02T08:15:00",
+    }
     json.dumps(profile, sort_keys=True)
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -166,6 +167,8 @@ def _clean_value(value: object) -> object:
     if pd.isna(value):
         return None
     if isinstance(value, pd.Timestamp):
+        return value.isoformat()
+    if isinstance(value, date):
         return value.isoformat()
     if isinstance(value, Decimal):
         return str(value)
