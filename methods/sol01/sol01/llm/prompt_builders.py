@@ -212,30 +212,11 @@ def _grounded_literal_context_from_intent(intent: Intent) -> str | None:
     return "\n".join(lines)
 
 
-def _grain_guidance_block(guidance: str | None) -> str:
-    """Render an optional grain hint as a prompt section."""
-
-    if not guidance:
-        return ""
-    return f"Grain guidance:\n{guidance}\n\n"
-
-
-def _metric_source_guidance_block(guidance: str | None) -> str:
-    """Render optional metric source guidance as a prompt section."""
-
-    if not guidance:
-        return ""
-    return f"Metric source guidance:\n{guidance}\n\n"
-
-
 def _sql_generation_prompt(
     task: Task,
     intent: Intent,
     sql_reference_context: str,
     docs_context: str,
-    *,
-    aggregate_grain_guidance: str | None = None,
-    metric_source_guidance: str | None = None,
 ) -> str:
     """Build the SQL-generation prompt body."""
 
@@ -247,8 +228,6 @@ def _sql_generation_prompt(
         f"Question: {task.question}\n\n"
         f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
         f"{grounded_literal_block}"
-        f"{_grain_guidance_block(aggregate_grain_guidance)}"
-        f"{_metric_source_guidance_block(metric_source_guidance)}"
         "Write the SQL using only the reference context above."
     )
 
@@ -260,8 +239,6 @@ def _sql_generation_batch_prompt(
     docs_context: str,
     *,
     candidate_count: int,
-    aggregate_grain_guidance: str | None = None,
-    metric_source_guidance: str | None = None,
 ) -> str:
     """Build one prompt that asks for multiple candidate SQL queries."""
 
@@ -270,8 +247,6 @@ def _sql_generation_batch_prompt(
         intent,
         sql_reference_context,
         docs_context,
-        aggregate_grain_guidance=aggregate_grain_guidance,
-        metric_source_guidance=metric_source_guidance,
     )
     return (
         f"{base_prompt}\n\n"
@@ -286,9 +261,6 @@ def _sql_repair_prompt(
     attempt: dict[str, Any],
     sql_reference_context: str,
     docs_context: str,
-    *,
-    aggregate_grain_guidance: str | None = None,
-    metric_source_guidance: str | None = None,
 ) -> str:
     """Build a repair prompt using validation or execution feedback."""
 
@@ -305,8 +277,6 @@ def _sql_repair_prompt(
         f"Validation:\n{json.dumps(attempt['validation'], indent=2, sort_keys=True)}\n\n"
         f"Execution:\n{json.dumps(attempt['execution_result'], indent=2, sort_keys=True)}\n\n"
         f"{grounded_literal_block}"
-        f"{_grain_guidance_block(aggregate_grain_guidance)}"
-        f"{_metric_source_guidance_block(metric_source_guidance)}"
     )
 
 
@@ -317,8 +287,6 @@ def _candidate_review_prompt(
     sql_reference_context: str,
     docs_context: str,
     *,
-    aggregate_grain_guidance: str | None = None,
-    metric_source_guidance: str | None = None,
     baseline_stage: str | None,
     review_reason: str,
 ) -> str:
@@ -333,12 +301,11 @@ def _candidate_review_prompt(
         f"Question: {task.question}\n\n"
         f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
         f"{grounded_literal_block}"
-        f"{_grain_guidance_block(aggregate_grain_guidance)}"
-        f"{_metric_source_guidance_block(metric_source_guidance)}"
         f"Baseline stage: {baseline_stage or 'unknown'}\n"
         f"Review reason: {review_reason}\n\n"
         "Executable candidates:\n"
         f"{json.dumps(comparison_candidates, indent=2, sort_keys=True)}\n\n"
+        "Use local scores and verification reports as evidence, not as the final decision. "
         "Pick the candidate that best answers the contract, then decide whether that "
         "preferred candidate still needs repair. Consider wrong shape, missing or "
         "ungrounded filters, suspicious aggregations including tiny aggregate results, "
@@ -354,8 +321,6 @@ def _semantic_repair_prompt(
     critic: ConfidenceReport,
     sql_reference_context: str,
     docs_context: str,
-    *,
-    metric_source_guidance: str | None = None,
 ) -> str:
     """Build the repair prompt for one critic-triggered retry."""
 
@@ -367,7 +332,6 @@ def _semantic_repair_prompt(
         f"Question: {task.question}\n\n"
         f"Current answer contract:\n{intent.model_dump_json(indent=2)}\n\n"
         f"{grounded_literal_block}"
-        f"{_metric_source_guidance_block(metric_source_guidance)}"
         f"Current SQL:\n{attempt['sql']}\n\n"
         "Candidate assumptions:\n"
         f"{json.dumps(attempt.get('assumptions', []), indent=2, sort_keys=True)}\n\n"

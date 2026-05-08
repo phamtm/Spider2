@@ -36,8 +36,8 @@ Spider2-Snow task
   -> generate several SQL candidates in one batch
   -> validate each SQL candidate
   -> execute valid candidates in Snowflake
-  -> score candidates locally
-  -> review ambiguous or risky candidates when needed
+  -> attach local observations and score breakdowns
+  -> ask the LLM to adjudicate executable candidates
   -> repair when needed
   -> write final SQL and CSV
   -> run official Spider2-Snow eval
@@ -188,16 +188,16 @@ For each executed candidate, the solver records:
 The candidate CSV is not written immediately. Only the final selected candidate
 becomes the saved prediction CSV.
 
-## Candidate Scoring
+## Candidate Observations
 
-`sol01` scores each candidate using local evidence.
+`sol01` records local observations for each candidate.
 
 The strongest signal is execution:
 
 - executable SQL gets a large positive score
 - non-executable SQL gets a large negative score
 
-Then it adjusts the score for:
+The observation payload also includes:
 
 - validation quality
 - expected output shape
@@ -206,17 +206,18 @@ Then it adjusts the score for:
 - result size plausibility
 - model confidence as a small tie-breaker
 
-This score is local solver logic. It is separate from the official benchmark
-score, which runs later on the final CSV.
+The numeric score is retained as diagnostic evidence. It is separate from the
+official benchmark score, which runs later on the final CSV, and it is not the
+semantic authority for choosing the final answer.
 
 ## Candidate Review
 
-Local scoring chooses the best attempt first. If executable candidates have
-close scores, or the current best candidate has local risk flags, the solver
-asks the LLM for one combined candidate review.
+After executable candidates are observed, the solver asks the LLM for one
+combined candidate review. Local scores, validation output, execution profiles,
+shape reports, and grounding reports are evidence for that review rather than
+hardcoded semantic policy.
 
-The review can override the current best candidate when another executable
-candidate better matches:
+The review chooses the candidate that best matches:
 
 - output shape
 - grain
@@ -226,8 +227,8 @@ candidate better matches:
 - grounded assumptions
 
 The same review also decides whether the preferred candidate needs repair. This
-replaces the former separate comparison, aggregate-verification, and critic
-calls.
+keeps semantic judgment in the model while preserving deterministic safety checks
+in local code.
 
 ## Repairs
 
@@ -371,7 +372,7 @@ trace races.
 - `sol01/prompt_builders.py`: builds the prompts for each pipeline stage.
 - `sol01/coordinator.py`: runs the per-task solver pipeline.
 - `sol01/candidate_evaluator.py`: validates, executes, profiles, and scores a candidate.
-- `sol01/candidate_scoring.py`: chooses the best local attempt.
+- `sol01/candidate_scoring.py`: produces local score breakdowns for review evidence.
 - `sol01/candidate_verification.py`: adds shape, filter, aggregate, and metric-source checks.
 - `sol01/validation.py`: blocks unsafe or out-of-scope SQL before execution.
 - `sol01/snowflake_runner.py`: executes SQL against Snowflake.

@@ -12,9 +12,7 @@ from typing import Any, Protocol
 from sol01.candidates.evaluator import _dataframe_records, evaluate_candidate
 from sol01.candidates.scoring import _best_attempt
 from sol01.candidates.verification import (
-    _aggregate_grain_guidance,
     _augment_intent_with_value_groundings,
-    _metric_source_guidance,
     _table_schemas_for_selection,
 )
 from sol01.infra.config import RuntimeConfig
@@ -307,8 +305,6 @@ class _TaskCtx:
     table_schemas: dict[str, Any]
     sql_reference_context: str
     docs_context: str
-    aggregate_grain_guidance: str | None
-    metric_source_guidance: str | None
     prompt_hashes: dict[str, str]
 
 
@@ -394,8 +390,6 @@ def _build_context(
         table_schemas=table_schemas,
         sql_reference_context=_sql_reference_context(schema, table_schemas),
         docs_context=docs_context,
-        aggregate_grain_guidance=_aggregate_grain_guidance(task, intent, schema, table_schemas),
-        metric_source_guidance=_metric_source_guidance(task, intent, table_schemas),
         prompt_hashes=prompt_hashes,
     )
 
@@ -493,8 +487,6 @@ def _generate_initial_candidates(
             ctx.sql_reference_context,
             ctx.docs_context,
             candidate_count=candidate_limit,
-            aggregate_grain_guidance=ctx.aggregate_grain_guidance,
-            metric_source_guidance=ctx.metric_source_guidance,
         ),
     )
     for candidate_index, candidate in enumerate(batch.candidates[:candidate_limit]):
@@ -545,8 +537,6 @@ def _repair_failed_execution(
             best_attempt,
             ctx.sql_reference_context,
             ctx.docs_context,
-            aggregate_grain_guidance=ctx.aggregate_grain_guidance,
-            metric_source_guidance=ctx.metric_source_guidance,
         ),
     )
     attempt = evaluate_candidate(
@@ -570,15 +560,13 @@ def _review_and_repair(
     max_attempts: int,
     semantic_repairs: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    """Run one combined candidate review when local evidence warrants it."""
+    """Ask the model to adjudicate executable attempts using local observations."""
 
     if best_attempt is None or not best_attempt["execution_result"]["ok"]:
         return best_attempt, None
 
     executable_attempts = [attempt for attempt in attempts if attempt["execution_result"]["ok"]]
-    review_reason = _candidate_review_reason(best_attempt, executable_attempts)
-    if review_reason is None:
-        return best_attempt, None
+    review_reason = _candidate_review_reason(executable_attempts)
 
     logger.info(
         "candidate review requested",
@@ -598,8 +586,6 @@ def _review_and_repair(
             executable_attempts,
             ctx.sql_reference_context,
             ctx.docs_context,
-            aggregate_grain_guidance=ctx.aggregate_grain_guidance,
-            metric_source_guidance=ctx.metric_source_guidance,
             baseline_stage=best_attempt["stage"],
             review_reason=review_reason,
         ),
@@ -672,7 +658,6 @@ def _review_and_repair(
             ),
             ctx.sql_reference_context,
             ctx.docs_context,
-            metric_source_guidance=ctx.metric_source_guidance,
         ),
     )
     attempt = evaluate_candidate(
@@ -690,72 +675,12 @@ def _review_and_repair(
     return new_best, review_payload
 
 
-def _candidate_review_reason(
-    best_attempt: dict[str, Any],
-    executable_attempts: list[dict[str, Any]],
-) -> str | None:
-    """Return why the combined review should run, or None for clear local winners."""
+def _candidate_review_reason(executable_attempts: list[dict[str, Any]]) -> str:
+    """Return the trace reason for model-led final candidate adjudication."""
 
-    reasons: list[str] = []
-    if _scores_are_ambiguous(executable_attempts):
-        reasons.append("multiple executable candidates have close local scores")
-    if _attempt_has_risk_flags(best_attempt):
-        reasons.append("best candidate has local risk flags")
-    return "; ".join(reasons) if reasons else None
-
-
-def _scores_are_ambiguous(executable_attempts: list[dict[str, Any]]) -> bool:
-    """Return True when local scoring cannot clearly separate executable candidates."""
-
-    if len(executable_attempts) <= 1:
-        return False
-    scores = sorted((float(attempt["score"]) for attempt in executable_attempts), reverse=True)
-    return scores[0] - scores[1] <= 10.0
-
-
-def _attempt_has_risk_flags(attempt: dict[str, Any]) -> bool:
-    """Return True when local checks found evidence worth one semantic review."""
-
-    if attempt.get("unsupported_assumptions"):
-        return True
-    if attempt.get("validation", {}).get("warnings"):
-        return True
-    if attempt.get("execution_result", {}).get("row_count") == 0:
-        return True
-    if (attempt.get("shape_report") or {}).get("violations"):
-        return True
-    if (attempt.get("filter_grounding_report") or {}).get("zero_like_result"):
-        return True
-    if float(attempt.get("score_breakdown", {}).get("verification_penalty", 0.0)) < 0:
-        return True
-    return _aggregate_risk_reason(attempt) is not None
-
-
-def _aggregate_risk_reason(attempt: dict[str, Any]) -> str | None:
-    """Return a local warning for tiny aggregate outputs without making an LLM call."""
-
-    execution = attempt.get("execution_result", {})
-    if not execution.get("ok"):
-        return None
-    sql = str(attempt.get("sql", "")).lower()
-    if not any(token in sql for token in ("count(", "sum(", "avg(", "min(", "max(")):
-        return None
-    sample_rows = execution.get("sample_rows") or []
-    if not sample_rows:
-        return None
-    numeric_values: list[float] = []
-    for value in sample_rows[0].values():
-        if isinstance(value, (int, float)):
-            numeric_values.append(float(value))
-    if not numeric_values:
-        return None
-    row_count = int(execution.get("row_count") or 0)
-    max_value = max(numeric_values)
-    if row_count == 1 and max_value <= 1:
-        return "aggregate returned one tiny numeric result"
-    if row_count <= 2 and max_value <= 2:
-        return "aggregate returned only tiny numeric results"
-    return None
+    if len(executable_attempts) == 1:
+        return "final adjudication of the only executable candidate"
+    return "final adjudication across executable candidates using local observations"
 
 
 def _expand_schema_selection(
@@ -798,10 +723,6 @@ def _rebuild_context_for_expansion(
         table_schemas=new_table_schemas,
         sql_reference_context=_sql_reference_context(expanded_schema, new_table_schemas),
         docs_context=ctx.docs_context,
-        aggregate_grain_guidance=_aggregate_grain_guidance(
-            ctx.task, intent, expanded_schema, new_table_schemas
-        ),
-        metric_source_guidance=_metric_source_guidance(ctx.task, intent, new_table_schemas),
         prompt_hashes=ctx.prompt_hashes,
     )
 
@@ -922,8 +843,6 @@ def _attempt_schema_expansion(
             expanded_ctx.sql_reference_context,
             expanded_ctx.docs_context,
             candidate_count=1,
-            aggregate_grain_guidance=expanded_ctx.aggregate_grain_guidance,
-            metric_source_guidance=expanded_ctx.metric_source_guidance,
         ),
     )
     if not batch.candidates:

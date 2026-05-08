@@ -2,6 +2,10 @@
 
 Review executable SQL candidates and decide whether the preferred result needs repair.
 
+Treat local validation, execution, result profiles, and score breakdowns as evidence.
+Do not choose a candidate only because it has the highest local score; choose the
+candidate that best answers the answer contract.
+
 First, choose the candidate that best satisfies the answer contract. Compare:
 - output shape
 - answer grain

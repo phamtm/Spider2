@@ -168,7 +168,7 @@ def _candidate(sql: str, *, confidence: float = 0.8) -> SQLCandidate:
     )
 
 
-def test_run_task_uses_planning_and_batched_generation(
+def test_run_task_uses_planning_batched_generation_and_model_review(
     tmp_path: Path,
     fake_snowflake: None,
     db_index: dict[str, TableSchema],
@@ -186,6 +186,17 @@ def test_run_task_uses_planning_and_batched_generation(
                             f"SELECT CUSTOMER, AMOUNT FROM {SALES_TABLE} ORDER BY AMOUNT DESC"
                         )
                     ]
+                )
+            ],
+            "candidate_review": [
+                CandidateReviewReport(
+                    baseline_stage="initial_1",
+                    preferred_stage="initial_1",
+                    compared_stages=["initial_1"],
+                    reasons=["The candidate matches the requested columns."],
+                    confidence=0.9,
+                    issues=[],
+                    should_repair=False,
                 )
             ],
         },
@@ -206,11 +217,15 @@ def test_run_task_uses_planning_and_batched_generation(
     assert trace["prompt_hashes"] == {
         "planning": "hash-planning",
         "sql_generation_batch": "hash-sql_generation_batch",
+        "candidate_review": "hash-candidate_review",
     }
     assert trace["schema_selection"]["selected_tables"] == [SALES_TABLE]
     assert len(trace["attempts"]) == 1
-    assert "candidate_review" not in trace
-    assert set(prompts) == {"planning", "sql_generation_batch"}
+    assert trace["candidate_review"]["preferred_stage"] == "initial_1"
+    assert trace["candidate_review"]["review_reason"] == (
+        "final adjudication of the only executable candidate"
+    )
+    assert set(prompts) == {"planning", "sql_generation_batch", "candidate_review"}
 
 
 def test_close_executable_candidates_use_one_candidate_review(
