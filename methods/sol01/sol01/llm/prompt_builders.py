@@ -107,17 +107,6 @@ def _column_looks_string_like(column_type: str | None) -> bool:
     return any(token in lowered for token in ("char", "text", "string", "varchar", "variant"))
 
 
-def _schema_context(schema: SchemaSelection) -> str:
-    """Render a compact schema summary for prompt inputs."""
-
-    return (
-        f"DB: {schema.db}\n"
-        f"Selected tables: {', '.join(schema.selected_tables)}\n"
-        f"Expanded tables: {', '.join(schema.expanded_tables)}\n"
-        f"Rationale: {schema.rationale}"
-    )
-
-
 def _sql_reference_context(
     schema: SchemaSelection,
     table_schemas: dict[str, TableSchema],
@@ -180,43 +169,32 @@ def _question_preview(question: str, *, max_length: int = 120) -> str:
     return normalized[: max_length - 1].rstrip() + "…"
 
 
-def _intent_user_prompt(
+def _planning_user_prompt(
     task: Task,
-    schema: SchemaSelection,
+    db: str,
     docs_context: str,
-    table_schemas: dict[str, TableSchema] | None = None,
+    db_schema_summary: str,
 ) -> str:
-    """Build the user prompt for intent extraction."""
+    """Build the combined schema-selection and intent-extraction prompt."""
 
-    grounded_literals = _grounded_literal_context(task, schema, table_schemas or {})
-    prompt = (
+    return (
         f"Question: {task.question}\n\n"
+        f"Database: {db}\n\n"
         f"Document context:\n{docs_context}\n\n"
-        f"Schema context:\n{_schema_context(schema)}"
+        "Include all tables that are plausibly required to answer the question, "
+        "including join and bridge tables. Omit only tables that are clearly irrelevant.\n\n"
+        "For metric questions, include tables at every grain that may be needed. "
+        "If one table already has the needed grouping keys, time key, filters, and a "
+        "native metric column that is clearly grounded in the answer contract or whose "
+        "semantics unambiguously match the question, that table is the preferred metric "
+        "source; also include lower-grain detail tables when the question may need "
+        "detail-level filters, grouping, output columns, an explicit formula, or when "
+        "no clearly grounded native metric exists.\n\n"
+        "Create the answer contract from the question and document context. Do not invent "
+        "filters, current/latest rules, dedupe rules, status rules, or metric formulas that "
+        "are not grounded.\n\n"
+        f"Schema summary:\n{db_schema_summary}"
     )
-    if grounded_literals:
-        prompt += f"\n\n{grounded_literals}"
-    return prompt
-
-
-def _grounded_literal_context(
-    task: Task,
-    schema: SchemaSelection,
-    table_schemas: dict[str, TableSchema],
-) -> str | None:
-    """Render native sample-value matches for intent extraction and repair prompts."""
-
-    native_value_terms = _infer_native_value_terms(task, schema, table_schemas)
-    if not native_value_terms:
-        return None
-    lines = ["Grounded literal values:"]
-    for term in native_value_terms:
-        lines.append(f"- {term}")
-    lines.append(
-        "Use these as native column values. Do not recast them as behavioral definitions "
-        "unless the question explicitly asks for that."
-    )
-    return "\n".join(lines)
 
 
 def _grounded_literal_context_from_intent(intent: Intent) -> str | None:
@@ -275,6 +253,33 @@ def _sql_generation_prompt(
     )
 
 
+def _sql_generation_batch_prompt(
+    task: Task,
+    intent: Intent,
+    sql_reference_context: str,
+    docs_context: str,
+    *,
+    candidate_count: int,
+    aggregate_grain_guidance: str | None = None,
+    metric_source_guidance: str | None = None,
+) -> str:
+    """Build one prompt that asks for multiple candidate SQL queries."""
+
+    base_prompt = _sql_generation_prompt(
+        task,
+        intent,
+        sql_reference_context,
+        docs_context,
+        aggregate_grain_guidance=aggregate_grain_guidance,
+        metric_source_guidance=metric_source_guidance,
+    )
+    return (
+        f"{base_prompt}\n\n"
+        f"Return exactly {candidate_count} meaningfully different SQL candidate(s) when "
+        "there are genuine alternatives. Keep each candidate independently executable."
+    )
+
+
 def _sql_repair_prompt(
     task: Task,
     intent: Intent | None,
@@ -305,68 +310,7 @@ def _sql_repair_prompt(
     )
 
 
-def _critic_prompt(
-    task: Task,
-    intent: Intent,
-    attempt: dict[str, Any],
-    sql_reference_context: str,
-    docs_context: str,
-    *,
-    metric_source_guidance: str | None = None,
-) -> str:
-    """Build the critic prompt using the current best SQL and result profile."""
-
-    grounded_literals = _grounded_literal_context_from_intent(intent)
-    grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
-    return (
-        f"{sql_reference_context}\n\n"
-        f"Document context:\n{docs_context}\n\n"
-        f"Question: {task.question}\n\n"
-        f"Answer contract:\n{intent.model_dump_json(indent=2)}\n\n"
-        f"{grounded_literal_block}"
-        f"{_metric_source_guidance_block(metric_source_guidance)}"
-        f"SQL:\n{attempt['sql']}\n\n"
-        "Candidate assumptions:\n"
-        f"{json.dumps(attempt.get('assumptions', []), indent=2, sort_keys=True)}\n\n"
-        "Candidate constraint ledger:\n"
-        f"{json.dumps(attempt.get('constraint_ledger', []), indent=2, sort_keys=True)}\n\n"
-        "Candidate unsupported assumptions:\n"
-        f"{json.dumps(attempt.get('unsupported_assumptions', []), indent=2, sort_keys=True)}\n\n"
-        "Execution result:\n"
-        f"{json.dumps(attempt.get('execution_result', {}), indent=2, sort_keys=True)}\n\n"
-        "Result profile:\n"
-        f"{json.dumps(attempt.get('result_profile', {}), indent=2, sort_keys=True)}"
-    )
-
-
-def _aggregate_verification_prompt(
-    task: Task,
-    attempt: dict[str, Any],
-    sql_reference_context: str,
-    docs_context: str,
-    *,
-    reason: str,
-) -> str:
-    """Build the verification prompt for suspicious aggregate outputs."""
-
-    return (
-        f"{sql_reference_context}\n\n"
-        f"Document context:\n{docs_context}\n\n"
-        f"Question: {task.question}\n\n"
-        f"Suspicion: {reason}\n\n"
-        f"SQL:\n{attempt['sql']}\n\n"
-        "Execution result:\n"
-        f"{json.dumps(attempt['execution_result'], indent=2, sort_keys=True)}\n\n"
-        "Result profile:\n"
-        f"{json.dumps(attempt.get('result_profile', {}), indent=2, sort_keys=True)}\n\n"
-        "Check whether the aggregate output is plausible.\n"
-        "If the result looks too small, inspect nearby value variants, filter selectivity, "
-        "and the grain of the aggregation.\n"
-        "Recommend repair only when the result is not trustworthy."
-    )
-
-
-def _candidate_comparison_prompt(
+def _candidate_review_prompt(
     task: Task,
     intent: Intent,
     attempts: list[dict[str, Any]],
@@ -376,8 +320,9 @@ def _candidate_comparison_prompt(
     aggregate_grain_guidance: str | None = None,
     metric_source_guidance: str | None = None,
     baseline_stage: str | None,
+    review_reason: str,
 ) -> str:
-    """Build the comparison prompt for executable candidates."""
+    """Build the unified comparison and critic prompt."""
 
     comparison_candidates = [_comparison_attempt_summary(attempt) for attempt in attempts]
     grounded_literals = _grounded_literal_context_from_intent(intent)
@@ -390,40 +335,15 @@ def _candidate_comparison_prompt(
         f"{grounded_literal_block}"
         f"{_grain_guidance_block(aggregate_grain_guidance)}"
         f"{_metric_source_guidance_block(metric_source_guidance)}"
-        f"Baseline stage: {baseline_stage or 'unknown'}\n\n"
+        f"Baseline stage: {baseline_stage or 'unknown'}\n"
+        f"Review reason: {review_reason}\n\n"
         "Executable candidates:\n"
         f"{json.dumps(comparison_candidates, indent=2, sort_keys=True)}\n\n"
-        "Compare every executable candidate above and choose the one "
-        "that best fits the answer contract."
-    )
-
-
-def _aggregate_repair_prompt(
-    task: Task,
-    attempt: dict[str, Any],
-    verification: ConfidenceReport,
-    sql_reference_context: str,
-    docs_context: str,
-    intent: Intent | None = None,
-) -> str:
-    """Build the repair prompt after aggregate verification fails."""
-
-    verification_json = json.dumps(verification.model_dump(mode="json"), indent=2, sort_keys=True)
-    execution_json = json.dumps(attempt["execution_result"], indent=2, sort_keys=True)
-    profile_json = json.dumps(attempt.get("result_profile", {}), indent=2, sort_keys=True)
-    grounded_literals = (
-        _grounded_literal_context_from_intent(intent) if intent is not None else None
-    )
-    grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
-    return (
-        f"{sql_reference_context}\n\n"
-        f"Document context:\n{docs_context}\n\n"
-        f"Question: {task.question}\n\n"
-        f"Current SQL:\n{attempt['sql']}\n\n"
-        f"Verification:\n{verification_json}\n\n"
-        f"Execution result:\n{execution_json}\n\n"
-        f"Result profile:\n{profile_json}\n\n"
-        f"{grounded_literal_block}"
+        "Pick the candidate that best answers the contract, then decide whether that "
+        "preferred candidate still needs repair. Consider wrong shape, missing or "
+        "ungrounded filters, suspicious aggregations including tiny aggregate results, "
+        "native value mismatches, metric-source mistakes, and unsupported assumptions. "
+        "Recommend repair only for a concrete issue."
     )
 
 

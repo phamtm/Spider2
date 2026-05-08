@@ -91,12 +91,13 @@ class SchemaSelection(BaseModel):
     candidate_table_count: int = Field(default=0, ge=0)
 
 
-class TableSelectionDecision(BaseModel):
-    """The LLM's table shortlist for one task."""
+class PlanningDecision(BaseModel):
+    """Combined table selection and answer-contract planning output."""
 
     selected_tables: list[str] = Field(default_factory=list)
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
+    intent: Intent
 
 
 class MetricDefinition(BaseModel):
@@ -120,6 +121,12 @@ class SQLCandidate(BaseModel):
     constraint_ledger: list[str] = Field(default_factory=list)
     unsupported_assumptions: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
+
+
+class SQLCandidateBatch(BaseModel):
+    """Several SQL candidates generated from one prompt."""
+
+    candidates: list[SQLCandidate] = Field(default_factory=list)
 
 
 class ValidationReport(BaseModel):
@@ -164,7 +171,7 @@ class OutputShapeReport(BaseModel):
 
 
 class ConfidenceReport(BaseModel):
-    """Critic output that decides whether the best result needs repair."""
+    """Repair-review output that decides whether a candidate needs another attempt."""
 
     confidence: float = Field(ge=0.0, le=1.0)
     issues: list[str] = Field(default_factory=list)
@@ -192,13 +199,17 @@ class SchemaExpansionDecision(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0)
 
 
-class CandidateComparisonReport(BaseModel):
-    """Comparator output that picks the executable candidate to inspect next."""
+class CandidateReviewReport(BaseModel):
+    """Single review pass that can compare candidates and request repair."""
 
     baseline_stage: str | None = None
     preferred_stage: str | None = None
     compared_stages: list[str] = Field(default_factory=list)
     reasons: list[str] = Field(default_factory=list)
+    confidence: float = Field(ge=0.0, le=1.0)
+    issues: list[str] = Field(default_factory=list)
+    should_repair: bool
+    repair_focus: str | None = None
 
 
 class FinalAnswer(BaseModel):

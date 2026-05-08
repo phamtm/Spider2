@@ -3,7 +3,7 @@ from pydantic import ValidationError
 
 from sol01.models import (
     AggregateGrainReport,
-    CandidateComparisonReport,
+    CandidateReviewReport,
     CategoryMetadata,
     ColumnSchema,
     ConfidenceReport,
@@ -159,16 +159,20 @@ def test_aggregate_grain_model_constructs():
     assert grain.uses_distinct is True
 
 
-def test_candidate_comparison_model_constructs():
-    comparison = CandidateComparisonReport(
+def test_candidate_review_model_constructs():
+    review = CandidateReviewReport(
         baseline_stage="initial_1",
         preferred_stage="initial_2",
         compared_stages=["initial_1", "initial_2"],
         reasons=["The second attempt matches the requested shape better."],
+        confidence=0.9,
+        issues=[],
+        should_repair=False,
     )
 
-    assert comparison.preferred_stage == "initial_2"
-    assert comparison.compared_stages == ["initial_1", "initial_2"]
+    assert review.preferred_stage == "initial_2"
+    assert review.compared_stages == ["initial_1", "initial_2"]
+    assert review.should_repair is False
 
 
 def test_final_answer_status_is_limited_to_expected_values():

@@ -23,8 +23,8 @@ def test_load_llm_call_log_reads_valid_rows_in_order(tmp_path: Path):
         [
             {
                 "sequence": 1,
-                "call_id": "0001-intent",
-                "prompt_name": "intent",
+                "call_id": "0001-planning",
+                "prompt_name": "planning",
                 "status": "success",
                 "started_at": "2026-05-02T10:00:00Z",
                 "completed_at": "2026-05-02T10:00:01Z",
@@ -38,8 +38,8 @@ def test_load_llm_call_log_reads_valid_rows_in_order(tmp_path: Path):
             },
             {
                 "sequence": 2,
-                "call_id": "0002-sql_generation",
-                "prompt_name": "sql_generation",
+                "call_id": "0002-sql_generation_batch",
+                "prompt_name": "sql_generation_batch",
                 "status": "error",
                 "started_at": "2026-05-02T10:01:00Z",
                 "completed_at": "2026-05-02T10:01:03Z",
@@ -53,8 +53,8 @@ def test_load_llm_call_log_reads_valid_rows_in_order(tmp_path: Path):
             },
             {
                 "sequence": 3,
-                "call_id": "0003-result_critic",
-                "prompt_name": "result_critic",
+                "call_id": "0003-candidate_review",
+                "prompt_name": "candidate_review",
                 "status": "success",
                 "started_at": "2026-05-02T10:02:00Z",
                 "completed_at": "2026-05-02T10:02:05Z",
@@ -78,9 +78,9 @@ def test_load_llm_call_log_reads_valid_rows_in_order(tmp_path: Path):
     assert result.errors == []
     assert [record.sequence for record in result.records] == [1, 2, 3]
     assert [record.prompt_name for record in result.records] == [
-        "intent",
-        "sql_generation",
-        "result_critic",
+        "planning",
+        "sql_generation_batch",
+        "candidate_review",
     ]
     assert result.records[0].status == "success"
     assert result.records[0].started_at == datetime(2026, 5, 2, 10, 0, tzinfo=UTC)
@@ -102,17 +102,17 @@ def test_load_llm_call_log_reports_corrupted_rows_and_skips_them(tmp_path: Path)
                 json.dumps(
                     {
                         "sequence": 1,
-                        "prompt_name": "intent",
+                        "prompt_name": "planning",
                         "status": "success",
                         "model": "deepseek/deepseek-v4-pro",
                         "attempts": [],
                     }
                 ),
-                '{"sequence": 2, "prompt_name": "sql_generation"',
+                '{"sequence": 2, "prompt_name": "sql_generation_batch"',
                 json.dumps(
                     {
                         "sequence": 3,
-                        "prompt_name": "result_critic",
+                        "prompt_name": "candidate_review",
                         "status": "error",
                         "model": "deepseek/deepseek-v4-pro",
                         "attempts": [{"status": "error"}],
@@ -129,7 +129,7 @@ def test_load_llm_call_log_reports_corrupted_rows_and_skips_them(tmp_path: Path)
     result = load_llm_call_log(log_path)
 
     assert [record.sequence for record in result.records] == [1, 3]
-    assert result.records[0].prompt_name == "intent"
+    assert result.records[0].prompt_name == "planning"
     assert result.records[1].status == "error"
     assert len(result.errors) == 2
     assert result.errors[0].line_number == 2

@@ -136,5 +136,3 @@ Pass/fail comes from the official evaluator:
 6. Check `methods/sol01/outputs/registry/latest.json`.
 7. Use the Streamlit `LLM calls` view in `progress_ui.py` to pick a question and inspect the call timeline.
 8. Use `uv run sol01 llm-calls --run-id <run_id> --instance-id <instance_id>` for a terminal summary, or add `--call-id <call_id>` for one full call.
-
-The implementation plan is tracked in `PLAN.md`.

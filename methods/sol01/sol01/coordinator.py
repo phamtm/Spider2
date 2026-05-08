@@ -13,7 +13,6 @@ from sol01.candidates.evaluator import _dataframe_records, evaluate_candidate
 from sol01.candidates.scoring import _best_attempt
 from sol01.candidates.verification import (
     _aggregate_grain_guidance,
-    _aggregate_verification_reason,
     _augment_intent_with_value_groundings,
     _metric_source_guidance,
     _table_schemas_for_selection,
@@ -22,29 +21,27 @@ from sol01.infra.config import RuntimeConfig
 from sol01.infra.logging import get_logger
 from sol01.llm.llm_logging import LLMCallLogger
 from sol01.llm.prompt_builders import (
-    _aggregate_repair_prompt,
-    _aggregate_verification_prompt,
-    _candidate_comparison_prompt,
-    _comparison_attempt_summary,
-    _critic_prompt,
-    _intent_user_prompt,
+    _candidate_review_prompt,
+    _planning_user_prompt,
     _question_preview,
     _schema_expansion_prompt,
     _semantic_repair_prompt,
-    _sql_generation_prompt,
+    _sql_generation_batch_prompt,
     _sql_reference_context,
     _sql_repair_prompt,
     schema_expansion_trigger,
 )
 from sol01.models import (
-    CandidateComparisonReport,
+    CandidateReviewReport,
     ConfidenceReport,
     ExecutionResult,
     FinalAnswer,
     Intent,
+    PlanningDecision,
     SchemaExpansionDecision,
     SchemaSelection,
     SQLCandidate,
+    SQLCandidateBatch,
     Task,
 )
 from sol01.output.output import (
@@ -60,7 +57,7 @@ from sol01.output.output import (
     write_trace,
 )
 from sol01.schema.index import CACHE_PATH
-from sol01.schema.retrieval import load_db_index, retrieve_schema
+from sol01.schema.retrieval import load_db_index
 
 logger = get_logger(__name__)
 LLMClient: Any | None = None
@@ -363,7 +360,16 @@ def _build_context(
         question_length=len(task.question),
         run_root=str(run_paths.root),
     )
-    schema = retrieve_schema(task.question, task.db, llm_client=client)
+    docs_context = (
+        load_document_text(task.external_knowledge)
+        if task.external_knowledge
+        else "No task-linked document context."
+    )
+    schema, intent = _run_planning(task, client, prompt_hashes, docs_context)
+    table_schemas = _table_schemas_for_selection(schema)
+    intent = _augment_intent_with_value_groundings(
+        intent, task=task, schema=schema, table_schemas=table_schemas
+    )
     logger.info(
         "schema selected",
         instance_id=task.instance_id,
@@ -372,22 +378,6 @@ def _build_context(
         selected_tables=schema.selected_tables,
         expanded_tables=schema.expanded_tables,
         confidence=schema.confidence,
-    )
-    docs_context = (
-        load_document_text(task.external_knowledge)
-        if task.external_knowledge
-        else "No task-linked document context."
-    )
-    table_schemas = _table_schemas_for_selection(schema)
-    intent = _run_prompt(
-        client,
-        prompt_hashes=prompt_hashes,
-        prompt_name="intent",
-        output_type=Intent,
-        user_prompt=_intent_user_prompt(task, schema, docs_context, table_schemas),
-    )
-    intent = _augment_intent_with_value_groundings(
-        intent, task=task, schema=schema, table_schemas=table_schemas
     )
     logger.info(
         "intent extracted",
@@ -408,6 +398,54 @@ def _build_context(
         metric_source_guidance=_metric_source_guidance(task, intent, table_schemas),
         prompt_hashes=prompt_hashes,
     )
+
+
+def _run_planning(
+    task: Task,
+    client: StructuredLLM,
+    prompt_hashes: dict[str, str],
+    docs_context: str,
+) -> tuple[SchemaSelection, Intent]:
+    """Run the combined table-selection and intent-extraction LLM call."""
+
+    from sol01.schema.retrieval import _db_schema_summary, _sanitize_llm_tables
+
+    db_index = load_db_index(task.db)
+    decision = _run_prompt(
+        client,
+        prompt_hashes=prompt_hashes,
+        prompt_name="planning",
+        output_type=PlanningDecision,
+        user_prompt=_planning_user_prompt(
+            task,
+            task.db,
+            docs_context,
+            _db_schema_summary(db_index),
+        ),
+    )
+    selected_tables = _sanitize_llm_tables(decision.selected_tables, db_index)
+    confidence = decision.confidence if selected_tables else 0.0
+    rationale = decision.rationale.strip()
+    if not selected_tables:
+        rationale = f"{rationale} No valid tables matched the schema summary.".strip()
+    elif selected_tables != decision.selected_tables[: len(selected_tables)]:
+        rationale = (
+            f"{rationale} Ignored unknown or duplicate table names returned by the model."
+        ).strip()
+
+    schema = SchemaSelection(
+        db=task.db,
+        retrieval_mode="llm_only",
+        selected_tables=selected_tables,
+        expanded_tables=list(selected_tables),
+        rationale=rationale,
+        confidence=confidence,
+        selection_prompt_chars=len(
+            _planning_user_prompt(task, task.db, docs_context, _db_schema_summary(db_index))
+        ),
+        candidate_table_count=len(db_index),
+    )
+    return schema, decision.intent
 
 
 def _log_candidate(instance_id: str, attempt: dict[str, Any]) -> None:
@@ -440,30 +478,27 @@ def _generate_initial_candidates(
         initial_candidates=initial_candidates,
         max_attempts=max_attempts,
     )
-    for candidate_index in range(initial_candidates):
-        if len(attempts) >= max_attempts:
-            break
+    candidate_limit = min(initial_candidates, max_attempts - len(attempts))
+    if candidate_limit <= 0:
+        return _best_attempt(attempts)
+
+    batch = _run_prompt(
+        ctx.client,
+        prompt_hashes=ctx.prompt_hashes,
+        prompt_name="sql_generation_batch",
+        output_type=SQLCandidateBatch,
+        user_prompt=_sql_generation_batch_prompt(
+            ctx.task,
+            ctx.intent,
+            ctx.sql_reference_context,
+            ctx.docs_context,
+            candidate_count=candidate_limit,
+            aggregate_grain_guidance=ctx.aggregate_grain_guidance,
+            metric_source_guidance=ctx.metric_source_guidance,
+        ),
+    )
+    for candidate_index, candidate in enumerate(batch.candidates[:candidate_limit]):
         stage = f"initial_{candidate_index + 1}"
-        logger.info(
-            "candidate request",
-            instance_id=ctx.task.instance_id,
-            stage=stage,
-            prompt_name="sql_generation",
-        )
-        candidate = _run_prompt(
-            ctx.client,
-            prompt_hashes=ctx.prompt_hashes,
-            prompt_name="sql_generation",
-            output_type=SQLCandidate,
-            user_prompt=_sql_generation_prompt(
-                ctx.task,
-                ctx.intent,
-                ctx.sql_reference_context,
-                ctx.docs_context,
-                aggregate_grain_guidance=ctx.aggregate_grain_guidance,
-                metric_source_guidance=ctx.metric_source_guidance,
-            ),
-        )
         attempt = evaluate_candidate(
             task=ctx.task,
             candidate=candidate,
@@ -527,29 +562,37 @@ def _repair_failed_execution(
     return _best_attempt(attempts)
 
 
-def _compare_candidates(
+def _review_and_repair(
     ctx: _TaskCtx,
     attempts: list[dict[str, Any]],
-    baseline_attempt: dict[str, Any] | None,
+    best_attempt: dict[str, Any] | None,
+    *,
+    max_attempts: int,
+    semantic_repairs: int,
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-    """Compare all executable candidates and return (updated_best, comparison_payload)."""
+    """Run one combined candidate review when local evidence warrants it."""
 
-    executable_attempts = [a for a in attempts if a["execution_result"]["ok"]]
-    if len(executable_attempts) <= 1:
-        return baseline_attempt, None
+    if best_attempt is None or not best_attempt["execution_result"]["ok"]:
+        return best_attempt, None
+
+    executable_attempts = [attempt for attempt in attempts if attempt["execution_result"]["ok"]]
+    review_reason = _candidate_review_reason(best_attempt, executable_attempts)
+    if review_reason is None:
+        return best_attempt, None
 
     logger.info(
-        "candidate comparison requested",
+        "candidate review requested",
         instance_id=ctx.task.instance_id,
-        baseline_stage=baseline_attempt["stage"] if baseline_attempt is not None else None,
+        best_stage=best_attempt["stage"],
         executable_attempts=len(executable_attempts),
+        reason=review_reason,
     )
-    comparison = _run_prompt(
+    review = _run_prompt(
         ctx.client,
         prompt_hashes=ctx.prompt_hashes,
-        prompt_name="result_comparison",
-        output_type=CandidateComparisonReport,
-        user_prompt=_candidate_comparison_prompt(
+        prompt_name="candidate_review",
+        output_type=CandidateReviewReport,
+        user_prompt=_candidate_review_prompt(
             ctx.task,
             ctx.intent,
             executable_attempts,
@@ -557,202 +600,44 @@ def _compare_candidates(
             ctx.docs_context,
             aggregate_grain_guidance=ctx.aggregate_grain_guidance,
             metric_source_guidance=ctx.metric_source_guidance,
-            baseline_stage=baseline_attempt["stage"] if baseline_attempt is not None else None,
+            baseline_stage=best_attempt["stage"],
+            review_reason=review_reason,
         ),
     )
-    comparison_payload = {
-        **comparison.model_dump(mode="json"),
-        "candidates": [_comparison_attempt_summary(a) for a in executable_attempts],
+    review_payload = {
+        "review_reason": review_reason,
+        **review.model_dump(mode="json"),
     }
-    logger.info(
-        "candidate comparison reviewed",
-        instance_id=ctx.task.instance_id,
-        baseline_stage=comparison.baseline_stage,
-        preferred_stage=comparison.preferred_stage,
-        compared_stages=comparison.compared_stages,
-        reasons=comparison.reasons,
-    )
-    best_attempt = baseline_attempt
-    if comparison.preferred_stage:
+    if review.preferred_stage:
         preferred_attempt = next(
-            (a for a in executable_attempts if a["stage"] == comparison.preferred_stage),
+            (
+                attempt
+                for attempt in executable_attempts
+                if attempt["stage"] == review.preferred_stage
+            ),
             None,
         )
         if preferred_attempt is not None:
             best_attempt = preferred_attempt
-    return best_attempt, comparison_payload
 
-
-def _verify_aggregates(
-    ctx: _TaskCtx,
-    attempts: list[dict[str, Any]],
-    best_attempt: dict[str, Any] | None,
-    *,
-    max_attempts: int,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None, dict[str, Any] | None]:
-    """Verify aggregate result quality and repair if needed; appends to attempts in place.
-
-    Returns (updated_best_attempt, verification_payload, aggregate_comparison_payload).
-    Also sets best_attempt["aggregate_verification"] in place when verification runs.
-    """
-
-    if (
-        best_attempt is None
-        or not best_attempt["execution_result"]["ok"]
-        or len(attempts) >= max_attempts
-    ):
-        return best_attempt, None, None
-
-    verification_reason = _aggregate_verification_reason(best_attempt)
-    if verification_reason is None:
-        return best_attempt, None, None
-
-    logger.info(
-        "aggregate verification requested",
-        instance_id=ctx.task.instance_id,
-        stage=best_attempt["stage"],
-        reason=verification_reason,
-    )
-    aggregate_verification = _run_prompt(
-        ctx.client,
-        prompt_hashes=ctx.prompt_hashes,
-        prompt_name="aggregate_verification",
-        output_type=ConfidenceReport,
-        user_prompt=_aggregate_verification_prompt(
-            ctx.task,
-            best_attempt,
-            ctx.sql_reference_context,
-            ctx.docs_context,
-            reason=verification_reason,
-        ),
-    )
-    verification_payload: dict[str, Any] = {
-        "reason": verification_reason,
-        **aggregate_verification.model_dump(mode="json"),
+    best_attempt["critic"] = {
+        "confidence": review.confidence,
+        "issues": review.issues,
+        "should_repair": review.should_repair,
+        "repair_focus": review.repair_focus,
     }
-    best_attempt["aggregate_verification"] = verification_payload
+    best_attempt["candidate_review"] = review_payload
     logger.info(
-        "aggregate verification reviewed",
+        "candidate review complete",
         instance_id=ctx.task.instance_id,
-        should_repair=aggregate_verification.should_repair,
-        confidence=aggregate_verification.confidence,
-        issues=aggregate_verification.issues,
-        repair_focus=aggregate_verification.repair_focus,
+        preferred_stage=review.preferred_stage,
+        should_repair=review.should_repair,
+        confidence=review.confidence,
+        issues=review.issues,
     )
 
-    if not aggregate_verification.should_repair:
-        return best_attempt, verification_payload, None
-
-    logger.info(
-        "aggregate repair requested",
-        instance_id=ctx.task.instance_id,
-        stage="aggregate_repair",
-        focus=aggregate_verification.repair_focus,
-    )
-    repaired_candidate = _run_prompt(
-        ctx.client,
-        prompt_hashes=ctx.prompt_hashes,
-        prompt_name="sql_repair",
-        output_type=SQLCandidate,
-        user_prompt=_aggregate_repair_prompt(
-            ctx.task,
-            best_attempt,
-            aggregate_verification,
-            ctx.sql_reference_context,
-            ctx.docs_context,
-            intent=ctx.intent,
-        ),
-    )
-    attempt = evaluate_candidate(
-        task=ctx.task,
-        candidate=repaired_candidate,
-        intent=ctx.intent,
-        schema=ctx.schema,
-        table_schemas=ctx.table_schemas,
-        stage="aggregate_repair",
-    )
-    attempts.append(attempt)
-    _log_candidate(ctx.task.instance_id, attempt)
-    aggregate_comparison_payload = None
-    if attempt["execution_result"]["ok"]:
-        best_attempt, aggregate_comparison_payload = _compare_candidates(ctx, attempts, attempt)
-    else:
-        best_attempt = _best_attempt(attempts)
-    return best_attempt, verification_payload, aggregate_comparison_payload
-
-
-def _run_critic_review(
-    ctx: _TaskCtx,
-    attempt: dict[str, Any],
-    *,
-    log_label: str = "critic",
-) -> ConfidenceReport:
-    """Run a critic review on *attempt* and store the result in place.
-
-    Mutates ``attempt["critic"]`` with the serialised ConfidenceReport.
-    """
-
-    logger.info(
-        "critic requested",
-        instance_id=ctx.task.instance_id,
-        stage=log_label,
-        best_stage=attempt["stage"],
-    )
-    critic = _run_prompt(
-        ctx.client,
-        prompt_hashes=ctx.prompt_hashes,
-        prompt_name="result_critic",
-        output_type=ConfidenceReport,
-        user_prompt=_critic_prompt(
-            ctx.task,
-            ctx.intent,
-            attempt,
-            ctx.sql_reference_context,
-            ctx.docs_context,
-            metric_source_guidance=ctx.metric_source_guidance,
-        ),
-    )
-    attempt["critic"] = critic.model_dump(mode="json")
-    logger.info(
-        "critic reviewed",
-        instance_id=ctx.task.instance_id,
-        stage=log_label,
-        should_repair=critic.should_repair,
-        confidence=critic.confidence,
-        issues=critic.issues,
-    )
-    return critic
-
-
-def _apply_critic_repair(
-    ctx: _TaskCtx,
-    attempts: list[dict[str, Any]],
-    best_attempt: dict[str, Any] | None,
-    *,
-    max_attempts: int,
-    semantic_repairs: int,
-) -> dict[str, Any] | None:
-    """Run the critic and apply a semantic repair if needed; appends to attempts in place.
-
-    Also sets best_attempt["critic"] in place when the critic runs.
-    semantic_repairs acts as a budget: 0 skips the critic entirely; >= 1 enables
-    the initial critic review.  When a critic repair succeeds and changes the
-    selected candidate, a second no-repair traceability review runs on the new
-    candidate.
-
-    The review itself always runs on the final executable candidate, even when
-    the attempt budget is exhausted.  Only the repair step is budget-gated.
-    When the budget is exhausted the critic report is still saved alongside a
-    ``repair_skipped_reason`` string for traceability.
-    """
-
-    if best_attempt is None or not best_attempt["execution_result"]["ok"] or semantic_repairs < 1:
-        return best_attempt
-
-    critic = _run_critic_review(ctx, best_attempt)
-
-    if not critic.should_repair:
-        return best_attempt
+    if not review.should_repair or semantic_repairs < 1:
+        return best_attempt, review_payload
 
     budget_exhausted = len(attempts) >= max_attempts
     if budget_exhausted:
@@ -762,13 +647,13 @@ def _apply_critic_repair(
             instance_id=ctx.task.instance_id,
             reason="attempt budget exhausted",
         )
-        return best_attempt
+        return best_attempt, review_payload
 
     logger.info(
         "semantic repair requested",
         instance_id=ctx.task.instance_id,
         stage="critic_repair",
-        focus=critic.repair_focus,
+        focus=review.repair_focus,
     )
     repaired_candidate = _run_prompt(
         ctx.client,
@@ -779,7 +664,12 @@ def _apply_critic_repair(
             ctx.task,
             ctx.intent,
             best_attempt,
-            critic,
+            ConfidenceReport(
+                confidence=review.confidence,
+                issues=review.issues,
+                should_repair=review.should_repair,
+                repair_focus=review.repair_focus,
+            ),
             ctx.sql_reference_context,
             ctx.docs_context,
             metric_source_guidance=ctx.metric_source_guidance,
@@ -797,22 +687,75 @@ def _apply_critic_repair(
     _log_candidate(ctx.task.instance_id, attempt)
 
     new_best = attempt if attempt["execution_result"]["ok"] else _best_attempt(attempts)
+    return new_best, review_payload
 
-    if new_best is not attempt:
-        return new_best
 
-    try:
-        final_critic = _run_critic_review(ctx, new_best, log_label="critic_final_review")
-        if final_critic.should_repair:
-            new_best["repair_skipped_reason"] = "final review after critic repair"
-    except Exception:
-        logger.warning(
-            "final critic review failed",
-            instance_id=ctx.task.instance_id,
-            exc_info=True,
-        )
+def _candidate_review_reason(
+    best_attempt: dict[str, Any],
+    executable_attempts: list[dict[str, Any]],
+) -> str | None:
+    """Return why the combined review should run, or None for clear local winners."""
 
-    return new_best
+    reasons: list[str] = []
+    if _scores_are_ambiguous(executable_attempts):
+        reasons.append("multiple executable candidates have close local scores")
+    if _attempt_has_risk_flags(best_attempt):
+        reasons.append("best candidate has local risk flags")
+    return "; ".join(reasons) if reasons else None
+
+
+def _scores_are_ambiguous(executable_attempts: list[dict[str, Any]]) -> bool:
+    """Return True when local scoring cannot clearly separate executable candidates."""
+
+    if len(executable_attempts) <= 1:
+        return False
+    scores = sorted((float(attempt["score"]) for attempt in executable_attempts), reverse=True)
+    return scores[0] - scores[1] <= 10.0
+
+
+def _attempt_has_risk_flags(attempt: dict[str, Any]) -> bool:
+    """Return True when local checks found evidence worth one semantic review."""
+
+    if attempt.get("unsupported_assumptions"):
+        return True
+    if attempt.get("validation", {}).get("warnings"):
+        return True
+    if attempt.get("execution_result", {}).get("row_count") == 0:
+        return True
+    if (attempt.get("shape_report") or {}).get("violations"):
+        return True
+    if (attempt.get("filter_grounding_report") or {}).get("zero_like_result"):
+        return True
+    if float(attempt.get("score_breakdown", {}).get("verification_penalty", 0.0)) < 0:
+        return True
+    return _aggregate_risk_reason(attempt) is not None
+
+
+def _aggregate_risk_reason(attempt: dict[str, Any]) -> str | None:
+    """Return a local warning for tiny aggregate outputs without making an LLM call."""
+
+    execution = attempt.get("execution_result", {})
+    if not execution.get("ok"):
+        return None
+    sql = str(attempt.get("sql", "")).lower()
+    if not any(token in sql for token in ("count(", "sum(", "avg(", "min(", "max(")):
+        return None
+    sample_rows = execution.get("sample_rows") or []
+    if not sample_rows:
+        return None
+    numeric_values: list[float] = []
+    for value in sample_rows[0].values():
+        if isinstance(value, (int, float)):
+            numeric_values.append(float(value))
+    if not numeric_values:
+        return None
+    row_count = int(execution.get("row_count") or 0)
+    max_value = max(numeric_values)
+    if row_count == 1 and max_value <= 1:
+        return "aggregate returned one tiny numeric result"
+    if row_count <= 2 and max_value <= 2:
+        return "aggregate returned only tiny numeric results"
+    return None
 
 
 def _expand_schema_selection(
@@ -841,33 +784,24 @@ def _rebuild_context_for_expansion(
     ctx: _TaskCtx,
     expanded_schema: SchemaSelection,
 ) -> _TaskCtx:
-    """Rebuild the task context with an expanded schema and a fresh intent extraction."""
+    """Rebuild selected-schema context while preserving the original answer contract."""
 
     new_table_schemas = _table_schemas_for_selection(expanded_schema)
-    new_intent = _run_prompt(
-        ctx.client,
-        prompt_hashes=ctx.prompt_hashes,
-        prompt_name="intent",
-        output_type=Intent,
-        user_prompt=_intent_user_prompt(
-            ctx.task, expanded_schema, ctx.docs_context, new_table_schemas
-        ),
-    )
-    new_intent = _augment_intent_with_value_groundings(
-        new_intent, task=ctx.task, schema=expanded_schema, table_schemas=new_table_schemas
+    intent = _augment_intent_with_value_groundings(
+        ctx.intent, task=ctx.task, schema=expanded_schema, table_schemas=new_table_schemas
     )
     return _TaskCtx(
         task=ctx.task,
         client=ctx.client,
-        intent=new_intent,
+        intent=intent,
         schema=expanded_schema,
         table_schemas=new_table_schemas,
         sql_reference_context=_sql_reference_context(expanded_schema, new_table_schemas),
         docs_context=ctx.docs_context,
         aggregate_grain_guidance=_aggregate_grain_guidance(
-            ctx.task, new_intent, expanded_schema, new_table_schemas
+            ctx.task, intent, expanded_schema, new_table_schemas
         ),
-        metric_source_guidance=_metric_source_guidance(ctx.task, new_intent, new_table_schemas),
+        metric_source_guidance=_metric_source_guidance(ctx.task, intent, new_table_schemas),
         prompt_hashes=ctx.prompt_hashes,
     )
 
@@ -907,38 +841,49 @@ def _attempt_schema_expansion(
         )
         return best_attempt, None, None
 
-    from sol01.schema.retrieval import _db_schema_summary
-
-    decision = _run_prompt(
-        ctx.client,
-        prompt_hashes=ctx.prompt_hashes,
-        prompt_name="schema_expansion",
-        output_type=SchemaExpansionDecision,
-        user_prompt=_schema_expansion_prompt(
-            ctx.task,
-            best_attempt,
-            trigger,
-            ctx.schema,
-            _db_schema_summary(db_index),
-        ),
+    deterministic_tables = _deterministic_expansion_tables(
+        trigger, best_attempt, ctx.schema, db_index
     )
     expansion_payload: dict[str, Any] = {
         "trigger": trigger,
-        "decision": decision.model_dump(mode="json"),
+        "decision": None,
         "added_tables": [],
-        "outcome": "model_declined",
+        "outcome": "no_new_tables",
     }
 
-    if not decision.should_expand:
-        logger.info(
-            "schema expansion declined by model",
-            instance_id=ctx.task.instance_id,
-        )
-        return best_attempt, expansion_payload, None
+    if deterministic_tables:
+        requested_tables = deterministic_tables
+        expansion_payload["decision"] = {
+            "source": "deterministic",
+            "additional_tables": deterministic_tables,
+        }
+    else:
+        from sol01.schema.retrieval import _db_schema_summary
 
-    expanded_schema, added_tables = _expand_schema_selection(
-        ctx.schema, decision.additional_tables, db_index
-    )
+        decision = _run_prompt(
+            ctx.client,
+            prompt_hashes=ctx.prompt_hashes,
+            prompt_name="schema_expansion",
+            output_type=SchemaExpansionDecision,
+            user_prompt=_schema_expansion_prompt(
+                ctx.task,
+                best_attempt,
+                trigger,
+                ctx.schema,
+                _db_schema_summary(db_index),
+            ),
+        )
+        expansion_payload["decision"] = decision.model_dump(mode="json")
+        if not decision.should_expand:
+            expansion_payload["outcome"] = "model_declined"
+            logger.info(
+                "schema expansion declined by model",
+                instance_id=ctx.task.instance_id,
+            )
+            return best_attempt, expansion_payload, None
+        requested_tables = decision.additional_tables
+
+    expanded_schema, added_tables = _expand_schema_selection(ctx.schema, requested_tables, db_index)
     expansion_payload["added_tables"] = added_tables
 
     if not added_tables:
@@ -946,7 +891,7 @@ def _attempt_schema_expansion(
         logger.info(
             "schema expansion skipped: no new valid tables",
             instance_id=ctx.task.instance_id,
-            requested=decision.additional_tables,
+            requested=requested_tables,
         )
         return best_attempt, expansion_payload, None
 
@@ -954,7 +899,6 @@ def _attempt_schema_expansion(
         "schema expanding",
         instance_id=ctx.task.instance_id,
         added_tables=added_tables,
-        confidence=decision.confidence,
     )
 
     expanded_ctx = _rebuild_context_for_expansion(ctx, expanded_schema)
@@ -965,25 +909,29 @@ def _attempt_schema_expansion(
         "candidate request",
         instance_id=ctx.task.instance_id,
         stage=expansion_stage,
-        prompt_name="sql_generation",
+        prompt_name="sql_generation_batch",
     )
-    candidate = _run_prompt(
+    batch = _run_prompt(
         expanded_ctx.client,
         prompt_hashes=expanded_ctx.prompt_hashes,
-        prompt_name="sql_generation",
-        output_type=SQLCandidate,
-        user_prompt=_sql_generation_prompt(
+        prompt_name="sql_generation_batch",
+        output_type=SQLCandidateBatch,
+        user_prompt=_sql_generation_batch_prompt(
             expanded_ctx.task,
             expanded_ctx.intent,
             expanded_ctx.sql_reference_context,
             expanded_ctx.docs_context,
+            candidate_count=1,
             aggregate_grain_guidance=expanded_ctx.aggregate_grain_guidance,
             metric_source_guidance=expanded_ctx.metric_source_guidance,
         ),
     )
+    if not batch.candidates:
+        expansion_payload["outcome"] = "expanded_no_candidate"
+        return _best_attempt(attempts), expansion_payload, expanded_ctx
     expansion_attempt = evaluate_candidate(
         task=expanded_ctx.task,
-        candidate=candidate,
+        candidate=batch.candidates[0],
         intent=expanded_ctx.intent,
         schema=expanded_ctx.schema,
         table_schemas=expanded_ctx.table_schemas,
@@ -1000,6 +948,49 @@ def _attempt_schema_expansion(
     return _best_attempt(attempts), expansion_payload, expanded_ctx
 
 
+def _deterministic_expansion_tables(
+    trigger: str,
+    attempt: dict[str, Any],
+    schema: SchemaSelection,
+    db_index: dict[str, Any],
+) -> list[str]:
+    """Infer expansion tables from explicit names before asking the LLM."""
+
+    text_parts = [
+        trigger,
+        str(attempt.get("sql") or ""),
+        json.dumps(attempt.get("validation", {}), sort_keys=True),
+        str(attempt.get("execution_result", {}).get("error") or ""),
+        json.dumps(attempt.get("critic", {}), sort_keys=True),
+    ]
+    haystack = _identifier_search_text("\n".join(text_parts))
+    current = set(schema.expanded_tables)
+    selected: list[str] = []
+    for table_name in sorted(db_index):
+        if table_name in current:
+            continue
+        candidates = _table_name_aliases(table_name)
+        if any(alias and alias in haystack for alias in candidates):
+            selected.append(table_name)
+    return selected
+
+
+def _identifier_search_text(value: str) -> str:
+    """Normalize free text so table aliases can be found with boundary spaces."""
+
+    return f" {''.join(char.lower() if char.isalnum() else ' ' for char in value)} "
+
+
+def _table_name_aliases(table_name: str) -> list[str]:
+    """Return normalized aliases for a fully qualified table name."""
+
+    parts = [part for part in table_name.lower().split(".") if part]
+    aliases = {f" {parts[-1]} "} if parts else set()
+    for start in range(len(parts)):
+        aliases.add(f" {' '.join(parts[start:])} ")
+    return sorted(aliases, key=len, reverse=True)
+
+
 def _write_task_output(
     ctx: _TaskCtx,
     attempts: list[dict[str, Any]],
@@ -1008,9 +999,7 @@ def _write_task_output(
     task_trace_path: Path,
     task_llm_log_path: Path,
     *,
-    candidate_comparison_payload: dict[str, Any] | None,
-    aggregate_verification_payload: dict[str, Any] | None,
-    aggregate_comparison_payload: dict[str, Any] | None,
+    candidate_review_payload: dict[str, Any] | None,
     schema_expansion_payload: dict[str, Any] | None,
     expanded_ctx: _TaskCtx | None,
     live_logging_enabled: bool,
@@ -1030,16 +1019,8 @@ def _write_task_output(
         "prompt_hashes": ctx.prompt_hashes,
         "attempts": attempts,
     }
-    candidate_comparisons: list[dict[str, Any]] = []
-    if candidate_comparison_payload is not None:
-        trace_payload["candidate_comparison"] = candidate_comparison_payload
-        candidate_comparisons.append({"phase": "initial", **candidate_comparison_payload})
-    if aggregate_verification_payload is not None:
-        trace_payload["aggregate_verification"] = aggregate_verification_payload
-    if aggregate_comparison_payload is not None:
-        candidate_comparisons.append({"phase": "aggregate_repair", **aggregate_comparison_payload})
-    if candidate_comparisons:
-        trace_payload["candidate_comparisons"] = candidate_comparisons
+    if candidate_review_payload is not None:
+        trace_payload["candidate_review"] = candidate_review_payload
     if schema_expansion_payload is not None:
         trace_payload["schema_expansion"] = schema_expansion_payload
     if live_logging_enabled:
@@ -1159,11 +1140,7 @@ def run_task(
         ctx, attempts, initial_candidates=initial_candidates, max_attempts=max_attempts
     )
     best_attempt = _repair_failed_execution(ctx, attempts, best_attempt, max_attempts=max_attempts)
-    best_attempt, candidate_comparison_payload = _compare_candidates(ctx, attempts, best_attempt)
-    best_attempt, aggregate_verification_payload, aggregate_comparison_payload = _verify_aggregates(
-        ctx, attempts, best_attempt, max_attempts=max_attempts
-    )
-    best_attempt = _apply_critic_repair(
+    best_attempt, candidate_review_payload = _review_and_repair(
         ctx, attempts, best_attempt, max_attempts=max_attempts, semantic_repairs=semantic_repairs
     )
     best_attempt, schema_expansion_payload, expanded_ctx = _attempt_schema_expansion(
@@ -1177,9 +1154,7 @@ def run_task(
         run_paths,
         task_trace_path,
         task_llm_log_path,
-        candidate_comparison_payload=candidate_comparison_payload,
-        aggregate_verification_payload=aggregate_verification_payload,
-        aggregate_comparison_payload=aggregate_comparison_payload,
+        candidate_review_payload=candidate_review_payload,
         schema_expansion_payload=schema_expansion_payload,
         expanded_ctx=expanded_ctx,
         live_logging_enabled=live_logging_enabled,

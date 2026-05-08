@@ -919,38 +919,6 @@ def _count_distinct_target(sql: str) -> str | None:
     return target.strip(" \"'`")
 
 
-def _aggregate_verification_reason(attempt: dict[str, Any]) -> str | None:
-    """Return a reason when an aggregate result looks suspiciously small."""
-
-    execution = attempt["execution_result"]
-    if not execution["ok"]:
-        return None
-    sql = str(attempt["sql"]).lower()
-    if not _looks_aggregate_query(sql):
-        return None
-
-    sample_rows = execution.get("sample_rows") or []
-    if not sample_rows:
-        return None
-
-    first_row = sample_rows[0]
-    numeric_values = [
-        value
-        for value in (_coerce_number(item) for item in first_row.values())
-        if value is not None
-    ]
-    if not numeric_values:
-        return None
-
-    row_count = int(execution.get("row_count") or 0)
-    max_value = max(numeric_values)
-    if row_count == 1 and max_value <= 1:
-        return "Aggregate query returned a single very small numeric result."
-    if row_count <= 2 and max_value <= 2:
-        return "Aggregate query returned only tiny numeric results."
-    return None
-
-
 def _looks_aggregate_query(sql: str) -> bool:
     """Heuristically detect aggregate queries that deserve extra scrutiny."""
 

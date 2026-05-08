@@ -1,6 +1,6 @@
 from sol01.models.core import (
     AggregateGrainReport,
-    CandidateComparisonReport,
+    CandidateReviewReport,
     CategoryMetadata,
     ColumnSchema,
     ConfidenceReport,
@@ -10,18 +10,19 @@ from sol01.models.core import (
     Intent,
     MetricDefinition,
     OutputShapeReport,
+    PlanningDecision,
     SchemaExpansionDecision,
     SchemaSelection,
     SQLCandidate,
+    SQLCandidateBatch,
     TableSchema,
-    TableSelectionDecision,
     Task,
     ValidationReport,
 )
 
 __all__ = [
     "AggregateGrainReport",
-    "CandidateComparisonReport",
+    "CandidateReviewReport",
     "CategoryMetadata",
     "ColumnSchema",
     "ConfidenceReport",
@@ -31,11 +32,12 @@ __all__ = [
     "Intent",
     "MetricDefinition",
     "OutputShapeReport",
+    "PlanningDecision",
     "SchemaExpansionDecision",
     "SQLCandidate",
+    "SQLCandidateBatch",
     "SchemaSelection",
     "TableSchema",
-    "TableSelectionDecision",
     "Task",
     "ValidationReport",
 ]

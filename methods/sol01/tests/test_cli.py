@@ -565,8 +565,8 @@ def test_llm_calls_command_summarizes_rows(monkeypatch, tmp_path: Path):
         [
             {
                 "sequence": 1,
-                "call_id": "0001-intent",
-                "prompt_name": "intent",
+                "call_id": "0001-planning",
+                "prompt_name": "planning",
                 "status": "success",
                 "duration_ms": 1000,
                 "model": "deepseek/deepseek-v4-pro",
@@ -575,8 +575,8 @@ def test_llm_calls_command_summarizes_rows(monkeypatch, tmp_path: Path):
             },
             {
                 "sequence": 2,
-                "call_id": "0002-sql_generation",
-                "prompt_name": "sql_generation",
+                "call_id": "0002-sql_generation_batch",
+                "prompt_name": "sql_generation_batch",
                 "status": "error",
                 "duration_ms": 3000,
                 "model": "deepseek/deepseek-v4-pro",
@@ -598,8 +598,12 @@ def test_llm_calls_command_summarizes_rows(monkeypatch, tmp_path: Path):
     )
 
     assert result.exit_code == 0
-    expected_first = "- 1: intent | success | 1s | deepseek/deepseek-v4-pro | 1 attempt | no error"
-    expected_second = "- 2: sql_generation | error | 3s | deepseek/deepseek-v4-pro | 1 attempt |"
+    expected_first = (
+        "- 1: planning | success | 1s | deepseek/deepseek-v4-pro | 1 attempt | no error"
+    )
+    expected_second = (
+        "- 2: sql_generation_batch | error | 3s | deepseek/deepseek-v4-pro | 1 attempt |"
+    )
     assert expected_first in result.output
     assert expected_second in result.output
     assert "ModelHTTPError" in result.output
@@ -615,8 +619,8 @@ def test_llm_calls_command_prints_full_selected_call(monkeypatch, tmp_path: Path
         [
             {
                 "sequence": 1,
-                "call_id": "0001-intent",
-                "prompt_name": "intent",
+                "call_id": "0001-planning",
+                "prompt_name": "planning",
                 "status": "success",
                 "duration_ms": 1000,
                 "model": "deepseek/deepseek-v4-pro",
@@ -631,8 +635,8 @@ def test_llm_calls_command_prints_full_selected_call(monkeypatch, tmp_path: Path
             },
             {
                 "sequence": 2,
-                "call_id": "0002-sql_generation",
-                "prompt_name": "sql_generation",
+                "call_id": "0002-sql_generation_batch",
+                "prompt_name": "sql_generation_batch",
                 "status": "error",
                 "duration_ms": 3000,
                 "model": "deepseek/deepseek-v4-pro",
@@ -657,7 +661,7 @@ def test_llm_calls_command_prints_full_selected_call(monkeypatch, tmp_path: Path
             "--instance-id",
             "local003",
             "--call-id",
-            "0001-intent",
+            "0001-planning",
         ],
     )
 

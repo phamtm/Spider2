@@ -32,12 +32,12 @@ Each Spider2-Snow task gives the solver:
 ```text
 Spider2-Snow task
   -> load database metadata
-  -> ask the LLM which tables matter
-  -> extract the question intent
-  -> generate several SQL candidates
+  -> ask the LLM for table selection and question intent in one plan
+  -> generate several SQL candidates in one batch
   -> validate each SQL candidate
   -> execute valid candidates in Snowflake
-  -> score and compare candidates
+  -> score candidates locally
+  -> review ambiguous or risky candidates when needed
   -> repair when needed
   -> write final SQL and CSV
   -> run official Spider2-Snow eval
@@ -98,34 +98,27 @@ This index is cached at `methods/sol01/.cache/snow_index.json`.
 The solver preserves fully qualified Snowflake table names when they are
 available, because table identity matters during validation and execution.
 
-## Table Selection
+## Planning
 
-The default retrieval path is `llm_only`.
+For each question, the solver gives the LLM the task, document context, and a
+compact summary of every table in the target database. The LLM returns both the
+table set and the answer contract in one structured response.
 
-For each question, the solver gives the LLM a compact summary of every table in
-the target database. The LLM returns the smallest useful table set for the
-question.
-
-The selector is asked to include:
+The planner is asked to include:
 
 - tables needed for final output
 - tables needed for joins
 - tables needed for filters
 - metric tables at the right grain
 
-The solver then sanitizes the answer:
+The solver sanitizes the selected tables:
 
 - unknown table names are dropped
 - duplicate tables are dropped
 - unambiguous suffix matches are accepted
 - if no valid table survives, the selection confidence becomes `0`
 
-## Intent Extraction
-
-After table selection, the solver asks the LLM to rewrite the question into an
-answer contract.
-
-The contract captures:
+The same planning call also returns an answer contract capturing:
 
 - entities
 - metrics
@@ -146,7 +139,8 @@ database values into invented business rules.
 
 ## SQL Generation
 
-For each task, the coordinator usually asks for three initial SQL candidates.
+For each task, the coordinator asks for the initial SQL candidates in a single
+batch call.
 
 Each SQL prompt includes:
 
@@ -157,9 +151,10 @@ Each SQL prompt includes:
 - the extracted answer contract
 - guidance about aggregate grain and metric source when available
 
-The prompt asks for one read-only Snowflake query. It also asks the model to
-record assumptions, unsupported assumptions, and the constraint ledger behind
-row narrowing, dedupe, ordering, and top-k choices.
+The prompt asks for independently executable read-only Snowflake queries. It
+also asks the model to record assumptions, unsupported assumptions, and the
+constraint ledger behind row narrowing, dedupe, ordering, and top-k choices for
+each candidate.
 
 ## Validation
 
@@ -214,12 +209,13 @@ Then it adjusts the score for:
 This score is local solver logic. It is separate from the official benchmark
 score, which runs later on the final CSV.
 
-## Candidate Comparison
+## Candidate Review
 
-If more than one candidate executes, the solver asks the LLM to compare the
-executable candidates against the answer contract.
+Local scoring chooses the best attempt first. If executable candidates have
+close scores, or the current best candidate has local risk flags, the solver
+asks the LLM for one combined candidate review.
 
-The comparison can override the current best candidate when another executable
+The review can override the current best candidate when another executable
 candidate better matches:
 
 - output shape
@@ -229,7 +225,9 @@ candidate better matches:
 - metric source
 - grounded assumptions
 
-This keeps candidate choice from being purely numeric when two queries both run.
+The same review also decides whether the preferred candidate needs repair. This
+replaces the former separate comparison, aggregate-verification, and critic
+calls.
 
 ## Repairs
 
@@ -240,20 +238,12 @@ This keeps candidate choice from being purely numeric when two queries both run.
 If the best candidate does not execute, the solver asks for a SQL repair using
 the validation and execution feedback.
 
-### Aggregate Repair
-
-If a candidate returns a suspicious aggregate result, such as zero or a tiny
-count, the solver asks a verifier whether the result is trustworthy.
-
-If the verifier says repair is needed, the solver asks for an aggregate-focused
-repair.
-
 ### Semantic Repair
 
-After a best executable candidate is chosen, a critic reviews whether the SQL
-answers the question.
+When candidate review finds a concrete semantic issue, the solver asks for one
+semantic repair.
 
-The critic looks for concrete issues such as:
+The review looks for concrete issues such as:
 
 - ungrounded filters
 - wrong shape
@@ -261,8 +251,6 @@ The critic looks for concrete issues such as:
 - suspicious aggregates
 - wrong metric source
 - literal values treated as invented business definitions
-
-If the critic recommends repair, the solver asks for one semantic repair.
 
 By default, each task has a small attempt budget: three initial candidates and
 up to four total attempts.
@@ -279,8 +267,8 @@ The final candidate must execute successfully. The solver writes:
 - `llm_calls/<instance_id>.jsonl`
 
 The trace contains the full local decision path: schema selection, intent,
-prompt hashes, attempts, scores, comparison output, verifier output, critic
-output, final SQL, and final execution summary.
+prompt hashes, attempts, scores, candidate review output, final SQL, and final
+execution summary.
 
 ## Official Evaluation
 
@@ -377,9 +365,9 @@ trace races.
 
 - `sol01/tasks.py`: loads and filters Spider2-Snow tasks.
 - `sol01/index.py`: builds the Snowflake schema index.
-- `sol01/retrieval.py`: selects tables for a question.
+- `sol01/retrieval.py`: loads and renders compact schema-index helpers.
 - `sol01/docs.py`: loads linked markdown documents.
-- `sol01/llm.py`: runs structured LLM calls and logs raw call data.
+- `sol01/llm/client.py`: runs structured LLM calls and logs raw call data.
 - `sol01/prompt_builders.py`: builds the prompts for each pipeline stage.
 - `sol01/coordinator.py`: runs the per-task solver pipeline.
 - `sol01/candidate_evaluator.py`: validates, executes, profiles, and scores a candidate.

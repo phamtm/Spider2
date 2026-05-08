@@ -98,46 +98,33 @@ def test_llm_client_returns_simple_structured_output_from_test_model():
 def test_default_prompt_directory_contains_packaged_prompts():
     client = LLMClient(RuntimeConfig(api_key="test-key"))
 
-    prompt = client.load_prompt("intent")
+    prompt = client.load_prompt("planning")
 
-    assert prompt.text.startswith("# Intent Extraction")
+    assert prompt.text.startswith("# Planning")
 
 
 def test_default_sql_prompts_keep_grouped_identifiers():
     client = LLMClient(RuntimeConfig(api_key="test-key"))
 
-    intent_prompt = client.load_prompt("intent")
-    generation_prompt = client.load_prompt("sql_generation")
+    planning_prompt = client.load_prompt("planning")
+    generation_prompt = client.load_prompt("sql_generation_batch")
     repair_prompt = client.load_prompt("sql_repair")
-    critic_prompt = client.load_prompt("result_critic")
-    comparison_prompt = client.load_prompt("result_comparison")
-    schema_selection_prompt = client.load_prompt("schema_selection")
+    review_prompt = client.load_prompt("candidate_review")
 
-    assert "grouped superlatives" in intent_prompt.text
-    assert "highest number in any month" in intent_prompt.text
-    assert "Do not bind a metric to a specific column" in intent_prompt.text
+    assert "answer contract" in planning_prompt.text
+    assert "join and bridge tables" in planning_prompt.text
+    assert "clearly irrelevant" in planning_prompt.text
     assert "stable identifier and a display label" in generation_prompt.text
     assert "winning group key plus the metric" in generation_prompt.text
-    assert "requested answer grain" in generation_prompt.text
-    assert "column-name semantics" in generation_prompt.text
-    assert "clearly grounded" in generation_prompt.text
+    assert "several Snowflake query candidates" in generation_prompt.text
     assert "stable identifier and a display label" in repair_prompt.text
     assert "winning group key plus the metric" in repair_prompt.text
     assert "native metric column" in repair_prompt.text
     assert "column-name semantics" in repair_prompt.text
     assert "clearly grounded" in repair_prompt.text
-    assert "metric-source mismatches" in critic_prompt.text
-    assert "line-item formulas" in critic_prompt.text
-    assert "clearly grounded" in critic_prompt.text
-    assert "unambiguously match" in critic_prompt.text
-    assert "preserves a stable grouping identifier" in comparison_prompt.text
-    assert "native metric column" in comparison_prompt.text
-    assert "column-name semantics" in comparison_prompt.text
-    assert "clearly grounded" in comparison_prompt.text
-    assert "plausibly required" in schema_selection_prompt.text
-    assert "join and bridge tables" in schema_selection_prompt.text
-    assert "clearly grounded" in schema_selection_prompt.text
-    assert "clearly irrelevant" in schema_selection_prompt.text
+    assert "suspicious aggregations" in review_prompt.text
+    assert "metric-source mismatches" in review_prompt.text
+    assert "Recommend repair only" in review_prompt.text
 
 
 def test_build_model_uses_openrouter_wrapper_for_string_override():

@@ -1,54 +1,14 @@
-"""Select the table set that should be shown for one task question."""
+"""Load and render compact Snowflake schema indexes."""
 
 from __future__ import annotations
 
 import json
 from functools import cache
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 
-from sol01.infra.logging import get_logger
-from sol01.models import (
-    SchemaSelection,
-    TableSchema,
-    TableSelectionDecision,
-)
+from sol01.models import TableSchema
 from sol01.schema.index import CACHE_PATH, build_db_index, build_index_cache
-
-logger = get_logger(__name__)
-
-
-class StructuredSelector(Protocol):
-    """Minimal LLM surface needed for table selection."""
-
-    def load_prompt(self, prompt_name: str) -> Any: ...
-
-    def run_structured_with_prompt(
-        self,
-        user_prompt: str,
-        *,
-        prompt: Any,
-        output_type: type[Any],
-        model: Any = None,
-    ) -> Any: ...
-
-
-def retrieve_schema(
-    question: str,
-    db: str,
-    *,
-    llm_client: StructuredSelector | None = None,
-    cache_path: Path = CACHE_PATH,
-) -> SchemaSelection:
-    """Ask the LLM for the best-fit table set within one database."""
-
-    db_index = load_db_index(db, cache_path=cache_path)
-    return _retrieve_schema_with_llm(
-        question,
-        db,
-        db_index,
-        llm_client=llm_client,
-    )
 
 
 def load_db_index(db: str, *, cache_path: Path = CACHE_PATH) -> dict[str, TableSchema]:
@@ -61,76 +21,6 @@ def load_db_index(db: str, *, cache_path: Path = CACHE_PATH) -> dict[str, TableS
         _write_index_cache(payload, cache_path)
 
     return dict(payload[db])
-
-
-def _retrieve_schema_with_llm(
-    question: str,
-    db: str,
-    db_index: dict[str, TableSchema],
-    *,
-    llm_client: StructuredSelector | None,
-) -> SchemaSelection:
-    """Let the LLM pick tables directly from one DB summary."""
-
-    if llm_client is None:
-        raise ValueError("llm_client is required for schema retrieval")
-
-    schema_summary = _db_schema_summary(db_index)
-    prompt = llm_client.load_prompt("schema_selection")
-    user_prompt = (
-        f"Question: {question}\n\n"
-        f"Database: {db}\n\n"
-        "Include all tables that are plausibly required to answer the question, "
-        "including join and bridge tables. Omit only tables that are clearly irrelevant.\n\n"
-        "For metric questions, include tables at every grain that may be needed. "
-        "If one table already has the needed grouping keys, time key, filters, and a "
-        "native metric column that is clearly grounded in the answer contract or whose "
-        "semantics unambiguously match the question, that table is the preferred metric "
-        "source; also include lower-grain detail tables when the question may need "
-        "detail-level filters, grouping, output columns, an explicit formula, or when "
-        "no clearly grounded native metric exists. When several native metric columns "
-        "exist, choose by column-name semantics from the question; do not treat subtotal, "
-        "total due, tax, freight, or line-item formulas as interchangeable.\n\n"
-        f"Schema summary:\n{schema_summary}"
-    )
-    decision = llm_client.run_structured_with_prompt(
-        user_prompt,
-        prompt=prompt,
-        output_type=TableSelectionDecision,
-    )
-    selected_tables = _sanitize_llm_tables(
-        decision.selected_tables,
-        db_index,
-    )
-    confidence = decision.confidence if selected_tables else 0.0
-    expanded_tables = list(selected_tables)
-    rationale = decision.rationale.strip()
-    if not selected_tables:
-        rationale = f"{rationale} No valid tables matched the schema summary.".strip()
-    elif selected_tables != decision.selected_tables[: len(selected_tables)]:
-        rationale = (
-            f"{rationale} Ignored unknown or duplicate table names returned by the model."
-        ).strip()
-
-    logger.info(
-        "schema retrieval complete",
-        db=db,
-        retrieval_mode="llm_only",
-        selected_tables=selected_tables,
-        expanded_tables=expanded_tables,
-        confidence=decision.confidence,
-        selection_prompt_chars=len(user_prompt),
-    )
-    return SchemaSelection(
-        db=db,
-        retrieval_mode="llm_only",
-        selected_tables=selected_tables,
-        expanded_tables=expanded_tables,
-        rationale=rationale,
-        confidence=confidence,
-        selection_prompt_chars=len(user_prompt),
-        candidate_table_count=len(db_index),
-    )
 
 
 def load_index_cache(
