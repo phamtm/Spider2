@@ -14,9 +14,6 @@ from sol01.infra.paths import REPO_ROOT
 from sol01.loading.category_metadata import (  # noqa: F401
     CATEGORY_BATCHES_DIR,
     KNOWN_CATEGORY_TAGS,
-    CategoryMetadata,
-    CategoryMetadataValidationError,
-    load_category_metadata,
     load_category_metadata_map,
 )
 from sol01.models import Task
@@ -24,7 +21,6 @@ from sol01.models import Task
 SPIDER2_SNOW_PATH = REPO_ROOT / "spider2-snow" / "spider2-snow.jsonl"
 ALL_TASK_SELECTOR = "all"
 logger = get_logger(__name__)
-_TIER_SELECTOR_RE = re.compile(r"^\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*$")
 _TAG_SELECTOR_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 
 

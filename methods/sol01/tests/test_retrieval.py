@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from sol01.models import ColumnSchema, TableSchema
-from sol01.schema.retrieval import _db_schema_summary, _sanitize_llm_tables
+from sol01.schema.retrieval import db_schema_summary, sanitize_llm_tables
 
 CUSTOMERS = "E_COMMERCE.E_COMMERCE.CUSTOMERS"
 ORDERS = "E_COMMERCE.E_COMMERCE.ORDERS"
@@ -32,7 +32,7 @@ def _index() -> dict[str, TableSchema]:
 
 
 def test_sanitize_llm_tables_keeps_valid_unique_names_and_suffix_matches():
-    selected = _sanitize_llm_tables(
+    selected = sanitize_llm_tables(
         ["orders", "missing", "E_COMMERCE.CUSTOMERS", "orders"],
         _index(),
     )
@@ -41,7 +41,7 @@ def test_sanitize_llm_tables_keeps_valid_unique_names_and_suffix_matches():
 
 
 def test_db_schema_summary_keeps_column_types_docs_and_samples():
-    summary = _db_schema_summary(_index())
+    summary = db_schema_summary(_index())
 
     assert f"Table {ORDERS}:" in summary
     assert "ORDER_ID [NUMBER]" in summary

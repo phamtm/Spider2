@@ -4,6 +4,7 @@ from typing import Any
 
 import streamlit as st
 
+from sol01.progress_ui.constants import TABLE_HEIGHT
 from sol01.progress_ui.display import build_run_command
 from sol01.progress_ui.transforms import prepare_debug_frame
 
@@ -17,8 +18,6 @@ def render_debug_tab(
     available_tags: list[str],
     metadata_rows: dict[str, dict[str, Any]],
 ) -> None:
-    from sol01.progress_ui.constants import TABLE_HEIGHT
-
     st.header("Debug")
     st.caption("Operational details for triage and empty-state debugging.")
 

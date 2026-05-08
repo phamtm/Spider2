@@ -84,7 +84,7 @@ def _path_signature(path: Path) -> tuple[int, int] | None:
     return stat_result.st_mtime_ns, stat_result.st_size
 
 
-def _db_schema_summary(db_index: dict[str, TableSchema]) -> str:
+def db_schema_summary(db_index: dict[str, TableSchema]) -> str:
     """Render one compact all-table schema summary for the selector."""
 
     parts: list[str] = []
@@ -109,7 +109,7 @@ def _column_summary(column: Any) -> str:
     return summary
 
 
-def _sanitize_llm_tables(
+def sanitize_llm_tables(
     requested_tables: list[str],
     db_index: dict[str, TableSchema],
 ) -> list[str]:
@@ -135,3 +135,7 @@ def _sanitize_llm_tables(
             continue
         selected_tables.append(canonical)
     return selected_tables
+
+
+_db_schema_summary = db_schema_summary
+_sanitize_llm_tables = sanitize_llm_tables

@@ -55,7 +55,7 @@ from sol01.output.output import (
     write_trace,
 )
 from sol01.schema.index import CACHE_PATH
-from sol01.schema.retrieval import load_db_index
+from sol01.schema.retrieval import db_schema_summary, load_db_index, sanitize_llm_tables
 
 logger = get_logger(__name__)
 LLMClient: Any | None = None
@@ -66,7 +66,7 @@ __all__ = ["run_task", "run_tasks"]
 def load_document_text(file_name: str) -> str:
     """Load task-linked document text without importing the docs module at startup."""
 
-    from sol01.loading.docs import load_document_text as _load_document_text
+    from sol01.loading.docs import load_document_text as _load_document_text  # noqa: PLC0415
 
     return _load_document_text(file_name)
 
@@ -76,7 +76,7 @@ def _llm_client_class() -> Any:
 
     global LLMClient
     if LLMClient is None:
-        from sol01.llm.client import LLMClient as _LLMClient
+        from sol01.llm.client import LLMClient as _LLMClient  # noqa: PLC0415
 
         LLMClient = _LLMClient
     return LLMClient
@@ -402,8 +402,6 @@ def _run_planning(
 ) -> tuple[SchemaSelection, Intent]:
     """Run the combined table-selection and intent-extraction LLM call."""
 
-    from sol01.schema.retrieval import _db_schema_summary, _sanitize_llm_tables
-
     db_index = load_db_index(task.db)
     decision = _run_prompt(
         client,
@@ -414,10 +412,10 @@ def _run_planning(
             task,
             task.db,
             docs_context,
-            _db_schema_summary(db_index),
+            db_schema_summary(db_index),
         ),
     )
-    selected_tables = _sanitize_llm_tables(decision.selected_tables, db_index)
+    selected_tables = sanitize_llm_tables(decision.selected_tables, db_index)
     confidence = decision.confidence if selected_tables else 0.0
     rationale = decision.rationale.strip()
     if not selected_tables:
@@ -435,7 +433,7 @@ def _run_planning(
         rationale=rationale,
         confidence=confidence,
         selection_prompt_chars=len(
-            _planning_user_prompt(task, task.db, docs_context, _db_schema_summary(db_index))
+            _planning_user_prompt(task, task.db, docs_context, db_schema_summary(db_index))
         ),
         candidate_table_count=len(db_index),
     )
@@ -690,9 +688,7 @@ def _expand_schema_selection(
 ) -> tuple[SchemaSelection, list[str]]:
     """Return an expanded SchemaSelection and the list of tables actually added."""
 
-    from sol01.schema.retrieval import _sanitize_llm_tables
-
-    sanitized = _sanitize_llm_tables(additional_tables, db_index)
+    sanitized = sanitize_llm_tables(additional_tables, db_index)
     combined = list(schema.expanded_tables)
     added: list[str] = []
     for table in sanitized:
@@ -779,8 +775,6 @@ def _attempt_schema_expansion(
             "additional_tables": deterministic_tables,
         }
     else:
-        from sol01.schema.retrieval import _db_schema_summary
-
         decision = _run_prompt(
             ctx.client,
             prompt_hashes=ctx.prompt_hashes,
@@ -791,7 +785,7 @@ def _attempt_schema_expansion(
                 best_attempt,
                 trigger,
                 ctx.schema,
-                _db_schema_summary(db_index),
+                db_schema_summary(db_index),
             ),
         )
         expansion_payload["decision"] = decision.model_dump(mode="json")

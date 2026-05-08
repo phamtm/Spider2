@@ -249,9 +249,9 @@ def build_model(config: RuntimeConfig, *, model_name: str | None = None) -> Any:
     """Create the OpenAI-compatible chat model that points at OpenRouter."""
 
     resolved_model_name = model_name or config.model
-    from pydantic_ai.models.openai import OpenAIChatModel
-    from pydantic_ai.profiles.openai import OpenAIModelProfile
-    from pydantic_ai.providers.openai import OpenAIProvider
+    from pydantic_ai.models.openai import OpenAIChatModel  # noqa: PLC0415
+    from pydantic_ai.profiles.openai import OpenAIModelProfile  # noqa: PLC0415
+    from pydantic_ai.providers.openai import OpenAIProvider  # noqa: PLC0415
 
     provider = OpenAIProvider(
         base_url=config.base_url,
@@ -289,7 +289,7 @@ def _resolve_model(model: Model | str | None, *, config: RuntimeConfig) -> Model
 def _structured_output(output_type: type[OutputT]) -> Any:
     """Use prompted JSON output so DeepSeek does not need tool calling support."""
 
-    from pydantic_ai import PromptedOutput
+    from pydantic_ai import PromptedOutput  # noqa: PLC0415
 
     return PromptedOutput(output_type)
 
@@ -299,7 +299,7 @@ def _agent_class() -> Any:
 
     global Agent
     if Agent is None:
-        from pydantic_ai import Agent as _Agent
+        from pydantic_ai import Agent as _Agent  # noqa: PLC0415
 
         Agent = _Agent
     return Agent
@@ -314,7 +314,7 @@ def _run_agent_sync(
 ) -> Any:
     """Retry transient provider errors a few times before failing the call."""
 
-    from pydantic_ai.exceptions import ModelHTTPError
+    from pydantic_ai.exceptions import ModelHTTPError  # noqa: PLC0415
 
     for attempt in range(1, MAX_MODEL_ATTEMPTS + 1):
         attempt_started = time.perf_counter()
