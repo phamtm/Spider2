@@ -10,6 +10,27 @@ CUSTOMERS = "DB.PUBLIC.CUSTOMERS"
 EVENTS = "DB.PUBLIC.EVENTS"
 
 
+def _table(
+    name: str,
+    columns: list[ColumnSchema],
+    *,
+    schema_name: str = "PUBLIC",
+    searchable_text: str | None = None,
+) -> TableSchema:
+    """Create one compact synthetic table schema."""
+
+    full_name = f"DB.{schema_name}.{name}"
+    return TableSchema(
+        name=name,
+        database_name="DB",
+        schema_name=schema_name,
+        full_name=full_name,
+        ddl="",
+        columns=columns,
+        searchable_text=searchable_text or name.lower(),
+    )
+
+
 def _objects_by_type(index: dict[str, TableSchema], object_type: str):
     """Return schema objects of one type from a synthetic index."""
 
@@ -199,3 +220,151 @@ def test_sample_values_include_only_bounded_categorical_values():
         assert sample_value.metadata["distinct_count"] == 2
         assert sample_value.metadata["dense_embedding_default"] is False
         assert sample_value.metadata["inclusion_reason"] == "repeated_bounded_sample"
+
+
+def test_exact_table_families_use_ordered_column_signature_and_stable_canonical_member():
+    columns = [
+        ColumnSchema(name="ORDER_ID", type="TEXT"),
+        ColumnSchema(name="AMOUNT", type="NUMBER"),
+        ColumnSchema(name="ORDER_DATE", type="DATE"),
+    ]
+    index = {
+        "DB.PUBLIC.SALES_2024": _table("SALES_2024", columns),
+        "DB.PUBLIC.SALES_2023": _table("SALES_2023", columns),
+        "DB.PUBLIC.SALES_2022": _table("SALES_2022", columns),
+    }
+
+    first = _objects_by_type(index, "family")
+    second = _objects_by_type(index, "family")
+
+    assert [obj.object_id for obj in first] == [obj.object_id for obj in second]
+    assert len(first) == 1
+    family = first[0]
+    assert family.metadata["schema_object_subtype"] == "table_family"
+    assert family.metadata["family_kind"] == "exact"
+    assert family.metadata["canonical_member"] == "DB.PUBLIC.SALES_2022"
+    assert family.metadata["member_table_refs"] == [
+        "DB.PUBLIC.SALES_2022",
+        "DB.PUBLIC.SALES_2023",
+        "DB.PUBLIC.SALES_2024",
+    ]
+    assert family.metadata["common_columns"] == ["ORDER_ID", "AMOUNT", "ORDER_DATE"]
+    assert family.metadata["variant_columns"] == {
+        "columns": [],
+        "total_count": 0,
+        "truncated": False,
+    }
+    assert family.metadata["suffix_dimensions"] == [
+        {
+            "kind": "YYYY",
+            "raw_values": ["2022", "2023", "2024"],
+            "values": ["2022", "2023", "2024"],
+        }
+    ]
+
+
+def test_near_table_families_require_same_stem_and_column_jaccard_threshold():
+    index = {
+        "DB.PUBLIC.EVENTS_1": _table(
+            "EVENTS_1",
+            [
+                ColumnSchema(name="EVENT_ID", type="TEXT"),
+                ColumnSchema(name="USER_ID", type="TEXT"),
+                ColumnSchema(name="CREATED_AT", type="TIMESTAMP"),
+                ColumnSchema(name="EVENT_TYPE", type="TEXT"),
+            ],
+        ),
+        "DB.PUBLIC.EVENTS_2": _table(
+            "EVENTS_2",
+            [
+                ColumnSchema(name="EVENT_ID", type="TEXT"),
+                ColumnSchema(name="USER_ID", type="TEXT"),
+                ColumnSchema(name="CREATED_AT", type="TIMESTAMP"),
+                ColumnSchema(name="EVENT_SOURCE", type="TEXT"),
+            ],
+        ),
+        "DB.PUBLIC.EVENTS_3": _table(
+            "EVENTS_3",
+            [
+                ColumnSchema(name="EVENT_ID", type="TEXT"),
+                ColumnSchema(name="USER_ID", type="TEXT"),
+                ColumnSchema(name="CREATED_AT", type="TIMESTAMP"),
+                ColumnSchema(name="SESSION_ID", type="TEXT"),
+            ],
+        ),
+    }
+
+    families = [
+        obj
+        for obj in build_schema_objects(index, family_similarity_threshold=0.6)
+        if obj.object_type == "family"
+    ]
+
+    assert len(families) == 1
+    family = families[0]
+    assert family.metadata["family_kind"] == "near"
+    assert family.metadata["common_columns"] == ["EVENT_ID", "USER_ID", "CREATED_AT"]
+    assert family.metadata["variant_columns"]["total_count"] == 3
+    assert family.metadata["suffix_dimensions"] == [
+        {"kind": "integer", "raw_values": ["1", "2", "3"], "values": ["1", "2", "3"]}
+    ]
+    assert family.metadata["caveats"]
+
+
+def test_partition_suffix_dimensions_cover_supported_generic_suffix_shapes():
+    columns = [ColumnSchema(name="ID", type="TEXT")]
+    index = {
+        "DB.PUBLIC.DAILY_20240101": _table("DAILY_20240101", columns),
+        "DB.PUBLIC.DAILY_20240102": _table("DAILY_20240102", columns),
+        "DB.PUBLIC.SNAPSHOT_2024_01_01": _table("SNAPSHOT_2024_01_01", columns),
+        "DB.PUBLIC.SNAPSHOT_2024_01_02": _table("SNAPSHOT_2024_01_02", columns),
+        "DB.PUBLIC.MODEL_v1": _table("MODEL_v1", columns),
+        "DB.PUBLIC.MODEL_v2": _table("MODEL_v2", columns),
+    }
+
+    families = {
+        family.metadata["normalized_stem"]: family.metadata["suffix_dimensions"]
+        for family in _objects_by_type(index, "family")
+    }
+
+    assert families["daily"] == [
+        {
+            "kind": "YYYYMMDD",
+            "raw_values": ["20240101", "20240102"],
+            "values": ["2024-01-01", "2024-01-02"],
+        }
+    ]
+    assert families["snapshot"] == [
+        {
+            "kind": "YYYY_MM_DD",
+            "raw_values": ["2024_01_01", "2024_01_02"],
+            "values": ["2024-01-01", "2024-01-02"],
+        }
+    ]
+    assert families["model"] == [
+        {"kind": "version", "raw_values": ["_v1", "_v2"], "values": ["1", "2"]}
+    ]
+
+
+def test_table_family_detection_rejects_unrelated_tables_and_wide_single_tables():
+    index = {
+        "DB.PUBLIC.CUSTOMERS": _table(
+            "CUSTOMERS",
+            [ColumnSchema(name="ID", type="TEXT"), ColumnSchema(name="NAME", type="TEXT")],
+        ),
+        "DB.PUBLIC.VENDORS": _table(
+            "VENDORS",
+            [ColumnSchema(name="ID", type="TEXT"), ColumnSchema(name="NAME", type="TEXT")],
+        ),
+        "DB.PUBLIC.WIDE_METRICS": _table(
+            "WIDE_METRICS",
+            [
+                ColumnSchema(name="METRIC_1", type="NUMBER"),
+                ColumnSchema(name="METRIC_2", type="NUMBER"),
+                ColumnSchema(name="METRIC_3", type="NUMBER"),
+                ColumnSchema(name="METRIC_4", type="NUMBER"),
+            ],
+        ),
+    }
+
+    assert _objects_by_type(index, "family") == []
