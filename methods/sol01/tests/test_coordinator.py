@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pandas as pd
@@ -17,14 +18,17 @@ from sol01.models import (
     CandidateReviewReport,
     ColumnSchema,
     FinalAnswer,
+    HybridPlanningDecision,
     Intent,
-    PlanningDecision,
+    RetrievedSchemaObject,
+    SchemaObject,
+    SelectedSchemaObject,
     SQLCandidate,
     SQLCandidateBatch,
     TableSchema,
     Task,
 )
-from sol01.output.output import ensure_run_paths
+from sol01.output.output import csv_path_for, ensure_run_paths
 
 SALES_TABLE = "TEST_DB.PUBLIC.SALES"
 ORDERS_TABLE = "TEST_DB.PUBLIC.ORDERS"
@@ -135,14 +139,56 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
     monkeypatch.setattr(
         "sol01.candidates.verification.load_db_index", lambda *args, **kwargs: schema
     )
+    schema_objects = [
+        SchemaObject(
+            object_id=f"table:{SALES_TABLE}",
+            object_type="table",
+            name=SALES_TABLE,
+            db="TEST_DB",
+            table_name=SALES_TABLE,
+            searchable_text="sales customer amount",
+        ),
+        SchemaObject(
+            object_id=f"table:{ORDERS_TABLE}",
+            object_type="table",
+            name=ORDERS_TABLE,
+            db="TEST_DB",
+            table_name=ORDERS_TABLE,
+            searchable_text="orders order amount",
+        ),
+    ]
+    retrieval_index = SimpleNamespace(
+        db="TEST_DB",
+        cache_key="test-cache-key",
+        objects=schema_objects,
+        chunks=[],
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.build_retrieval_index",
+        lambda *args, **kwargs: retrieval_index,
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema_objects",
+        lambda *args, **kwargs: (
+            [
+                RetrievedSchemaObject(schema_object=schema_objects[0], rank=1, score=0.9),
+                RetrievedSchemaObject(schema_object=schema_objects[1], rank=2, score=0.8),
+            ],
+            {"query": {"text": "test query"}, "candidate_count": 2},
+        ),
+    )
     return schema
 
 
 def _planning(
-    *, tables: list[str] | None = None, summary: str = "Find totals."
-) -> PlanningDecision:
-    return PlanningDecision(
-        selected_tables=tables or [SALES_TABLE],
+    *, object_ids: list[str] | None = None, summary: str = "Find totals."
+) -> HybridPlanningDecision:
+    return HybridPlanningDecision(
+        selected_objects=[
+            SelectedSchemaObject(object_id=object_id)
+            for object_id in (object_ids or [f"table:{SALES_TABLE}"])
+        ],
+        selected_tables=[],
         rationale="selected needed tables",
         confidence=0.9,
         intent=Intent(
@@ -220,12 +266,73 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
         "candidate_review": "hash-candidate_review",
     }
     assert trace["schema_selection"]["selected_tables"] == [SALES_TABLE]
+    assert trace["schema_retrieval_version"] == "hybrid_v1"
+    assert trace["schema_retrieval"]["index"]["cache_key"] == "test-cache-key"
     assert len(trace["attempts"]) == 1
     assert trace["candidate_review"]["preferred_stage"] == "initial_1"
     assert trace["candidate_review"]["review_reason"] == (
         "final adjudication of the only executable candidate"
     )
     assert set(prompts) == {"planning", "sql_generation_batch", "candidate_review"}
+    assert "Schema summary:" not in prompts["planning"][0]
+    assert "Retrieved logical schema object evidence:" in prompts["planning"][0]
+
+
+def test_run_task_reruns_old_trace_without_schema_retrieval_version(
+    tmp_path: Path,
+    fake_snowflake: None,
+    db_index: dict[str, TableSchema],
+):
+    task = Task(instance_id="sf_stale", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("stale-run", outputs_root=tmp_path)
+    csv_path = csv_path_for(run_paths, instance_id=task.instance_id)
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    csv_path.write_text("old\n", encoding="utf-8")
+    (run_paths.traces_dir / "sf_stale.json").write_text(
+        json.dumps(
+            {
+                "instance_id": task.instance_id,
+                "status": "success",
+                "final_sql": "SELECT 1",
+                "csv_path": str(csv_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    llm = FakeLLMClient(
+        outputs={
+            "planning": [_planning()],
+            "sql_generation_batch": [
+                SQLCandidateBatch(
+                    candidates=[_candidate(f"SELECT CUSTOMER, AMOUNT FROM {SALES_TABLE}")]
+                )
+            ],
+            "candidate_review": [
+                CandidateReviewReport(
+                    baseline_stage="initial_1",
+                    preferred_stage="initial_1",
+                    compared_stages=["initial_1"],
+                    reasons=["The rerun candidate matches the request."],
+                    confidence=0.9,
+                    issues=[],
+                    should_repair=False,
+                )
+            ],
+        }
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    assert answer.status == "success"
+    assert answer.sql != "SELECT 1"
+    trace = json.loads((run_paths.traces_dir / "sf_stale.json").read_text(encoding="utf-8"))
+    assert trace["schema_retrieval_version"] == "hybrid_v1"
 
 
 def test_close_executable_candidates_use_one_candidate_review(

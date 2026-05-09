@@ -15,18 +15,18 @@ from sol01.candidates.verification import (
     _augment_intent_with_value_groundings,
     _table_schemas_for_selection,
 )
-from sol01.infra.config import RuntimeConfig
+from sol01.infra.config import DEFAULT_DOTENV_PATH, RuntimeConfig, SchemaRetrievalConfig
 from sol01.infra.logging import get_logger
 from sol01.llm.llm_logging import LLMCallLogger
 from sol01.llm.prompt_builders import (
     _candidate_review_prompt,
-    _planning_user_prompt,
     _question_preview,
-    _schema_expansion_prompt,
+    _retrieval_planning_user_prompt,
     _semantic_repair_prompt,
     _sql_generation_batch_prompt,
     _sql_reference_context,
     _sql_repair_prompt,
+    sanitize_hybrid_planning_decision,
     schema_expansion_trigger,
 )
 from sol01.models import (
@@ -34,9 +34,8 @@ from sol01.models import (
     ConfidenceReport,
     ExecutionResult,
     FinalAnswer,
+    HybridPlanningDecision,
     Intent,
-    PlanningDecision,
-    SchemaExpansionDecision,
     SchemaSelection,
     SQLCandidate,
     SQLCandidateBatch,
@@ -54,8 +53,11 @@ from sol01.output.output import (
     write_sql,
     write_trace,
 )
+from sol01.schema.hybrid_retrieval import retrieve_schema_objects
 from sol01.schema.index import CACHE_PATH
-from sol01.schema.retrieval import db_schema_summary, load_db_index, sanitize_llm_tables
+from sol01.schema.resolver import resolve_schema_context
+from sol01.schema.retrieval import load_db_index, sanitize_llm_tables
+from sol01.schema.retrieval_index import build_retrieval_index
 
 logger = get_logger(__name__)
 LLMClient: Any | None = None
@@ -141,7 +143,8 @@ def run_tasks(
         skip_failed=skip_failed,
     )
 
-    _prewarm_schema_indexes(tasks)
+    schema_retrieval_config = SchemaRetrievalConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
+    _prewarm_schema_indexes(tasks, schema_retrieval_config=schema_retrieval_config)
     results = _run_task_batch(
         tasks,
         run_paths=run_paths,
@@ -160,15 +163,25 @@ def run_tasks(
     return results
 
 
-def _prewarm_schema_indexes(tasks: list[Task], *, cache_path: Path = CACHE_PATH) -> None:
-    """Load each selected database into the local schema cache before workers start."""
+def _prewarm_schema_indexes(
+    tasks: list[Task],
+    *,
+    cache_path: Path = CACHE_PATH,
+    schema_retrieval_config: SchemaRetrievalConfig,
+) -> None:
+    """Build each selected database retrieval index before workers start."""
 
     seen: set[str] = set()
     for task in tasks:
         if task.db in seen:
             continue
         seen.add(task.db)
-        load_db_index(task.db, cache_path=cache_path)
+        db_index = load_db_index(task.db, cache_path=cache_path)
+        build_retrieval_index(
+            task.db,
+            db_index=db_index,
+            config=schema_retrieval_config,
+        )
 
 
 def _run_task_batch(
@@ -306,6 +319,8 @@ class _TaskCtx:
     sql_reference_context: str
     docs_context: str
     prompt_hashes: dict[str, str]
+    schema_retrieval_version: str
+    schema_retrieval: dict[str, Any]
 
 
 def _check_skip(
@@ -315,6 +330,7 @@ def _check_skip(
     *,
     force: bool,
     skip_failed: bool,
+    expected_schema_retrieval_version: str,
 ) -> FinalAnswer | None:
     """Return an existing FinalAnswer if the task should be skipped, else None."""
 
@@ -323,6 +339,15 @@ def _check_skip(
     ):
         return None
     existing_trace = json.loads(task_trace_path.read_text(encoding="utf-8"))
+    if existing_trace.get("schema_retrieval_version") != expected_schema_retrieval_version:
+        logger.info(
+            "task rerun: schema retrieval version changed",
+            instance_id=task.instance_id,
+            db=task.db,
+            expected_schema_retrieval_version=expected_schema_retrieval_version,
+            existing_schema_retrieval_version=existing_trace.get("schema_retrieval_version"),
+        )
+        return None
     logger.info(
         "task skipped",
         instance_id=task.instance_id,
@@ -345,6 +370,7 @@ def _build_context(
     client: StructuredLLM,
     prompt_hashes: dict[str, str],
     run_paths: RunPaths,
+    schema_retrieval_config: SchemaRetrievalConfig,
 ) -> _TaskCtx:
     """Retrieve schema, extract intent, and assemble the shared pipeline context."""
 
@@ -361,8 +387,13 @@ def _build_context(
         if task.external_knowledge
         else "No task-linked document context."
     )
-    schema, intent = _run_planning(task, client, prompt_hashes, docs_context)
-    table_schemas = _table_schemas_for_selection(schema)
+    schema, intent, table_schemas, sql_reference_context, schema_retrieval = _run_planning(
+        task,
+        client,
+        prompt_hashes,
+        docs_context,
+        schema_retrieval_config=schema_retrieval_config,
+    )
     intent = _augment_intent_with_value_groundings(
         intent, task=task, schema=schema, table_schemas=table_schemas
     )
@@ -388,9 +419,11 @@ def _build_context(
         intent=intent,
         schema=schema,
         table_schemas=table_schemas,
-        sql_reference_context=_sql_reference_context(schema, table_schemas),
+        sql_reference_context=sql_reference_context,
         docs_context=docs_context,
         prompt_hashes=prompt_hashes,
+        schema_retrieval_version=schema_retrieval_config.schema_retrieval_version,
+        schema_retrieval=schema_retrieval,
     )
 
 
@@ -399,48 +432,108 @@ def _run_planning(
     client: StructuredLLM,
     prompt_hashes: dict[str, str],
     docs_context: str,
-) -> tuple[SchemaSelection, Intent]:
-    """Run the combined table-selection and intent-extraction LLM call."""
+    *,
+    schema_retrieval_config: SchemaRetrievalConfig,
+) -> tuple[SchemaSelection, Intent, dict[str, Any], str, dict[str, Any]]:
+    """Retrieve schema objects and run the retrieval-scoped planning call."""
 
     db_index = load_db_index(task.db)
+    retrieval_index = build_retrieval_index(
+        task.db,
+        db_index=db_index,
+        config=schema_retrieval_config,
+    )
+    linked_docs = [] if docs_context == "No task-linked document context." else [docs_context]
+    retrieved_objects, retrieval_diagnostics = retrieve_schema_objects(
+        retrieval_index,
+        task.question,
+        linked_docs=linked_docs,
+        config=schema_retrieval_config,
+    )
     decision = _run_prompt(
         client,
         prompt_hashes=prompt_hashes,
         prompt_name="planning",
-        output_type=PlanningDecision,
-        user_prompt=_planning_user_prompt(
+        output_type=HybridPlanningDecision,
+        user_prompt=_retrieval_planning_user_prompt(
             task,
             task.db,
             docs_context,
-            db_schema_summary(db_index),
+            retrieved_objects,
         ),
     )
-    selected_tables = sanitize_llm_tables(decision.selected_tables, db_index)
-    confidence = decision.confidence if selected_tables else 0.0
-    rationale = decision.rationale.strip()
-    if not selected_tables:
-        rationale = f"{rationale} No valid tables matched the schema summary.".strip()
-    elif selected_tables != decision.selected_tables[: len(selected_tables)]:
-        rationale = (
-            f"{rationale} Ignored unknown or duplicate table names returned by the model."
-        ).strip()
+    sanitized_decision, planner_diagnostics = sanitize_hybrid_planning_decision(
+        decision,
+        retrieved_objects,
+    )
+    resolved = resolve_schema_context(
+        db=task.db,
+        selected_objects=sanitized_decision.selected_objects,
+        canonical_schema_objects=retrieval_index.objects,
+        db_index=db_index,
+        question=task.question,
+        retrieval_evidence=retrieved_objects,
+        constraints=sanitized_decision.constraints,
+    )
 
     schema = SchemaSelection(
         db=task.db,
-        selected_object_ids=[f"table:{table_name}" for table_name in selected_tables],
-        selected_tables=selected_tables,
-        expanded_tables=list(selected_tables),
-        allowed_tables=list(selected_tables),
-        rationale=rationale,
-        confidence=confidence,
+        selected_object_ids=[
+            selected.object_id for selected in sanitized_decision.selected_objects
+        ],
+        selected_tables=list(resolved.resolved_tables),
+        expanded_tables=list(resolved.allowed_tables),
+        allowed_tables=list(resolved.allowed_tables),
+        rationale=sanitized_decision.rationale,
+        confidence=sanitized_decision.confidence,
         diagnostics={
             "selection_prompt_chars": len(
-                _planning_user_prompt(task, task.db, docs_context, db_schema_summary(db_index))
+                _retrieval_planning_user_prompt(
+                    task,
+                    task.db,
+                    docs_context,
+                    retrieved_objects,
+                )
             ),
-            "candidate_table_count": len(db_index),
+            "retrieved_object_count": len(retrieved_objects),
+            "selected_objects": [
+                selected.model_dump(mode="json") for selected in sanitized_decision.selected_objects
+            ],
+            "resolved_tables": list(resolved.resolved_tables),
+            "allowed_tables": list(resolved.allowed_tables),
+            "planner": planner_diagnostics,
+            "resolver": resolved.diagnostics,
         },
     )
-    return schema, decision.intent
+    schema_retrieval = {
+        "index": {
+            "db": retrieval_index.db,
+            "cache_key": retrieval_index.cache_key,
+            "object_count": len(retrieval_index.objects),
+            "chunk_count": len(retrieval_index.chunks),
+        },
+        "retrieval": retrieval_diagnostics,
+        "retrieved_objects": [
+            {
+                "object_id": item.schema_object.object_id,
+                "object_type": item.schema_object.object_type,
+                "name": item.schema_object.name,
+                "table_name": item.schema_object.table_name,
+                "rank": item.rank,
+                "score": item.score,
+            }
+            for item in retrieved_objects
+        ],
+        "planner": planner_diagnostics,
+        "resolver": resolved.diagnostics,
+    }
+    return (
+        schema,
+        sanitized_decision.intent,
+        resolved.table_schemas,
+        resolved.prompt_context,
+        schema_retrieval,
+    )
 
 
 def _log_candidate(instance_id: str, attempt: dict[str, Any]) -> None:
@@ -699,7 +792,13 @@ def _expand_schema_selection(
             combined.append(table)
             added.append(table)
     return (
-        schema.model_copy(update={"expanded_tables": combined, "selected_tables": combined}),
+        schema.model_copy(
+            update={
+                "expanded_tables": combined,
+                "selected_tables": combined,
+                "allowed_tables": combined,
+            }
+        ),
         added,
     )
 
@@ -723,6 +822,8 @@ def _rebuild_context_for_expansion(
         sql_reference_context=_sql_reference_context(expanded_schema, new_table_schemas),
         docs_context=ctx.docs_context,
         prompt_hashes=ctx.prompt_hashes,
+        schema_retrieval_version=ctx.schema_retrieval_version,
+        schema_retrieval=ctx.schema_retrieval,
     )
 
 
@@ -778,28 +879,16 @@ def _attempt_schema_expansion(
             "additional_tables": deterministic_tables,
         }
     else:
-        decision = _run_prompt(
-            ctx.client,
-            prompt_hashes=ctx.prompt_hashes,
-            prompt_name="schema_expansion",
-            output_type=SchemaExpansionDecision,
-            user_prompt=_schema_expansion_prompt(
-                ctx.task,
-                best_attempt,
-                trigger,
-                ctx.schema,
-                db_schema_summary(db_index),
-            ),
+        expansion_payload["outcome"] = "retrieval_expansion_pending"
+        expansion_payload["decision"] = {
+            "source": "none",
+            "reason": "schema expansion must use retrieval and is tracked separately",
+        }
+        logger.info(
+            "schema expansion skipped: retrieval expansion pending",
+            instance_id=ctx.task.instance_id,
         )
-        expansion_payload["decision"] = decision.model_dump(mode="json")
-        if not decision.should_expand:
-            expansion_payload["outcome"] = "model_declined"
-            logger.info(
-                "schema expansion declined by model",
-                instance_id=ctx.task.instance_id,
-            )
-            return best_attempt, expansion_payload, None
-        requested_tables = decision.additional_tables
+        return best_attempt, expansion_payload, None
 
     expanded_schema, added_tables = _expand_schema_selection(ctx.schema, requested_tables, db_index)
     expansion_payload["added_tables"] = added_tables
@@ -930,6 +1019,8 @@ def _write_task_output(
         "db": task.db,
         "question": task.question,
         "schema_selection": final_ctx.schema.model_dump(mode="json"),
+        "schema_retrieval_version": final_ctx.schema_retrieval_version,
+        "schema_retrieval": final_ctx.schema_retrieval,
         "intent": final_ctx.intent.model_dump(mode="json"),
         "prompt_hashes": ctx.prompt_hashes,
         "attempts": attempts,
@@ -1041,15 +1132,29 @@ def run_task(
         call_logger=LLMCallLogger(task_llm_log_path),
     )
     task_trace_path = trace_path_for(run_paths, instance_id=task.instance_id)
+    schema_retrieval_config = SchemaRetrievalConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
 
-    skipped = _check_skip(task, run_paths, task_trace_path, force=force, skip_failed=skip_failed)
+    skipped = _check_skip(
+        task,
+        run_paths,
+        task_trace_path,
+        force=force,
+        skip_failed=skip_failed,
+        expected_schema_retrieval_version=schema_retrieval_config.schema_retrieval_version,
+    )
     if skipped is not None:
         return skipped
 
     prompt_hashes: dict[str, str] = {}
     attempts: list[dict[str, Any]] = []
 
-    ctx = _build_context(task, client, prompt_hashes, run_paths)
+    ctx = _build_context(
+        task,
+        client,
+        prompt_hashes,
+        run_paths,
+        schema_retrieval_config,
+    )
 
     best_attempt = _generate_initial_candidates(
         ctx, attempts, initial_candidates=initial_candidates, max_attempts=max_attempts
