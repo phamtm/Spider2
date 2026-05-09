@@ -427,15 +427,18 @@ def _run_planning(
 
     schema = SchemaSelection(
         db=task.db,
-        retrieval_mode="llm_only",
+        selected_object_ids=[f"table:{table_name}" for table_name in selected_tables],
         selected_tables=selected_tables,
         expanded_tables=list(selected_tables),
+        allowed_tables=list(selected_tables),
         rationale=rationale,
         confidence=confidence,
-        selection_prompt_chars=len(
-            _planning_user_prompt(task, task.db, docs_context, db_schema_summary(db_index))
-        ),
-        candidate_table_count=len(db_index),
+        diagnostics={
+            "selection_prompt_chars": len(
+                _planning_user_prompt(task, task.db, docs_context, db_schema_summary(db_index))
+            ),
+            "candidate_table_count": len(db_index),
+        },
     )
     return schema, decision.intent
 
@@ -926,7 +929,6 @@ def _write_task_output(
         "instance_id": task.instance_id,
         "db": task.db,
         "question": task.question,
-        "retrieval_mode": final_ctx.schema.retrieval_mode,
         "schema_selection": final_ctx.schema.model_dump(mode="json"),
         "intent": final_ctx.intent.model_dump(mode="json"),
         "prompt_hashes": ctx.prompt_hashes,

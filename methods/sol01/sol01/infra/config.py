@@ -11,6 +11,17 @@ DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "deepseek/deepseek-v4-pro"
 DEFAULT_PROVIDER_ONLY = "deepseek"
 DEFAULT_CONCURRENCY = 4
+DEFAULT_SCHEMA_RETRIEVAL_VERSION = "schema-retrieval-v1"
+DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
+DEFAULT_SCHEMA_EMBEDDING_MODEL = "qwen3-embedding:4b"
+DEFAULT_SCHEMA_RERANKER_MODEL = "qwen3-reranker:4b"
+DEFAULT_RETRIEVAL_CHUNK_TOP_K = 80
+DEFAULT_RETRIEVAL_RERANK_TOP_K = 20
+DEFAULT_RETRIEVAL_OBJECT_TOP_K = 12
+DEFAULT_RETRIEVAL_FAMILY_TOP_K = 8
+DEFAULT_FAMILY_SIMILARITY_THRESHOLD = 0.82
+DEFAULT_MAX_LINKED_DOC_CHARS = 6000
+DEFAULT_MAX_SCHEMA_PROMPT_CHARS = 24000
 METHOD_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DOTENV_PATH = METHOD_ROOT / ".env"
 
@@ -75,6 +86,73 @@ class RuntimeConfig(BaseModel):
         return self
 
 
+class SchemaRetrievalConfig(BaseModel):
+    """Local schema-retrieval settings used before LLM planning."""
+
+    schema_retrieval_version: str = DEFAULT_SCHEMA_RETRIEVAL_VERSION
+    ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
+    embedding_model: str = DEFAULT_SCHEMA_EMBEDDING_MODEL
+    reranker_model: str = DEFAULT_SCHEMA_RERANKER_MODEL
+    chunk_top_k: int = Field(default=DEFAULT_RETRIEVAL_CHUNK_TOP_K, ge=1)
+    rerank_top_k: int = Field(default=DEFAULT_RETRIEVAL_RERANK_TOP_K, ge=1)
+    object_top_k: int = Field(default=DEFAULT_RETRIEVAL_OBJECT_TOP_K, ge=1)
+    family_top_k: int = Field(default=DEFAULT_RETRIEVAL_FAMILY_TOP_K, ge=1)
+    family_similarity_threshold: float = Field(
+        default=DEFAULT_FAMILY_SIMILARITY_THRESHOLD,
+        ge=0.0,
+        le=1.0,
+    )
+    max_linked_doc_chars: int = Field(default=DEFAULT_MAX_LINKED_DOC_CHARS, ge=1)
+    max_schema_prompt_chars: int = Field(default=DEFAULT_MAX_SCHEMA_PROMPT_CHARS, ge=1)
+
+    @classmethod
+    def from_env(cls, *, dotenv_path: Path | None = None) -> "SchemaRetrievalConfig":
+        """Load schema retrieval settings from the shell or one local .env file."""
+
+        _load_local_dotenv(dotenv_path)
+
+        return cls(
+            schema_retrieval_version=(
+                _env_first("SOL01_SCHEMA_RETRIEVAL_VERSION") or DEFAULT_SCHEMA_RETRIEVAL_VERSION
+            ),
+            ollama_base_url=_env_first("SOL01_OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL,
+            embedding_model=(
+                _env_first("SOL01_SCHEMA_EMBEDDING_MODEL") or DEFAULT_SCHEMA_EMBEDDING_MODEL
+            ),
+            reranker_model=(
+                _env_first("SOL01_SCHEMA_RERANKER_MODEL") or DEFAULT_SCHEMA_RERANKER_MODEL
+            ),
+            chunk_top_k=_env_positive_int(
+                "SOL01_SCHEMA_CHUNK_TOP_K",
+                default=DEFAULT_RETRIEVAL_CHUNK_TOP_K,
+            ),
+            rerank_top_k=_env_positive_int(
+                "SOL01_SCHEMA_RERANK_TOP_K",
+                default=DEFAULT_RETRIEVAL_RERANK_TOP_K,
+            ),
+            object_top_k=_env_positive_int(
+                "SOL01_SCHEMA_OBJECT_TOP_K",
+                default=DEFAULT_RETRIEVAL_OBJECT_TOP_K,
+            ),
+            family_top_k=_env_positive_int(
+                "SOL01_SCHEMA_FAMILY_TOP_K",
+                default=DEFAULT_RETRIEVAL_FAMILY_TOP_K,
+            ),
+            family_similarity_threshold=_env_unit_float(
+                "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD",
+                default=DEFAULT_FAMILY_SIMILARITY_THRESHOLD,
+            ),
+            max_linked_doc_chars=_env_positive_int(
+                "SOL01_SCHEMA_MAX_LINKED_DOC_CHARS",
+                default=DEFAULT_MAX_LINKED_DOC_CHARS,
+            ),
+            max_schema_prompt_chars=_env_positive_int(
+                "SOL01_SCHEMA_MAX_PROMPT_CHARS",
+                default=DEFAULT_MAX_SCHEMA_PROMPT_CHARS,
+            ),
+        )
+
+
 def _env_first(*names: str) -> str | None:
     """Return the first non-empty environment value from the given names."""
 
@@ -127,4 +205,21 @@ def _env_positive_int(name: str, *, default: int) -> int:
 
     if parsed < 1:
         raise ValueError(f"{name} must be a positive integer")
+    return parsed
+
+
+def _env_unit_float(name: str, *, default: float) -> float:
+    """Parse a float between 0 and 1 inclusive from the environment."""
+
+    value = os.environ.get(name)
+    if value is None or not value.strip():
+        return default
+
+    try:
+        parsed = float(value.strip())
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number between 0 and 1") from exc
+
+    if not 0.0 <= parsed <= 1.0:
+        raise ValueError(f"{name} must be a number between 0 and 1")
     return parsed

@@ -271,10 +271,8 @@ def should_skip_task(
     trace = json.loads(trace_path.read_text(encoding="utf-8"))
     status = trace.get("status")
     csv_path = csv_path_for(run_paths, instance_id=instance_id)
-    actual_retrieval_mode = _trace_retrieval_mode(trace)
 
-    # Rerun traces produced by any removed fixed retrieval path.
-    if actual_retrieval_mode != "llm_only":
+    if _trace_uses_removed_retrieval_path(trace):
         return False
 
     if status == "success":
@@ -286,18 +284,16 @@ def should_skip_task(
     return False
 
 
-def _trace_retrieval_mode(trace: dict[str, Any]) -> str:
-    """Read the schema-selection marker and default old traces to llm_only."""
+def _trace_uses_removed_retrieval_path(trace: dict[str, Any]) -> bool:
+    """Return True for traces produced by removed fixed retrieval experiments."""
 
     mode = trace.get("retrieval_mode")
-    if isinstance(mode, str):
-        return mode
+    if mode == "legacy_fixed":
+        return True
 
     schema = trace.get("schema_selection") or {}
     schema_mode = schema.get("retrieval_mode")
-    if isinstance(schema_mode, str):
-        return schema_mode
-    return "llm_only"
+    return schema_mode == "legacy_fixed"
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> Path:

@@ -1,9 +1,70 @@
 """Typed data contracts shared across the sol01 pipeline."""
 
+from __future__ import annotations
+
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+SchemaObjectKind = Literal[
+    "table",
+    "column",
+    "column_group",
+    "sample_value",
+    "join_candidate",
+    "family",
+]
+SelectedSchemaRole = Literal[
+    "primary",
+    "supporting",
+    "join",
+    "filter",
+    "metric",
+    "dimension",
+    "unknown",
+]
+
+# Stable schema object id formats:
+# table:<full_table_name>
+# column:<full_table_name>#<column_name>
+# column_group:<full_table_name>#<group_slug>:<8char_hash>
+# sample_value:<full_table_name>#<column_name>:<8char_hash>
+# join_candidate:<left_table>#<left_col>-><right_table>#<right_col>:<8char_hash>
+# family:<db>.<schema_or_none>:<stem_slug>:<8char_hash>
+SCHEMA_OBJECT_ID_PATTERNS: dict[SchemaObjectKind, re.Pattern[str]] = {
+    "table": re.compile(r"^table:[^#:\s]+$"),
+    "column": re.compile(r"^column:[^#:\s]+#[^#:\s]+$"),
+    "column_group": re.compile(r"^column_group:[^#:\s]+#[a-z0-9][a-z0-9_-]*:[0-9a-f]{8}$"),
+    "sample_value": re.compile(r"^sample_value:[^#:\s]+#[^#:\s]+:[0-9a-f]{8}$"),
+    "join_candidate": re.compile(
+        r"^join_candidate:[^#:\s]+#[^#:\s]+->[^#:\s]+#[^#:\s]+:[0-9a-f]{8}$"
+    ),
+    "family": re.compile(r"^family:[^#:\s]+\.[^#:\s]+:[a-z0-9][a-z0-9_-]*:[0-9a-f]{8}$"),
+}
+
+
+def schema_object_id_kind(object_id: str) -> SchemaObjectKind | None:
+    """Return the schema object kind encoded in one stable object id."""
+
+    for object_type, pattern in SCHEMA_OBJECT_ID_PATTERNS.items():
+        if pattern.fullmatch(object_id):
+            return object_type
+    return None
+
+
+def is_schema_object_id(object_id: str) -> bool:
+    """Return True when a value follows one stable schema object id format."""
+
+    return schema_object_id_kind(object_id) is not None
+
+
+def validate_schema_object_id(object_id: str) -> str:
+    """Validate one stable schema object id and return it unchanged."""
+
+    if not is_schema_object_id(object_id):
+        raise ValueError("schema object id does not match a stable format")
+    return object_id
 
 
 class Task(BaseModel):
@@ -78,23 +139,141 @@ class TableSchema(BaseModel):
     searchable_text: str
 
 
-class SchemaSelection(BaseModel):
-    """The LLM-selected table set for one task."""
+class SchemaObject(BaseModel):
+    """One canonical database object that can be indexed for retrieval."""
+
+    object_id: str
+    object_type: SchemaObjectKind
+    name: str
+    db: str | None = None
+    table_name: str | None = None
+    column_name: str | None = None
+    description: str | None = None
+    searchable_text: str = ""
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("object_id")
+    @classmethod
+    def _validate_object_id(cls, object_id: str) -> str:
+        return validate_schema_object_id(object_id)
+
+    @model_validator(mode="after")
+    def _object_type_matches_id(self) -> SchemaObject:
+        object_type = schema_object_id_kind(self.object_id)
+        if object_type != self.object_type:
+            raise ValueError("object_type must match object_id prefix")
+        return self
+
+
+class RetrievalChunk(BaseModel):
+    """Searchable text derived from one schema object or linked document."""
+
+    chunk_id: str
+    object_id: str
+    text: str
+    source: Literal["schema", "linked_doc", "sample", "join", "family"] = "schema"
+    linked_doc_title: str | None = None
+    metadata: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("object_id")
+    @classmethod
+    def _validate_object_id(cls, object_id: str) -> str:
+        return validate_schema_object_id(object_id)
+
+
+class RetrievedChunk(BaseModel):
+    """One retrieval hit with embedding and reranker scores preserved."""
+
+    chunk: RetrievalChunk
+    rank: int = Field(ge=1)
+    score: float | None = None
+    embedding_score: float | None = None
+    rerank_score: float | None = None
+
+
+class RetrievedSchemaObject(BaseModel):
+    """A retrieved schema object plus the chunks that support it."""
+
+    schema_object: SchemaObject
+    chunks: list[RetrievedChunk] = Field(default_factory=list)
+    rank: int = Field(ge=1)
+    score: float | None = None
+
+
+class SelectionConstraints(BaseModel):
+    """Optional hard bounds applied when selecting retrieved schema objects."""
+
+    required_object_ids: list[str] = Field(default_factory=list)
+    excluded_object_ids: list[str] = Field(default_factory=list)
+    allowed_object_types: list[SchemaObjectKind] = Field(default_factory=list)
+    max_objects: int | None = Field(default=None, ge=1)
+    max_tables: int | None = Field(default=None, ge=1)
+    max_columns_per_table: int | None = Field(default=None, ge=1)
+    include_families: bool = True
+
+    @field_validator("required_object_ids", "excluded_object_ids")
+    @classmethod
+    def _validate_object_ids(cls, object_ids: list[str]) -> list[str]:
+        return [validate_schema_object_id(object_id) for object_id in object_ids]
+
+
+class SelectedSchemaObject(BaseModel):
+    """One retrieved object selected for the compact resolved schema context."""
+
+    object_id: str
+    role: SelectedSchemaRole = "unknown"
+    reason: str | None = None
+    confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+
+    @field_validator("object_id")
+    @classmethod
+    def _validate_object_id(cls, object_id: str) -> str:
+        return validate_schema_object_id(object_id)
+
+
+class ResolvedSchemaContext(BaseModel):
+    """Compact context passed forward after retrieval and selection."""
 
     db: str
-    retrieval_mode: Literal["llm_only"] = "llm_only"
+    selected_objects: list[SelectedSchemaObject] = Field(default_factory=list)
+    retrieved_objects: list[RetrievedSchemaObject] = Field(default_factory=list)
+    resolved_tables: list[str] = Field(default_factory=list)
+    allowed_tables: list[str] = Field(default_factory=list)
+    schema_prompt: str = ""
+    diagnostics: dict[str, object] = Field(default_factory=dict)
+
+
+class SchemaSelection(BaseModel):
+    """Compact schema selection passed through the current planner."""
+
+    db: str
+    selected_object_ids: list[str] = Field(default_factory=list)
     selected_tables: list[str] = Field(default_factory=list)
     expanded_tables: list[str] = Field(default_factory=list)
+    allowed_tables: list[str] = Field(default_factory=list)
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
-    selection_prompt_chars: int = Field(default=0, ge=0)
-    candidate_table_count: int = Field(default=0, ge=0)
+    diagnostics: dict[str, object] = Field(default_factory=dict)
+
+    @field_validator("selected_object_ids")
+    @classmethod
+    def _validate_selected_object_ids(cls, object_ids: list[str]) -> list[str]:
+        return [validate_schema_object_id(object_id) for object_id in object_ids]
 
 
 class PlanningDecision(BaseModel):
     """Combined table selection and answer-contract planning output."""
 
     selected_tables: list[str] = Field(default_factory=list)
+    rationale: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    intent: Intent
+
+
+class HybridPlanningDecision(BaseModel):
+    """Future planner output that combines intent with selected schema objects."""
+
+    selected_objects: list[SelectedSchemaObject] = Field(default_factory=list)
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
     intent: Intent
