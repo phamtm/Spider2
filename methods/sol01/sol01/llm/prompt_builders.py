@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from typing import Any
 
 from sol01.models import (
     ConfidenceReport,
+    HybridPlanningDecision,
     Intent,
+    RetrievedSchemaObject,
     SchemaSelection,
+    SelectedSchemaObject,
     TableSchema,
     Task,
 )
@@ -24,6 +28,8 @@ _EXEC_TABLE_MISSING_SUBSTRINGS = (
     "002003",
     "000904",
 )
+_RETRIEVAL_PLANNING_DOCS_CHAR_LIMIT = 6000
+_RETRIEVAL_PLANNING_EVIDENCE_CHAR_LIMIT = 16000
 
 
 def _comparison_attempt_summary(attempt: dict[str, Any]) -> dict[str, Any]:
@@ -195,6 +201,181 @@ def _planning_user_prompt(
         "are not grounded.\n\n"
         f"Schema summary:\n{db_schema_summary}"
     )
+
+
+def _retrieval_planning_user_prompt(
+    task: Task,
+    db: str,
+    docs_context: str,
+    retrieved_objects: Sequence[RetrievedSchemaObject],
+    *,
+    max_docs_chars: int = _RETRIEVAL_PLANNING_DOCS_CHAR_LIMIT,
+    max_evidence_chars: int = _RETRIEVAL_PLANNING_EVIDENCE_CHAR_LIMIT,
+) -> str:
+    """Build a planner prompt limited to retrieved logical schema objects."""
+
+    available_ids = [item.schema_object.object_id for item in retrieved_objects]
+    return (
+        f"Question: {task.question}\n\n"
+        f"Database: {db}\n\n"
+        f"Document context:\n{_clip_context(docs_context, max_docs_chars)}\n\n"
+        "Retrieved logical schema object evidence:\n"
+        f"{_retrieved_object_evidence(retrieved_objects, max_chars=max_evidence_chars)}\n\n"
+        "Available object ids:\n"
+        f"{json.dumps(available_ids, indent=2)}\n\n"
+        "Select only logical schema objects from the retrieved candidates above. "
+        "Do not invent object ids, table names, column names, joins, families, suffixes, "
+        "versions, or date constraints that are not grounded in the question, documents, "
+        "or retrieved evidence. Do not use any full database DDL or schema summary.\n\n"
+        "Return a HybridPlanningDecision. Populate selected_objects with object ids from "
+        "Available object ids and roles such as primary, supporting, join, filter, metric, "
+        "dimension, or unknown. Populate constraints with any grounded date_start, date_end, "
+        "years, suffixes, version, include_all, and notes. Include rationale, confidence, "
+        "and an intent answer contract."
+    )
+
+
+def sanitize_hybrid_planning_decision(
+    decision: HybridPlanningDecision,
+    retrieved_objects: Sequence[RetrievedSchemaObject],
+) -> tuple[HybridPlanningDecision, dict[str, object]]:
+    """Drop hallucinated object ids and normalize exact retrieved table names."""
+
+    available_ids = [item.schema_object.object_id for item in retrieved_objects]
+    available_id_set = set(available_ids)
+    exact_table_ids = {
+        item.schema_object.table_name: item.schema_object.object_id
+        for item in retrieved_objects
+        if item.schema_object.object_type == "table" and item.schema_object.table_name
+    }
+
+    selected: list[SelectedSchemaObject] = []
+    seen_ids: set[str] = set()
+    rejected_object_ids: list[str] = []
+    duplicate_object_ids: list[str] = []
+
+    for selected_object in decision.selected_objects:
+        object_id = selected_object.object_id
+        if object_id not in available_id_set:
+            rejected_object_ids.append(object_id)
+            continue
+        if object_id in seen_ids:
+            duplicate_object_ids.append(object_id)
+            continue
+        selected.append(selected_object)
+        seen_ids.add(object_id)
+
+    normalized_table_names: list[str] = []
+    rejected_table_names: list[str] = []
+    for table_name in decision.selected_tables:
+        object_id = exact_table_ids.get(table_name)
+        if object_id is None:
+            rejected_table_names.append(table_name)
+            continue
+        if object_id in seen_ids:
+            duplicate_object_ids.append(object_id)
+            continue
+        selected.append(SelectedSchemaObject(object_id=object_id, role="unknown"))
+        seen_ids.add(object_id)
+        normalized_table_names.append(table_name)
+
+    diagnostics = {
+        "available_object_count": len(available_ids),
+        "selected_object_count": len(selected),
+        "rejected_object_ids": rejected_object_ids,
+        "duplicate_object_ids": duplicate_object_ids,
+        "normalized_table_names": normalized_table_names,
+        "rejected_table_names": rejected_table_names,
+    }
+    confidence = decision.confidence if selected else 0.0
+    rationale = decision.rationale.strip()
+    if rejected_object_ids or rejected_table_names:
+        rationale = (
+            f"{rationale} Ignored ids or table names outside retrieved candidates."
+        ).strip()
+    if duplicate_object_ids:
+        rationale = f"{rationale} Ignored duplicate selections.".strip()
+    if not selected:
+        rationale = f"{rationale} No valid retrieved schema objects were selected.".strip()
+
+    sanitized = decision.model_copy(
+        update={
+            "selected_objects": selected,
+            "selected_tables": [],
+            "confidence": confidence,
+            "rationale": rationale,
+        }
+    )
+    return sanitized, diagnostics
+
+
+def _clip_context(text: str, max_chars: int) -> str:
+    """Clip context text on a word boundary when possible."""
+
+    normalized = text.strip()
+    if max_chars < 1:
+        return ""
+    if len(normalized) <= max_chars:
+        return normalized
+    clipped = normalized[:max_chars].rstrip()
+    if " " in clipped:
+        clipped = clipped.rsplit(" ", 1)[0].rstrip()
+    return f"{clipped}..."
+
+
+def _retrieved_object_evidence(
+    retrieved_objects: Sequence[RetrievedSchemaObject],
+    *,
+    max_chars: int,
+) -> str:
+    """Render retrieved object evidence without expanding full database schema text."""
+
+    lines: list[str] = []
+    remaining = max_chars
+    for item in retrieved_objects:
+        schema_object = item.schema_object
+        header = (
+            f"- id: {schema_object.object_id}\n"
+            f"  type: {schema_object.object_type}\n"
+            f"  name: {schema_object.name}"
+        )
+        if schema_object.table_name:
+            header += f"\n  table: {schema_object.table_name}"
+        if schema_object.column_name:
+            header += f"\n  column: {schema_object.column_name}"
+        if schema_object.description:
+            header += f"\n  description: {_single_line(schema_object.description)}"
+        if item.score is not None:
+            header += f"\n  score: {item.score:.4f}"
+
+        evidence_lines = [header]
+        for retrieved_chunk in item.chunks[:3]:
+            chunk = retrieved_chunk.chunk
+            text = (
+                chunk.prompt_text
+                or chunk.rerank_text
+                or chunk.source_definition
+                or chunk.inferred_usage
+                or chunk.text
+            )
+            if text:
+                evidence_lines.append(f"  evidence: {_single_line(text, max_length=500)}")
+        rendered = "\n".join(evidence_lines)
+        if len(rendered) + 2 > remaining:
+            break
+        lines.append(rendered)
+        remaining -= len(rendered) + 2
+
+    return "\n\n".join(lines) if lines else "(no retrieved objects)"
+
+
+def _single_line(text: str, *, max_length: int = 500) -> str:
+    """Collapse whitespace and clip one evidence line."""
+
+    normalized = " ".join(text.split())
+    if len(normalized) <= max_length:
+        return normalized
+    return normalized[: max_length - 3].rstrip() + "..."
 
 
 def _grounded_literal_context_from_intent(intent: Intent) -> str | None:

@@ -248,6 +248,18 @@ class SelectionConstraints(BaseModel):
         return [validate_schema_object_id(object_id) for object_id in object_ids]
 
 
+class HybridPlanningConstraints(BaseModel):
+    """Question constraints inferred while selecting retrieved schema objects."""
+
+    date_start: str | None = None
+    date_end: str | None = None
+    years: list[int] = Field(default_factory=list)
+    suffixes: list[str] = Field(default_factory=list)
+    version: str | None = None
+    include_all: bool = False
+    notes: list[str] = Field(default_factory=list)
+
+
 class SelectedSchemaObject(BaseModel):
     """One retrieved object selected for the compact resolved schema context."""
 
@@ -305,6 +317,8 @@ class HybridPlanningDecision(BaseModel):
     """Future planner output that combines intent with selected schema objects."""
 
     selected_objects: list[SelectedSchemaObject] = Field(default_factory=list)
+    selected_tables: list[str] = Field(default_factory=list)
+    constraints: HybridPlanningConstraints = Field(default_factory=HybridPlanningConstraints)
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
     intent: Intent
