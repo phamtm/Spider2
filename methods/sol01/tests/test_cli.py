@@ -95,6 +95,7 @@ def test_run_command_dispatches_expected_filters(monkeypatch):
         "limit": None,
         "force": False,
         "skip_failed": False,
+        "prewarm_schema_index": False,
     }
     assert "Eval summary: 1/1 correct, missing CSV 0" in result.output
     assert "Exec time:" in result.output
@@ -182,6 +183,45 @@ def test_run_command_forwards_explicit_concurrency(monkeypatch):
     assert called["concurrency"] == 8
 
 
+def test_run_command_forwards_schema_index_prewarm_flag(monkeypatch):
+    """The run command should expose batch prewarm plumbing before worker startup."""
+
+    called: dict[str, Any] = {}
+
+    def fake_handle_run(**kwargs: Any) -> dict[str, Any]:
+        called.update(kwargs)
+        return {
+            "tasks": [Task(instance_id="local003", db="db", question="Question text")],
+            "results": [
+                FinalAnswer(
+                    instance_id="local003",
+                    status="success",
+                    sql="SELECT 1",
+                    csv_path="out.csv",
+                    trace_path="trace.json",
+                )
+            ],
+            "eval_summary": {
+                "correct_tasks": 1,
+                "attempted_tasks": 1,
+                "missing_csv_count": 0,
+                "per_instance": [
+                    {"instance_id": "local003", "passed": True, "score": 1, "csv_present": True}
+                ],
+            },
+        }
+
+    monkeypatch.setattr(cli, "handle_run", fake_handle_run)
+
+    result = runner.invoke(
+        cli.app,
+        ["run", "--instance-id", "local003", "--prewarm-schema-index"],
+    )
+
+    assert result.exit_code == 0
+    assert called["prewarm_schema_index"] is True
+
+
 def test_handle_run_passes_default_dotenv_path(monkeypatch):
     """The run handler should opt into the method-local dotenv file."""
 
@@ -256,6 +296,64 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
     assert called["eval_run_id"] == "smoke-local003"
     assert called["expected_instance_ids"] == ["local003"]
     assert result["eval_summary"]["correct_tasks"] == 1
+
+
+def test_handle_run_prewarms_unique_task_databases_before_workers(monkeypatch):
+    """Schema index prewarm should happen once per database before run_tasks starts."""
+
+    events: list[tuple[str, Any]] = []
+
+    monkeypatch.setattr(
+        cli,
+        "_load_run_tasks",
+        lambda **kwargs: [
+            Task(instance_id="one", db="DB_A", question="q1"),
+            Task(instance_id="two", db="DB_A", question="q2"),
+            Task(instance_id="three", db="DB_B", question="q3"),
+        ],
+    )
+
+    def fake_prewarm(dbs):
+        events.append(("prewarm", sorted(set(dbs))))
+        return []
+
+    def fake_from_env(cls, require_api_key=False, dotenv_path=None, concurrency=None):
+        events.append(("config", require_api_key))
+        return RuntimeConfig(api_key="test-key")
+
+    def fake_run_tasks(tasks, *, run_id, config, force, skip_failed):
+        events.append(("run_tasks", [task.instance_id for task in tasks]))
+        return []
+
+    monkeypatch.setattr(cli, "_prewarm_schema_retrieval_indexes", fake_prewarm)
+    monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
+    monkeypatch.setattr(cli, "run_tasks", fake_run_tasks)
+    monkeypatch.setattr(
+        cli,
+        "run_persisted_eval",
+        lambda *args, **kwargs: {
+            "correct_tasks": 0,
+            "attempted_tasks": 0,
+            "missing_csv_count": 0,
+            "per_instance": [],
+        },
+    )
+
+    cli.handle_run(
+        concurrency=None,
+        run_id="prewarm",
+        selectors=None,
+        instance_id=None,
+        db=None,
+        question_contains=None,
+        limit=None,
+        force=False,
+        skip_failed=False,
+        prewarm_schema_index=True,
+    )
+
+    assert events[:2] == [("prewarm", ["DB_A", "DB_B"]), ("config", True)]
+    assert events[2][0] == "run_tasks"
 
 
 def test_handle_run_forwards_all_expected_ids_to_persisted_eval(monkeypatch, tmp_path: Path):

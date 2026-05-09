@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from shutil import rmtree
@@ -14,7 +15,7 @@ import typer
 from sol01.analysis.analysis import analyze_run
 from sol01.analysis.eval_runner import run_official_eval, run_persisted_eval
 from sol01.coordinator import run_task, run_tasks
-from sol01.infra.config import DEFAULT_DOTENV_PATH, RuntimeConfig
+from sol01.infra.config import DEFAULT_DOTENV_PATH, RuntimeConfig, SchemaRetrievalConfig
 from sol01.infra.logging import configure_logging, get_logger
 from sol01.infra.observability import configure_logfire
 from sol01.infra.time_utils import format_duration
@@ -35,6 +36,11 @@ from sol01.output.output import (
 )
 from sol01.output.registry import resolve_llm_call_log_path
 from sol01.schema.index import CACHE_PATH, build_index_cache
+from sol01.schema.ollama_provider import OllamaEmbeddingProvider
+from sol01.schema.retrieval_index import (
+    DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT,
+    prewarm_retrieval_indexes,
+)
 
 app = typer.Typer(
     help="Snowflake Spider2-snow solver.",
@@ -87,6 +93,13 @@ def run(
         bool,
         typer.Option(help="Skip failed traces during resume mode."),
     ] = False,
+    prewarm_schema_index: Annotated[
+        bool,
+        typer.Option(
+            "--prewarm-schema-index/--no-prewarm-schema-index",
+            help="Build retrieval indexes for selected databases before solver workers start.",
+        ),
+    ] = False,
     selectors: Annotated[
         list[str] | None,
         typer.Argument(
@@ -108,6 +121,7 @@ def run(
         limit=limit,
         force=force,
         skip_failed=skip_failed,
+        prewarm_schema_index=prewarm_schema_index,
         selectors=selectors or [],
     )
     handle_run_kwargs: dict[str, Any] = {
@@ -119,6 +133,7 @@ def run(
         "limit": limit,
         "force": force,
         "skip_failed": skip_failed,
+        "prewarm_schema_index": prewarm_schema_index,
     }
     if concurrency is not None:
         handle_run_kwargs["concurrency"] = concurrency
@@ -321,6 +336,22 @@ def _echo_llm_call_detail(record: Any) -> None:
     typer.echo("")
 
 
+@app.command("prewarm-schema-index")
+def prewarm_schema_index_command(
+    dbs: Annotated[
+        list[str],
+        typer.Argument(help="Database names to prewarm, for example E_COMMERCE."),
+    ],
+) -> None:
+    """Build retrieval index cache artifacts before running batch workers."""
+
+    indexes = _prewarm_schema_retrieval_indexes(dbs)
+    typer.echo(
+        f"Prewarmed {len(indexes)} schema retrieval index(es) into "
+        f"{DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT}"
+    )
+
+
 @app.command()
 def ask(
     db: Annotated[
@@ -376,6 +407,7 @@ def handle_run(
     limit: int | None,
     force: bool,
     skip_failed: bool,
+    prewarm_schema_index: bool = False,
     selectors: list[str] | None = None,
 ) -> dict[str, Any]:
     """Load tasks, then pass them to the batch coordinator."""
@@ -390,6 +422,9 @@ def handle_run(
     if not tasks:
         logger.warning("no tasks matched the filters")
         raise typer.Exit(code=1)
+
+    if prewarm_schema_index:
+        _prewarm_schema_retrieval_indexes(task.db for task in tasks)
 
     config = RuntimeConfig.from_env(
         require_api_key=True,
@@ -517,6 +552,17 @@ def handle_ask(*, db: str, question: str) -> FinalAnswer:
     finally:
         rmtree(run_paths.root, ignore_errors=True)
         logger.info("ask cleanup complete", ask_root=str(ask_paths.root))
+
+
+def _prewarm_schema_retrieval_indexes(dbs: Iterable[str]) -> list[Any]:
+    """Build schema retrieval indexes once before concurrent solver work begins."""
+
+    config = SchemaRetrievalConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
+    provider = OllamaEmbeddingProvider(
+        model=config.embedding_model,
+        base_url=config.ollama_base_url,
+    )
+    return prewarm_retrieval_indexes(dbs, embedding_provider=provider, config=config)
 
 
 def _load_filtered_tasks(
