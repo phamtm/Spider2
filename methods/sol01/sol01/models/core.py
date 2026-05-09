@@ -15,6 +15,15 @@ SchemaObjectKind = Literal[
     "join_candidate",
     "family",
 ]
+RetrievalChunkType = Literal[
+    "schema_object",
+    "table",
+    "column",
+    "column_group",
+    "join_candidate",
+    "sample_value",
+    "table_family",
+]
 SelectedSchemaRole = Literal[
     "primary",
     "supporting",
@@ -170,7 +179,16 @@ class RetrievalChunk(BaseModel):
 
     chunk_id: str
     object_id: str
-    text: str
+    text: str = ""
+    chunk_type: RetrievalChunkType = "schema_object"
+    parent_object_ids: list[str] = Field(default_factory=list)
+    embedding_text: str = ""
+    bm25_text: str = ""
+    rerank_text: str = ""
+    prompt_text: str = ""
+    source_definition: str = ""
+    inferred_usage: str = ""
+    include_dense_embedding: bool = True
     source: Literal["schema", "linked_doc", "sample", "join", "family"] = "schema"
     linked_doc_title: str | None = None
     metadata: dict[str, object] = Field(default_factory=dict)
@@ -179,6 +197,19 @@ class RetrievalChunk(BaseModel):
     @classmethod
     def _validate_object_id(cls, object_id: str) -> str:
         return validate_schema_object_id(object_id)
+
+    @field_validator("parent_object_ids")
+    @classmethod
+    def _validate_parent_object_ids(cls, object_ids: list[str]) -> list[str]:
+        return [validate_schema_object_id(object_id) for object_id in object_ids]
+
+    @model_validator(mode="after")
+    def _default_legacy_text(self) -> RetrievalChunk:
+        if not self.text:
+            self.text = (
+                self.embedding_text or self.prompt_text or self.rerank_text or self.bm25_text
+            )
+        return self
 
 
 class RetrievedChunk(BaseModel):
