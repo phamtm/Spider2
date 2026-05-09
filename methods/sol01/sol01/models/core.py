@@ -282,8 +282,26 @@ class ResolvedSchemaContext(BaseModel):
     retrieved_objects: list[RetrievedSchemaObject] = Field(default_factory=list)
     resolved_tables: list[str] = Field(default_factory=list)
     allowed_tables: list[str] = Field(default_factory=list)
+    table_schemas: dict[str, TableSchema] = Field(default_factory=dict)
+    prompt_context: str = ""
     schema_prompt: str = ""
+    resolution_diagnostics: dict[str, object] = Field(default_factory=dict)
     diagnostics: dict[str, object] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _sync_resolver_aliases(self) -> ResolvedSchemaContext:
+        """Keep older and newer resolver field names equivalent."""
+
+        if self.prompt_context and not self.schema_prompt:
+            self.schema_prompt = self.prompt_context
+        elif self.schema_prompt and not self.prompt_context:
+            self.prompt_context = self.schema_prompt
+
+        if self.resolution_diagnostics and not self.diagnostics:
+            self.diagnostics = self.resolution_diagnostics
+        elif self.diagnostics and not self.resolution_diagnostics:
+            self.resolution_diagnostics = self.diagnostics
+        return self
 
 
 class SchemaSelection(BaseModel):
