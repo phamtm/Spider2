@@ -1,0 +1,547 @@
+{"instance_id":"sf_bq011","primary_tier":6,"tags":["temporal","set_difference","count","filter"],"difficulty_notes":"Overlap of the 7-day and 2-day windows drives the exclusion."}
+{"instance_id":"sf_bq010","primary_tier":5,"tags":["join","ranking","filter","product_analysis"]}
+{"instance_id":"sf_bq009","primary_tier":6,"tags":["ranking","aggregation","time_series","comparison"],"difficulty_notes":"Need monthly revenue extremes after picking the top annual source."}
+{"instance_id":"sf_bq001","primary_tier":6,"tags":["join","temporal","aggregation","comparison"],"difficulty_notes":"First visit and first transaction are separate event dates per visitor."}
+{"instance_id":"sf_bq002","primary_tier":7,"tags":["time_series","ranking","aggregation","multi_scale"],"difficulty_notes":"Requires daily, weekly, and monthly rollups off the same source."}
+{"instance_id":"sf_bq003","primary_tier":6,"tags":["temporal","classification","aggregation","comparison"]}
+{"instance_id":"sf_bq004","primary_tier":5,"tags":["join","filter","ranking","product_analysis"]}
+{"instance_id":"sf_bq008","primary_tier":6,"tags":["path_sequence","ranking","temporal","filter"],"difficulty_notes":"Must follow the home-page path and keep the max dwell time."}
+{"instance_id":"sf_bq269","primary_tier":7,"tags":["nested_aggregation","temporal","classification","comparison"],"difficulty_notes":"Visitor totals are re-aggregated by month and purchase state."}
+{"instance_id":"sf_bq268","primary_tier":6,"tags":["temporal","window","filter","comparison"],"difficulty_notes":"The last event can be a visit or transaction, so the endpoint logic matters."}
+{"instance_id":"sf_bq270","primary_tier":5,"tags":["time_series","ratio","aggregation","comparison"]}
+{"instance_id":"sf_bq275","primary_tier":5,"tags":["join","filter","temporal","device_filter"]}
+{"instance_id":"sf_bq374","primary_tier":7,"tags":["cohort","temporal","percentage","join"],"difficulty_notes":"This is a cohort filter with a delayed purchase check."}
+{"instance_id":"sf_bq029","primary_tier":4,"tags":["group_by","aggregation","time_bucket","comparison"]}
+{"instance_id":"sf_bq026","primary_tier":6,"tags":["ranking","join","aggregation","geo"],"difficulty_notes":"Find the busiest assignee first, then rank jurisdictions within that year."}
+{"instance_id":"sf_bq091","primary_tier":4,"tags":["ranking","aggregation","temporal"]}
+{"instance_id":"sf_bq099","primary_tier":7,"tags":["ranking","multi_step","aggregation","geo"],"difficulty_notes":"Need nested ranking for assignees, years, and country codes."}
+{"instance_id":"sf_bq033","primary_tier":5,"tags":["time_series","count","text_search","date_range"]}
+{"instance_id":"sf_bq209","primary_tier":7,"tags":["citation","window","aggregation","filter"],"difficulty_notes":"Forward citations are constrained by filing-date windows."}
+{"instance_id":"sf_bq027","primary_tier":6,"tags":["citation","join","aggregation","filter"]}
+{"instance_id":"sf_bq210","primary_tier":3,"tags":["text_search","count","filter"]}
+{"instance_id":"sf_bq211","primary_tier":5,"tags":["family_aggregation","filter","count","join"]}
+{"instance_id":"sf_bq213","primary_tier":4,"tags":["ranking","aggregation","code_frequency"]}
+{"instance_id":"sf_bq212","primary_tier":7,"tags":["ranking","aggregation","filter","code_frequency"],"difficulty_notes":"One code per patent, then keep only patents where the code repeats 10+ times."}
+{"instance_id":"sf_bq214","primary_tier":8,"tags":["citation","similarity","ranking","multi_step"],"difficulty_notes":"Combines citation windows with a similarity lookup across the same filing year."}
+{"instance_id":"sf_bq216","primary_tier":8,"tags":["similarity","ranking","join","temporal"],"difficulty_notes":"Ranking similar patents needs the filing-year constraint preserved."}
+{"instance_id":"sf_bq247","primary_tier":8,"tags":["ranking","join","aggregation","text_join"],"difficulty_notes":"Top families are chosen before joining back to abstracts."}
+{"instance_id":"sf_bq127","primary_tier":9,"tags":["aggregation","distinct_lists","citation","join"],"difficulty_notes":"This mixes distinct list extraction with citation-family relationships."}
+{"instance_id":"sf_bq215","primary_tier":8,"tags":["formula","citation","ranking","aggregation"],"difficulty_notes":"Originality score is a derived formula over backward-citation IPC counts."}
+{"instance_id":"sf_bq222","primary_tier":10,"tags":["time_series","moving_average","ranking","cpc"],"difficulty_notes":"Exponential moving average is computed per CPC group and then compared by year."}
+{"instance_id":"sf_bq221","primary_tier":10,"tags":["time_series","moving_average","ranking","cpc"],"difficulty_notes":"Need the best EMA year per CPC group after filtering invalid records."}
+{"instance_id":"sf_bq223","primary_tier":8,"tags":["join","citation","ranking","aggregation"],"difficulty_notes":"Filter out DENSO as the citing assignee and group by first CPC subclass."}
+{"instance_id":"sf_bq420","primary_tier":8,"tags":["join","filter","ranking","claims"],"difficulty_notes":"Section 101 rejections need to be paired with grant and claim-length fields."}
+{"instance_id":"sf_bq207","primary_tier":9,"tags":["join","ranking","claims","aggregation"],"difficulty_notes":"Independent-claim ranking depends on earliest-publication deduping per application."}
+{"instance_id":"sf_bq128","primary_tier":8,"tags":["citation","window","join","temporal"],"difficulty_notes":"Backward and forward citations use different date anchors."}
+{"instance_id":"sf_bq246","primary_tier":9,"tags":["citation","window","filter","ranking"],"difficulty_notes":"Both citation windows and CPC filters apply before the final top-1 sort."}
+{"instance_id":"sf_bq052","primary_tier":8,"tags":["citation","window","filter","ranking"],"difficulty_notes":"Citation counts are bounded around the application date."}
+{"instance_id":"sf_bq036","primary_tier":3,"tags":["time_series","aggregation","count"]}
+{"instance_id":"sf_bq100","primary_tier":5,"tags":["text_parse","ranking","count","regex"]}
+{"instance_id":"sf_bq101","primary_tier":4,"tags":["text_parse","ranking","count","regex"]}
+{"instance_id":"sf_bq182","primary_tier":6,"tags":["join","aggregation","filter","ranking"]}
+{"instance_id":"sf_bq217","primary_tier":4,"tags":["join","count","date_filter"]}
+{"instance_id":"sf_bq191","primary_tier":6,"tags":["join","ranking","aggregation","threshold"]}
+{"instance_id":"sf_bq224","primary_tier":5,"tags":["ranking","aggregation","license_filter"]}
+{"instance_id":"sf_bq192","primary_tier":7,"tags":["join","ranking","aggregation","license_filter"],"difficulty_notes":"The license, file, watcher, issue, and fork filters all need to line up."}
+{"instance_id":"sf_bq225","primary_tier":4,"tags":["classification","count","file_extension"]}
+{"instance_id":"sf_bq180","primary_tier":5,"tags":["text_parse","aggregation","language_filter","count"]}
+{"instance_id":"sf_bq233","primary_tier":6,"tags":["join","text_parse","aggregation","language_filter"]}
+{"instance_id":"sf_bq248","primary_tier":5,"tags":["filter","proportion","repository_filter","text_match"]}
+{"instance_id":"sf_bq193","primary_tier":6,"tags":["text_extract","aggregation","language_list","filter"],"difficulty_notes":"README lines must be cleaned before language aggregation."}
+{"instance_id":"sf_bq295","primary_tier":7,"tags":["join","ranking","filter","github_events"],"difficulty_notes":"The Python file condition is nested inside the watch-event ranking."}
+{"instance_id":"sf_bq249","primary_tier":3,"tags":["classification","count","text_match"]}
+{"instance_id":"sf_bq375","primary_tier":4,"tags":["classification","ranking","depth_filter"]}
+{"instance_id":"sf_bq255","primary_tier":4,"tags":["filter","count","license_filter"]}
+{"instance_id":"sf_bq194","primary_tier":5,"tags":["text_parse","ranking","language_mix","count"]}
+{"instance_id":"sf_bq377","primary_tier":4,"tags":["text_parse","count","json"]}
+{"instance_id":"sf_bq359","primary_tier":4,"tags":["ranking","aggregation","language_filter"]}
+{"instance_id":"sf_bq252","primary_tier":5,"tags":["ranking","file_filter","binary_filter"]}
+{"instance_id":"sf_bq251","primary_tier":7,"tags":["join","url_cleaning","ranking","filter"],"difficulty_notes":"Clean GitHub URLs after selecting the most downloaded package version."}
+{"instance_id":"sf_bq019","primary_tier":6,"tags":["ranking","aggregation","group_by","weighted_average"]}
+{"instance_id":"sf_bq234","primary_tier":4,"tags":["group_by","ranking","aggregation"]}
+{"instance_id":"sf_bq235","primary_tier":4,"tags":["aggregation","ranking","comparison"]}
+{"instance_id":"sf_bq172","primary_tier":5,"tags":["ranking","join","aggregation","state_filter"]}
+{"instance_id":"sf_bq177","primary_tier":7,"tags":["multi_year","aggregation","ranking","join"],"difficulty_notes":"Need the provider's annual cost profile after identifying the top cumulative spender."}
+{"instance_id":"sf_bq354","primary_tier":6,"tags":["concept_hierarchy","percentage","join","cohort"]}
+{"instance_id":"sf_bq355","primary_tier":3,"tags":["percentage","filter","cohort"]}
+{"instance_id":"sf_bq032","primary_tier":4,"tags":["ranking","temporal","coordinate"]}
+{"instance_id":"sf_bq119","primary_tier":7,"tags":["ranking","time_series","coordinate","aggregation"],"difficulty_notes":"Return the per-point track, not just the final distance ranking."}
+{"instance_id":"sf_bq117","primary_tier":5,"tags":["ranking","temporal","aggregation","threshold"]}
+{"instance_id":"sf_bq419","primary_tier":6,"tags":["ranking","aggregation","temporal","filter"],"difficulty_notes":"Yearly top-1000 filtering changes the state ranking before the final rollup."}
+{"instance_id":"sf_bq071","primary_tier":8,"tags":["geospatial","join","aggregation","string_agg"],"difficulty_notes":"Boundary containment and sorted hurricane-name lists both need to line up per city and zip."}
+{"instance_id":"sf_bq236","primary_tier":7,"tags":["geospatial","aggregation","ranking","filter"]}
+{"instance_id":"sf_bq356","primary_tier":5,"tags":["filter","aggregation","ratio","temporal"]}
+{"instance_id":"sf_bq042","primary_tier":3,"tags":["filter","aggregation","temporal"]}
+{"instance_id":"sf_bq394","primary_tier":6,"tags":["temporal","aggregation","ranking","comparison"],"difficulty_notes":"The score comes from comparing four monthly averages, not just one metric."}
+{"instance_id":"sf_bq357","primary_tier":6,"tags":["geospatial","aggregation","ranking","filter"]}
+{"instance_id":"sf_bq181","primary_tier":5,"tags":["aggregation","ratio","comparison","filter"]}
+{"instance_id":"sf_bq045","primary_tier":6,"tags":["aggregation","comparison","temporal","ranking"]}
+{"instance_id":"sf_bq358","primary_tier":8,"tags":["geospatial","ranking","aggregation","tie_break"],"difficulty_notes":"Need the best pickup and dropoff zip pair, then break ties by zip order."}
+{"instance_id":"sf_bq290","primary_tier":6,"tags":["temporal","aggregation","comparison","join"]}
+{"instance_id":"sf_bq031","primary_tier":9,"tags":["window","time_series","aggregation","lag"],"difficulty_notes":"Moving averages and lagged differences make this a window-heavy time series task."}
+{"instance_id":"sf_bq392","primary_tier":3,"tags":["ranking","aggregation","temporal"]}
+{"instance_id":"sf_bq050","primary_tier":8,"tags":["geospatial","join","aggregation","temporal"],"difficulty_notes":"Trip-to-neighborhood mapping and weather joins both sit in the main path."}
+{"instance_id":"sf_bq426","primary_tier":7,"tags":["join","aggregation","ranking","temporal"]}
+{"instance_id":"sf_bq291","primary_tier":9,"tags":["geospatial","temporal","forecasting","aggregation"],"difficulty_notes":"Forecast-date filtering and radius-based weather selection both matter."}
+{"instance_id":"sf_bq208","primary_tier":6,"tags":["geospatial","aggregation","filter","count"]}
+{"instance_id":"sf_bq047","primary_tier":9,"tags":["correlation","aggregation","join","temporal"],"difficulty_notes":"Complaint counts are correlated against station temperature series after daily aggregation."}
+{"instance_id":"sf_bq048","primary_tier":9,"tags":["correlation","aggregation","ranking","temporal"]}
+{"instance_id":"sf_bq293","primary_tier":10,"tags":["window","time_series","cross_join","aggregation"],"difficulty_notes":"The complete zip-by-hour grid plus lags and moving averages pushes this into the hardest band."}
+{"instance_id":"sf_bq017","primary_tier":7,"tags":["geospatial","length","aggregation","ranking"]}
+{"instance_id":"sf_bq131","primary_tier":6,"tags":["geospatial","aggregation","ranking"]}
+{"instance_id":"sf_bq349","primary_tier":7,"tags":["geospatial","aggregation","ranking","median"]}
+{"instance_id":"sf_bq007","primary_tier":7,"tags":["aggregation","ranking","join","temporal"]}
+{"instance_id":"sf_bq429","primary_tier":7,"tags":["aggregation","join","comparison","ranking"]}
+{"instance_id":"sf_bq073","primary_tier":6,"tags":["aggregation","join","ranking"]}
+{"instance_id":"sf_bq410","primary_tier":7,"tags":["aggregation","ratio","join","comparison"]}
+{"instance_id":"sf_bq348","primary_tier":8,"tags":["geospatial","historical","ranking","filter"],"difficulty_notes":"The answer depends on historical features that are no longer present in the current layer."}
+{"instance_id":"sf_bq253","primary_tier":8,"tags":["geospatial","ranking","aggregation","filter"]}
+{"instance_id":"sf_bq254","primary_tier":8,"tags":["geospatial","ranking","aggregation","count"]}
+{"instance_id":"sf_bq056","primary_tier":8,"tags":["geospatial","pairwise","intersection","filter"]}
+{"instance_id":"sf_bq289","primary_tier":7,"tags":["geospatial","distance","pairwise","aggregation"]}
+{"instance_id":"sf_bq250","primary_tier":9,"tags":["geospatial","nearest_neighbor","ranking","aggregation"],"difficulty_notes":"Need the farthest grid cell after finding each cell's nearest hospital distance."}
+{"instance_id":"sf_bq083","primary_tier":8,"tags":["blockchain","token_transfer","aggregation","temporal"],"difficulty_notes":"Mint and burn inputs have to be decoded from hex before the daily rollup."}
+{"instance_id":"sf_bq184","primary_tier":8,"tags":["blockchain","cumulative","temporal","aggregation"]}
+{"instance_id":"sf_bq195","primary_tier":8,"tags":["blockchain","balance","ranking","aggregation"]}
+{"instance_id":"sf_bq256","primary_tier":9,"tags":["blockchain","balance","ranking","filter"]}
+{"instance_id":"sf_bq080","primary_tier":7,"tags":["blockchain","cumulative","temporal","aggregation"]}
+{"instance_id":"sf_bq342","primary_tier":8,"tags":["blockchain","time_series","comparison","window"]}
+{"instance_id":"sf_bq341","primary_tier":6,"tags":["blockchain","balance","ranking","filter"]}
+{"instance_id":"sf_bq444","primary_tier":5,"tags":["blockchain","event_log","filter","ordering"]}
+{"instance_id":"sf_bq340","primary_tier":7,"tags":["blockchain","balance","comparison","ranking"]}
+{"instance_id":"sf_bq005","primary_tier":8,"tags":["time_series","self_join","aggregation","temporal"]}
+{"instance_id":"sf_bq334","primary_tier":6,"tags":["bitcoin","aggregation","comparison","annual"]}
+{"instance_id":"sf_bq335","primary_tier":6,"tags":["bitcoin","ranking","group_by","tie_break"]}
+{"instance_id":"sf_bq057","primary_tier":8,"tags":["bitcoin","time_series","ratio","aggregation"]}
+{"instance_id":"sf_bq068","primary_tier":8,"tags":["double_entry","balance","aggregation","group_by"]}
+{"instance_id":"sf_bq092","primary_tier":8,"tags":["double_entry","balance","aggregation","group_by"]}
+{"instance_id":"sf_bq093","primary_tier":9,"tags":["double_entry","balance","fees","aggregation"]}
+{"instance_id":"sf_bq292","primary_tier":8,"tags":["bitcoin","time_series","ratio","aggregation"]}
+{"instance_id":"sf_bq135","primary_tier":3,"tags":["aggregation","ranking","temporal"]}
+{"instance_id":"sf_bq136","primary_tier":9,"tags":["graph","path_sequence","filter","ranking"]}
+{"instance_id":"sf_bq065","primary_tier":7,"tags":["array_unnest","aggregation","ordering","filter"]}
+{"instance_id":"sf_bq037","primary_tier":4,"tags":["aggregation","range","ratio"]}
+{"instance_id":"sf_bq012","primary_tier":8,"tags":["blockchain","balance","ranking","aggregation"]}
+{"instance_id":"sf_bq187","primary_tier":7,"tags":["token_supply","balance","aggregation"]}
+{"instance_id":"sf_bq450","primary_tier":11,"tags":["blockchain","address_profile","multi_metric","aggregation"],"difficulty_notes":"This is a broad per-address profile with many joins and metrics, not just a single balance query."}
+{"instance_id":"sf_bq034","primary_tier":5,"tags":["geospatial","radius","aggregation","filter"]}
+{"instance_id":"sf_bq383","primary_tier":6,"tags":["temporal","aggregation","validation","filter"]}
+{"instance_id":"sf_bq051","primary_tier":6,"tags":["join","aggregation","comparison","temporal"]}
+{"instance_id":"sf_bq038","primary_tier":8,"tags":["self_join","group_detection","ranking","aggregation"]}
+{"instance_id":"sf_bq053","primary_tier":7,"tags":["join","aggregation","comparison","categorization"]}
+{"instance_id":"sf_bq054","primary_tier":7,"tags":["join","aggregation","ranking","comparison"]}
+{"instance_id":"sf_bq021","primary_tier":8,"tags":["join","geospatial","ranking","comparison"]}
+{"instance_id":"sf_bq202","primary_tier":5,"tags":["aggregation","ranking","temporal"]}
+{"instance_id":"sf_bq185","primary_tier":4,"tags":["filter","aggregation","comparison"]}
+{"instance_id":"sf_bq040","primary_tier":6,"tags":["aggregation","comparison","categorization","join"]}
+{"instance_id":"sf_bq098","primary_tier":5,"tags":["aggregation","comparison","filter","categorization"]}
+{"instance_id":"sf_bq039","primary_tier":6,"tags":["filter","aggregation","ranking","fare_metrics"]}
+{"instance_id":"sf_bq203","primary_tier":5,"tags":["join","aggregation","ratio","ranking"]}
+{"instance_id":"sf_bq035","primary_tier":2,"tags":["join","aggregation"]}
+{"instance_id":"sf_bq186","primary_tier":4,"tags":["temporal","aggregation","ranking"]}
+{"instance_id":"sf_bq081","primary_tier":4,"tags":["temporal","ranking","group_by"]}
+{"instance_id":"sf_bq294","primary_tier":6,"tags":["ranking","join","filter","temporal"],"difficulty_notes":"Requires derived age bands and a route string from start to end stations."}
+{"instance_id":"sf_bq339","primary_tier":5,"tags":["temporal","aggregation","comparison","ranking"]}
+{"instance_id":"sf_bq400","primary_tier":5,"tags":["path_sequence","aggregation","ranking"],"difficulty_notes":"Order within the stop sequence changes the answer."}
+{"instance_id":"sf_bq059","primary_tier":2,"tags":["aggregation","filter","comparison"]}
+{"instance_id":"sf_bq376","primary_tier":5,"tags":["join","aggregation","group_by","spatial"]}
+{"instance_id":"sf_bq014","primary_tier":5,"tags":["ranking","join","filter","aggregation"]}
+{"instance_id":"sf_bq188","primary_tier":7,"tags":["ranking","session_window","join","aggregation"],"difficulty_notes":"Session gap uses the next event in the same session."}
+{"instance_id":"sf_bq258","primary_tier":7,"tags":["time_series","window","aggregation","percent_change","ratio"],"difficulty_notes":"June 2019 is base only for the growth calculations."}
+{"instance_id":"sf_bq259","primary_tier":7,"tags":["cohort","time_series","window","aggregation"],"difficulty_notes":"Track each cohort month across the first four months after purchase."}
+{"instance_id":"sf_bq189","primary_tier":7,"tags":["time_series","ranking","aggregation","percent_change"]}
+{"instance_id":"sf_bq260","primary_tier":3,"tags":["aggregation","group_by","comparison"]}
+{"instance_id":"sf_bq261","primary_tier":5,"tags":["time_series","ranking","aggregation"]}
+{"instance_id":"sf_bq262","primary_tier":8,"tags":["time_series","window","percent_change","aggregation"],"difficulty_notes":"June 2019 is a base period and is omitted from the final output."}
+{"instance_id":"sf_bq190","primary_tier":3,"tags":["aggregation","group_by","comparison"]}
+{"instance_id":"sf_bq263","primary_tier":5,"tags":["time_series","aggregation","ratio","filter"]}
+{"instance_id":"sf_bq264","primary_tier":2,"tags":["aggregation","comparison"]}
+{"instance_id":"sf_bq197","primary_tier":5,"tags":["time_series","ranking","filter","comparison"]}
+{"instance_id":"sf_bq265","primary_tier":5,"tags":["join","aggregation","ranking","filter"]}
+{"instance_id":"sf_bq266","primary_tier":5,"tags":["time_series","ranking","aggregation","filter"]}
+{"instance_id":"sf_bq333","primary_tier":4,"tags":["session_window","ranking","aggregation","filter"]}
+{"instance_id":"sf_bq361","primary_tier":6,"tags":["cohort","time_series","aggregation"]}
+{"instance_id":"sf_bq271","primary_tier":8,"tags":["multi_join","aggregation","group_by","filter"],"difficulty_notes":"Filters on user signup year and inventory creation year before grouping."}
+{"instance_id":"sf_bq272","primary_tier":6,"tags":["time_series","ranking","filter","aggregation"]}
+{"instance_id":"sf_bq273","primary_tier":6,"tags":["time_series","comparison","ranking","filter"]}
+{"instance_id":"sf_bq020","primary_tier":2,"tags":["ranking","ratio"]}
+{"instance_id":"sf_bq107","primary_tier":3,"tags":["ranking","ratio","filter"]}
+{"instance_id":"sf_bq025","primary_tier":3,"tags":["ranking","aggregation","ratio"]}
+{"instance_id":"sf_bq115","primary_tier":2,"tags":["ranking","ratio"]}
+{"instance_id":"sf_bq030","primary_tier":4,"tags":["filter","ranking","ratio"]}
+{"instance_id":"sf_bq018","primary_tier":4,"tags":["temporal","percent_change","ranking"]}
+{"instance_id":"sf_bq086","primary_tier":5,"tags":["join","ratio","aggregation"]}
+{"instance_id":"sf_bq085","primary_tier":5,"tags":["join","aggregation","ratio"]}
+{"instance_id":"sf_bq130","primary_tier":7,"tags":["time_series","ranking","aggregation","nested_ranking"],"difficulty_notes":"Two ranking passes are needed: states first, then counties within the fourth-ranked state."}
+{"instance_id":"sf_bq087","primary_tier":4,"tags":["aggregation","comparison","percent_change"]}
+{"instance_id":"sf_bq088","primary_tier":4,"tags":["aggregation","comparison","percent_change"]}
+{"instance_id":"sf_bq089","primary_tier":2,"tags":["ratio","filter"]}
+{"instance_id":"sf_bq407","primary_tier":5,"tags":["join","filter","ranking","ratio"]}
+{"instance_id":"sf_bq137","primary_tier":6,"tags":["spatial_join","aggregation","filter"]}
+{"instance_id":"sf_bq060","primary_tier":4,"tags":["filter","ranking","ratio"]}
+{"instance_id":"sf_bq338","primary_tier":8,"tags":["ranking","comparison","intersection","filter"],"difficulty_notes":"Need overlap between two separate top-20 rankings."}
+{"instance_id":"sf_bq061","primary_tier":3,"tags":["ranking","comparison"]}
+{"instance_id":"sf_bq064","primary_tier":8,"tags":["spatial_join","area_weighting","aggregation","filter"],"difficulty_notes":"Population and income are allocated by overlapping area."}
+{"instance_id":"sf_bq461","primary_tier":6,"tags":["event_sequence","temporal","aggregation"]}
+{"instance_id":"sf_bq198","primary_tier":4,"tags":["ranking","aggregation","filter"]}
+{"instance_id":"sf_bq462","primary_tier":8,"tags":["ranking","union","aggregation","comparison"],"difficulty_notes":"Four separate leaderboard slices are unioned into one table."}
+{"instance_id":"sf_bq427","primary_tier":7,"tags":["aggregation","spatial_adjustment","filter"],"difficulty_notes":"Shot coordinates need basket-side adjustment before averaging."}
+{"instance_id":"sf_bq428","primary_tier":8,"tags":["ranking","multi_join","aggregation","filter"],"difficulty_notes":"Rank team markets first, then expand to game-level tournament records."}
+{"instance_id":"sf_bq144","primary_tier":8,"tags":["multi_join","dataset_build","comparison"],"difficulty_notes":"Combines tournament outcomes with pace and efficiency features."}
+{"instance_id":"sf_bq113","primary_tier":4,"tags":["temporal","aggregation","percent_change"]}
+{"instance_id":"sf_bq112","primary_tier":4,"tags":["temporal","comparison","percent_change"]}
+{"instance_id":"sf_bq055","primary_tier":4,"tags":["comparison","join","ranking"]}
+{"instance_id":"sf_bq075","primary_tier":6,"tags":["multi_join","comparison","aggregation"]}
+{"instance_id":"sf_bq406","primary_tier":5,"tags":["time_series","percent_change","aggregation"]}
+{"instance_id":"sf_bq084","primary_tier":3,"tags":["time_series","aggregation","ratio"]}
+{"instance_id":"sf_bq058","primary_tier":5,"tags":["event_parsing","filter","formatting","join"]}
+{"instance_id":"sf_bq416","primary_tier":4,"tags":["event_parsing","ranking","formatting"]}
+{"instance_id":"sf_bq226","primary_tier":4,"tags":["ranking","group_by","filter"]}
+{"instance_id":"sf_bq016","primary_tier":4,"tags":["nested_aggregation","ranking","aggregation"]}
+{"instance_id":"sf_bq062","primary_tier":2,"tags":["count","group_by"]}
+{"instance_id":"sf_bq063","primary_tier":5,"tags":["ranking","join","filter"]}
+{"instance_id":"sf_bq028","primary_tier":3,"tags":["ranking","filter"]}
+{"instance_id":"sf_bq022","primary_tier":4,"tags":["quantile","aggregation","filter"]}
+{"instance_id":"sf_bq362","primary_tier":4,"tags":["time_series","ranking","comparison"]}
+{"instance_id":"sf_bq363","primary_tier":5,"tags":["window","quantile","aggregation"]}
+{"instance_id":"sf_bq076","primary_tier":2,"tags":["temporal","aggregation","max"]}
+{"instance_id":"sf_bq077","primary_tier":4,"tags":["aggregation","temporal","group_by"]}
+{"instance_id":"sf_bq350","primary_tier":5,"tags":["filter","join","aggregation"]}
+{"instance_id":"sf_bq379","primary_tier":5,"tags":["aggregation","comparison","ranking"]}
+{"instance_id":"sf_bq078","primary_tier":6,"tags":["filter","ranking","join"]}
+{"instance_id":"sf_bq095","primary_tier":7,"tags":["join","filter","ranking","aggregation"]}
+{"instance_id":"sf_bq109","primary_tier":7,"tags":["aggregation","filter","subquery","ratio"],"difficulty_notes":"Multiple filters feed four summary metrics and a max-row lookup."}
+{"instance_id":"sf_bq325","primary_tier":8,"tags":["subquery","ranking","aggregation"]}
+{"instance_id":"sf_bq090","primary_tier":5,"tags":["aggregation","comparison","filter"]}
+{"instance_id":"sf_bq442","primary_tier":6,"tags":["ranking","document_lookup","aggregation","filter"],"difficulty_notes":"The answer list comes from a referenced document rather than the database alone."}
+{"instance_id":"sf_bq079","primary_tier":9,"tags":["multi_join","aggregation","temporal","comparison"],"difficulty_notes":"Latest evaluation group per state with adjusted acreage across macroplots and subplots."}
+{"instance_id":"sf_bq024","primary_tier":7,"tags":["ranking","aggregation","filter","temporal"]}
+{"instance_id":"sf_bq220","primary_tier":8,"tags":["multi_join","ranking","aggregation","temporal"]}
+{"instance_id":"sf_bq096","primary_tier":6,"tags":["temporal","ranking","filter","aggregation"]}
+{"instance_id":"sf_bq276","primary_tier":9,"tags":["geospatial","join","aggregation","ranking"],"difficulty_notes":"Port, storm, and geometry data all need to line up before counting distinct storms."}
+{"instance_id":"sf_bq277","primary_tier":9,"tags":["geospatial","ranking","join","filter"]}
+{"instance_id":"sf_bq278","primary_tier":8,"tags":["aggregation","multi_join","group_by","comparison"],"difficulty_notes":"Compares solar metrics at both postal-code and census-tract levels."}
+{"instance_id":"sf_bq102","primary_tier":4,"tags":["filter","aggregation","genomics"]}
+{"instance_id":"sf_bq445","primary_tier":7,"tags":["subquery","filter","sorting","genomics"],"difficulty_notes":"Find the BRCA1 span first, then rank missense variants inside that region."}
+{"instance_id":"sf_bq103","primary_tier":4,"tags":["aggregation","filter","genomics","group_by"]}
+{"instance_id":"sf_bq104","primary_tier":6,"tags":["temporal","ranking","filter"]}
+{"instance_id":"sf_bq411","primary_tier":6,"tags":["temporal","ranking","group_by"]}
+{"instance_id":"sf_bq105","primary_tier":8,"tags":["join","aggregation","temporal","ranking"]}
+{"instance_id":"sf_bq108","primary_tier":5,"tags":["aggregation","filter","comparison"],"difficulty_notes":"Percentage over a filtered accident subset."}
+{"instance_id":"sf_bq067","primary_tier":8,"tags":["feature_engineering","filter","aggregation","classification"],"difficulty_notes":"Builds a labeled dataset with derived speed-difference buckets and a fatality label."}
+{"instance_id":"sf_bq396","primary_tier":6,"tags":["comparison","ranking","temporal","aggregation"]}
+{"instance_id":"sf_bq441","primary_tier":6,"tags":["document_lookup","filter","aggregation"],"difficulty_notes":"The source of truth is a reference document for the 2015 crash details."}
+{"instance_id":"sf_bq097","primary_tier":5,"tags":["temporal","comparison","aggregation"]}
+{"instance_id":"sf_bq120","primary_tier":7,"tags":["ranking","join","aggregation","ratio"]}
+{"instance_id":"sf_bq110","primary_tier":5,"tags":["temporal","comparison","aggregation","filter"]}
+{"instance_id":"sf_bq395","primary_tier":7,"tags":["temporal","aggregation","comparison","ranking"],"difficulty_notes":"State-level percentage changes are compared to the national average."}
+{"instance_id":"sf_bq352","primary_tier":5,"tags":["aggregation","filter","join"]}
+{"instance_id":"sf_bq074","primary_tier":5,"tags":["comparison","aggregation","filter","temporal"]}
+{"instance_id":"sf_bq066","primary_tier":8,"tags":["correlation","temporal","aggregation","join"],"difficulty_notes":"Computes a Pearson correlation across yearly birth and census measures."}
+{"instance_id":"sf_bq114","primary_tier":9,"tags":["geospatial","join","comparison","ranking"],"difficulty_notes":"Matches city measurements by rounded coordinates before ranking the differences."}
+{"instance_id":"sf_bq116","primary_tier":6,"tags":["aggregation","filter","ranking","temporal"]}
+{"instance_id":"sf_bq015","primary_tier":8,"tags":["text_processing","join","ranking","aggregation"],"difficulty_notes":"Split Stack Overflow tags after counting Hacker News references."}
+{"instance_id":"sf_bq041","primary_tier":8,"tags":["temporal","aggregation","cohort","ratio"],"difficulty_notes":"Monthly cohorts with chained 30-day follow-up rates."}
+{"instance_id":"sf_bq121","primary_tier":5,"tags":["aggregation","group_by","comparison","temporal"]}
+{"instance_id":"sf_bq123","primary_tier":6,"tags":["temporal","ranking","aggregation"]}
+{"instance_id":"sf_bq280","primary_tier":5,"tags":["ranking","aggregation","filter"]}
+{"instance_id":"sf_bq300","primary_tier":5,"tags":["aggregation","filter","comparison"]}
+{"instance_id":"sf_bq301","primary_tier":7,"tags":["join","filter","ranking","aggregation"]}
+{"instance_id":"sf_bq302","primary_tier":4,"tags":["temporal","aggregation","ratio"]}
+{"instance_id":"sf_bq303","primary_tier":8,"tags":["join","temporal","filter","aggregation"],"difficulty_notes":"Each comment or answer has to be tied back to its parent question tags."}
+{"instance_id":"sf_bq304","primary_tier":8,"tags":["ranking","filter","text_search","group_by"]}
+{"instance_id":"sf_bq310","primary_tier":6,"tags":["ranking","filter","text_search"]}
+{"instance_id":"sf_bq305","primary_tier":9,"tags":["ranking","join","aggregation","filter"],"difficulty_notes":"Association rules for a question can come from several answer paths."}
+{"instance_id":"sf_bq306","primary_tier":8,"tags":["ranking","join","aggregation","filter"]}
+{"instance_id":"sf_bq307","primary_tier":7,"tags":["ranking","aggregation","temporal","join"]}
+{"instance_id":"sf_bq308","primary_tier":6,"tags":["temporal","aggregation","ratio"]}
+{"instance_id":"sf_bq309","primary_tier":8,"tags":["ranking","filter","join","aggregation"]}
+{"instance_id":"sf_bq124","primary_tier":5,"tags":["filter","aggregation","join"]}
+{"instance_id":"sf_bq391","primary_tier":7,"tags":["group_by","ranking","aggregation","filter"]}
+{"instance_id":"sf_bq126","primary_tier":5,"tags":["filter","join","aggregation"]}
+{"instance_id":"sf_bq366","primary_tier":6,"tags":["ranking","aggregation","group_by"]}
+{"instance_id":"sf_bq414","primary_tier":4,"tags":["filter","aggregation","formatting"]}
+{"instance_id":"sf_bq200","primary_tier":8,"tags":["join","ranking","aggregation","filter"]}
+{"instance_id":"sf_bq458","primary_tier":10,"tags":["text_processing","embedding","aggregation","normalization"],"difficulty_notes":"Builds article vectors from weighted word embeddings and normalizes them."}
+{"instance_id":"sf_bq459","primary_tier":10,"tags":["embedding","similarity","ranking","text_processing"],"difficulty_notes":"Same embedding pipeline, then cosine similarity against a query vector."}
+{"instance_id":"sf_bq460","primary_tier":10,"tags":["embedding","similarity","ranking","text_processing"],"difficulty_notes":"Derives article vectors and ranks them by similarity to one reference article."}
+{"instance_id":"sf_bq204","primary_tier":4,"tags":["aggregation","ranking","group_by"]}
+{"instance_id":"sf_bq389","primary_tier":4,"tags":["temporal","aggregation","group_by"]}
+{"instance_id":"sf_bq345","primary_tier":9,"tags":["filter","group_by","geometry","ranking"],"difficulty_notes":"Series size is only valid after excluding linked instances and bad transfer syntaxes."}
+{"instance_id":"sf_bq346","primary_tier":5,"tags":["aggregation","filter","group_by"]}
+{"instance_id":"sf_bq347","primary_tier":7,"tags":["join","aggregation","ranking","filter"]}
+{"instance_id":"sf_bq390","primary_tier":6,"tags":["join","filter","aggregation"]}
+{"instance_id":"sf_bq421","primary_tier":8,"tags":["nested_aggregation","group_by","filter"],"difficulty_notes":"Unnest specimen-prep sequences before counting code-matching pairs."}
+{"instance_id":"sf_bq422","primary_tier":8,"tags":["ranking","aggregation","comparison","temporal"],"difficulty_notes":"Compares two patient cohorts built from different variation metrics."}
+{"instance_id":"sf_bq069","primary_tier":9,"tags":["filter","geometry","aggregation","comparison"],"difficulty_notes":"Geometry checks and exclusion rules gate the final CT series report."}
+{"instance_id":"sf_bq219","primary_tier":10,"tags":["time_series","correlation","ranking","aggregation"],"difficulty_notes":"Need monthly percentage normalization before pairwise correlation."}
+{"instance_id":"sf_bq199","primary_tier":7,"tags":["ranking","aggregation","comparison","temporal"]}
+{"instance_id":"sf_bq218","primary_tier":6,"tags":["ranking","percent_change","temporal","aggregation"]}
+{"instance_id":"sf_bq049","primary_tier":8,"tags":["geospatial","ranking","join","temporal"]}
+{"instance_id":"sf_bq360","primary_tier":6,"tags":["aggregation","ranking","comparison","filter"]}
+{"instance_id":"sf_bq286","primary_tier":5,"tags":["ranking","ratio","aggregation","filter"]}
+{"instance_id":"sf_bq044","primary_tier":8,"tags":["join","mutation","gene_expression","clinical"]}
+{"instance_id":"sf_bq043","primary_tier":8,"tags":["join","mutation","gene_expression","clinical"]}
+{"instance_id":"sf_bq143","primary_tier":9,"tags":["join","correlation","filter","aggregation"]}
+{"instance_id":"sf_bq147","primary_tier":7,"tags":["group_by","filter","join","sample_type"]}
+{"instance_id":"sf_bq148","primary_tier":7,"tags":["ranking","variance","aggregation","filter"]}
+{"instance_id":"sf_bq175","primary_tier":8,"tags":["ranking","copy_number","aggregation","filter"]}
+{"instance_id":"sf_bq176","primary_tier":9,"tags":["join","copy_number","interval_overlap","ranking"]}
+{"instance_id":"sf_bq170","primary_tier":10,"tags":["copy_number","interval_overlap","aggregation","classification"],"difficulty_notes":"Need overlap-weighted copy number per cytoband before CNV typing."}
+{"instance_id":"sf_bq150","primary_tier":9,"tags":["anova","mutation","gene_expression","comparison"]}
+{"instance_id":"sf_bq152","primary_tier":10,"tags":["copy_number","interval_overlap","aggregation","classification"]}
+{"instance_id":"sf_bq155","primary_tier":10,"tags":["correlation","t_statistic","gene_expression","filter"],"difficulty_notes":"Need pairwise gene-miRNA correlations before deriving the t-statistic."}
+{"instance_id":"sf_bq141","primary_tier":11,"tags":["train_test_split","classification","distance","join"],"difficulty_notes":"Train/test split before nearest-centroid stage assignment."}
+{"instance_id":"sf_bq046","primary_tier":9,"tags":["full_join","clinical","annotations","url_lookup"]}
+{"instance_id":"sf_bq153","primary_tier":6,"tags":["group_by","aggregation","filter","gene_expression"]}
+{"instance_id":"sf_bq154","primary_tier":8,"tags":["kruskal_wallis","group_by","gene_expression","filter"]}
+{"instance_id":"sf_bq156","primary_tier":8,"tags":["t_test","mutation","gene_expression","filter"]}
+{"instance_id":"sf_bq157","primary_tier":8,"tags":["t_test","mutation","gene_expression","join"]}
+{"instance_id":"sf_bq158","primary_tier":5,"tags":["ranking","ratio","mutation","group_by"]}
+{"instance_id":"sf_bq159","primary_tier":7,"tags":["chi_square","mutation","group_by","filter"]}
+{"instance_id":"sf_bq161","primary_tier":8,"tags":["mutation","comparison","join","filter"]}
+{"instance_id":"sf_bq151","primary_tier":8,"tags":["chi_square","mutation","comparison","join"]}
+{"instance_id":"sf_bq162","primary_tier":9,"tags":["lineage","join","filter","aggregation"]}
+{"instance_id":"sf_bq163","primary_tier":8,"tags":["ranking","aggregation","comparison","filter"]}
+{"instance_id":"sf_bq164","primary_tier":7,"tags":["metadata","join","filter","group_by"]}
+{"instance_id":"sf_bq166","primary_tier":9,"tags":["copy_number","join","classification","aggregation"]}
+{"instance_id":"sf_bq165","primary_tier":9,"tags":["copy_number","geospatial","classification","frequency"]}
+{"instance_id":"sf_bq169","primary_tier":10,"tags":["join","interval_overlap","classification","filter"],"difficulty_notes":"All three alterations must co-occur in one clone."}
+{"instance_id":"sf_bq111","primary_tier":9,"tags":["correlation","copy_number","join","group_by"]}
+{"instance_id":"sf_bq451","primary_tier":6,"tags":["genotype","filter","aggregation","comparison"]}
+{"instance_id":"sf_bq452","primary_tier":8,"tags":["chi_square","variant_analysis","filter","comparison"]}
+{"instance_id":"sf_bq453","primary_tier":8,"tags":["hardy_weinberg","variant_analysis","frequency","comparison"]}
+{"instance_id":"sf_bq454","primary_tier":7,"tags":["group_by","frequency","filter","variant_analysis"]}
+{"instance_id":"sf_bq415","primary_tier":5,"tags":["ranking","genotype","count","filter"]}
+{"instance_id":"sf_bq279","primary_tier":2,"tags":["count","group_by","temporal"]}
+{"instance_id":"sf_bq281","primary_tier":5,"tags":["temporal","ranking","filter","aggregation"]}
+{"instance_id":"sf_bq282","primary_tier":4,"tags":["ranking","count","filter","group_by"]}
+{"instance_id":"sf_bq006","primary_tier":6,"tags":["ranking","temporal","z_score","aggregation"]}
+{"instance_id":"sf_bq283","primary_tier":5,"tags":["ranking","aggregation","ratio","filter"]}
+{"instance_id":"sf_bq284","primary_tier":3,"tags":["aggregation","group_by","ratio","text_search"]}
+{"instance_id":"sf_bq413","primary_tier":5,"tags":["join","filter","coalesce","publication_metadata"]}
+{"instance_id":"sf_bq425","primary_tier":4,"tags":["aggregation","filter","distinct","drug_metadata"]}
+{"instance_id":"sf_bq430","primary_tier":11,"tags":["pairwise","join","filter","classification","uuid"],"difficulty_notes":"Pair construction, publication-date ranking, and UUID generation make this a dense multi-step join."}
+{"instance_id":"sf_bq023","primary_tier":8,"tags":["join","geospatial","aggregation","crosswalk"]}
+{"instance_id":"sf_bq094","primary_tier":6,"tags":["aggregation","group_by","filter","sorting"]}
+{"instance_id":"sf_bq287","primary_tier":5,"tags":["ranking","join","aggregation","filter"]}
+{"instance_id":"sf_bq432","primary_tier":6,"tags":["string_cleaning","array_split","date_filter","transformation"],"difficulty_notes":"Preserve embedded numeric commas while normalizing other delimiters."}
+{"instance_id":"sf_bq285","primary_tier":3,"tags":["ranking","count","filter"]}
+{"instance_id":"sf_bq288","primary_tier":5,"tags":["ranking","aggregation","filter","comparison"]}
+{"instance_id":"sf_bq412","primary_tier":8,"tags":["ranking","filter","metadata","ads"]}
+{"instance_id":"sf_bq423","primary_tier":9,"tags":["ads_targeting","filter","ranking","metadata"]}
+{"instance_id":"sf_bq070","primary_tier":5,"tags":["filter","imaging","metadata","classification"]}
+{"instance_id":"sf_bq320","primary_tier":3,"tags":["count","filter","imaging"]}
+{"instance_id":"sf_bq321","primary_tier":3,"tags":["count","filter","imaging"]}
+{"instance_id":"sf_bq323","primary_tier":6,"tags":["aggregation","filter","classification","imaging"]}
+{"instance_id":"sf_bq417","primary_tier":5,"tags":["filter","imaging","aggregation","metadata"]}
+{"instance_id":"sf_bq455","primary_tier":8,"tags":["ranking","filter","imaging","validation"]}
+{"instance_id":"sf_bq456","primary_tier":8,"tags":["join","aggregation","imaging","group_by"]}
+{"instance_id":"sf_bq324","primary_tier":3,"tags":["count","filter","imaging"]}
+{"instance_id":"sf_bq418","primary_tier":10,"tags":["chi_square","pathway_enrichment","filter","comparison"]}
+{"instance_id":"sf_bq330","primary_tier":8,"tags":["geospatial","join","ratio","ranking"]}
+{"instance_id":"sf_bq398","primary_tier":2,"tags":["ranking","aggregation","filter"]}
+{"instance_id":"sf_bq399","primary_tier":6,"tags":["ranking","aggregation","comparison","temporal"]}
+{"instance_id":"sf_bq457","primary_tier":9,"tags":["join","dependency","metadata","filter"]}
+{"instance_id":"sf_bq227","primary_tier":5,"tags":["temporal","aggregation","ranking","share"]}
+{"instance_id":"sf_bq232","primary_tier":2,"tags":["filter","aggregation","temporal"]}
+{"instance_id":"sf_bq228","primary_tier":2,"tags":["ranking","aggregation","filter"]}
+{"instance_id":"sf_bq229","primary_tier":5,"tags":["classification","distinct_count","anti_join","filter"]}
+{"instance_id":"sf_bq230","primary_tier":4,"tags":["aggregation","group_by","temporal","union"]}
+{"instance_id":"sf_bq326","primary_tier":7,"tags":["multi_dataset","join","percent_change","temporal"]}
+{"instance_id":"sf_bq424","primary_tier":3,"tags":["ranking","aggregation","filter"]}
+{"instance_id":"sf_bq327","primary_tier":1,"tags":["filter","count"]}
+{"instance_id":"sf_bq328","primary_tier":4,"tags":["median","aggregation","group_by","ranking"]}
+{"instance_id":"sf_bq331","primary_tier":6,"tags":["ranking","aggregation","join","comparison"],"difficulty_notes":"Need per-topic first-message identification and distinct voter counts before comparing to the overall average."}
+{"instance_id":"sf_bq380","primary_tier":6,"tags":["join","aggregation","ranking","distinct_count"],"difficulty_notes":"Need distinct upvotes in both directions from the same vote table."}
+{"instance_id":"sf_bq370","primary_tier":8,"tags":["join","aggregation","comparison","line_item_match"],"difficulty_notes":"Requires matching at both line-item and customer aggregate levels."}
+{"instance_id":"sf_bq371","primary_tier":4,"tags":["temporal","aggregation","comparison","quarter"]}
+{"instance_id":"sf_bq372","primary_tier":7,"tags":["anti_join","aggregation","comparison","ranking"],"difficulty_notes":"Use missing-invoice orders, then compare category maxima to the overall mean."}
+{"instance_id":"sf_bq373","primary_tier":6,"tags":["temporal","aggregation","median","group_by"]}
+{"instance_id":"sf_bq393","primary_tier":8,"tags":["temporal","gap_analysis","window","activity_span"],"difficulty_notes":"Need to detect a missing month inside each user's active span and report the latest such gap."}
+{"instance_id":"sf_bq403","primary_tier":5,"tags":["median","comparison","ranking","temporal"]}
+{"instance_id":"sf_bq397","primary_tier":6,"tags":["dedupe","group_by","ranking","multi_country"]}
+{"instance_id":"sf_bq402","primary_tier":4,"tags":["ratio","aggregation","filter","distinct_count"]}
+{"instance_id":"sf_bq160","primary_tier":6,"tags":["join","aggregation","ranking","forum"],"difficulty_notes":"Need topic-level rollups under the General parent forum with missing values treated as zero."}
+{"instance_id":"sf_bq167","primary_tier":7,"tags":["pairwise","join","ranking","distinct_count"],"difficulty_notes":"Requires comparing upvotes sent and returned between the same two users."}
+{"instance_id":"sf_bq171","primary_tier":4,"tags":["comparison","ranking","temporal","aggregation"]}
+{"instance_id":"sf_bq118","primary_tier":6,"tags":["filter","aggregation","comparison","age_group"],"difficulty_notes":"Compare discharge and vehicle codes only for white individuals, then aggregate by age group."}
+{"instance_id":"sf_bq072","primary_tier":7,"tags":["join","filter","aggregation","age_group"],"difficulty_notes":"Use EntityAxisConditions to link ICD-10 codes to deaths before splitting by race and cause."}
+{"instance_id":"sf_ga001","primary_tier":6,"tags":["join","ranking","aggregation","basket_analysis"]}
+{"instance_id":"sf_ga002","primary_tier":7,"tags":["join","temporal","ranking","aggregation"]}
+{"instance_id":"sf_ga003","primary_tier":3,"tags":["aggregation","group_by","temporal"]}
+{"instance_id":"sf_ga004","primary_tier":4,"tags":["comparison","aggregation","filter","user_segment"]}
+{"instance_id":"sf_ga008","primary_tier":5,"tags":["temporal","aggregation","group_by","user_average"]}
+{"instance_id":"sf_ga017","primary_tier":4,"tags":["ranking","aggregation","distinct_count"]}
+{"instance_id":"sf_ga007","primary_tier":3,"tags":["ratio","classification","temporal"]}
+{"instance_id":"sf_ga013","primary_tier":4,"tags":["path_sequence","classification","temporal"]}
+{"instance_id":"sf_ga018","primary_tier":6,"tags":["session_boundary","path_sequence","conversion_rate"]}
+{"instance_id":"sf_ga031","primary_tier":6,"tags":["session_boundary","path_sequence","conversion_rate"]}
+{"instance_id":"sf_ga032","primary_tier":5,"tags":["path_sequence","session_boundary","classification"],"difficulty_notes":"Need to compress repeated page visits while preserving the session order."}
+{"instance_id":"sf_ga006","primary_tier":6,"tags":["session_aggregation","ratio","filter","aggregation"]}
+{"instance_id":"sf_ga009","primary_tier":5,"tags":["session_aggregation","ratio","aggregation"]}
+{"instance_id":"sf_ga010","primary_tier":3,"tags":["ranking","aggregation","temporal"]}
+{"instance_id":"sf_ga014","primary_tier":4,"tags":["aggregation","group_by","temporal"]}
+{"instance_id":"sf_ga011","primary_tier":4,"tags":["ranking","string_normalization","aggregation"]}
+{"instance_id":"sf_ga012","primary_tier":7,"tags":["ranking","aggregation","join","filter"]}
+{"instance_id":"sf_ga019","primary_tier":5,"tags":["retention","ratio","temporal","cohort"]}
+{"instance_id":"sf_ga030","primary_tier":7,"tags":["cohort","retention","temporal","ranking"]}
+{"instance_id":"sf_ga005","primary_tier":7,"tags":["cohort","retention","temporal","group_by"]}
+{"instance_id":"sf_ga028","primary_tier":8,"tags":["cohort","retention","temporal","window"]}
+{"instance_id":"sf_ga020","primary_tier":8,"tags":["retention","event_classification","temporal","ranking"]}
+{"instance_id":"sf_ga021","primary_tier":8,"tags":["retention","event_classification","temporal","group_by"]}
+{"instance_id":"sf_ga022","primary_tier":8,"tags":["cohort","retention","temporal","timezone"],"difficulty_notes":"Retention windows depend on Shanghai-local dates, not raw timestamps."}
+{"instance_id":"sf_ga025","primary_tier":6,"tags":["cohort","filter","temporal","event_classification"]}
+{"instance_id":"sf_local002","primary_tier":11,"tags":["forecasting","time_series","regression","moving_average"],"difficulty_notes":"Linear regression feeds a centered moving average over future dates."}
+{"instance_id":"sf_local003","primary_tier":8,"tags":["segmentation","aggregation","ratio","external_knowledge"]}
+{"instance_id":"sf_local004","primary_tier":6,"tags":["ranking","aggregation","temporal","ratio"]}
+{"instance_id":"sf_local007","primary_tier":4,"tags":["date_diff","aggregation","temporal"]}
+{"instance_id":"sf_local008","primary_tier":4,"tags":["ranking","aggregation","multi_metric"]}
+{"instance_id":"sf_local009","primary_tier":6,"tags":["geospatial","ranking","filter","distance"]}
+{"instance_id":"sf_local010","primary_tier":7,"tags":["geospatial","group_by","ranking","distance_bucket"]}
+{"instance_id":"sf_local015","primary_tier":7,"tags":["classification","ratio","filter","aggregation"]}
+{"instance_id":"sf_local017","primary_tier":5,"tags":["ranking","temporal","comparison","aggregation"]}
+{"instance_id":"sf_local018","primary_tier":5,"tags":["percent_change","comparison","temporal","aggregation"]}
+{"instance_id":"sf_local019","primary_tier":4,"tags":["ranking","filter","join","temporal"]}
+{"instance_id":"sf_local026","primary_tier":8,"tags":["ranking","aggregation","window","join"],"difficulty_notes":"Need per-match maximum over identification before ranking bowlers globally."}
+{"instance_id":"sf_local020","primary_tier":3,"tags":["ranking","aggregation","ratio"]}
+{"instance_id":"sf_local021","primary_tier":3,"tags":["filter","aggregation","comparison"]}
+{"instance_id":"sf_local022","primary_tier":4,"tags":["join","filter","ranking"]}
+{"instance_id":"sf_local023","primary_tier":5,"tags":["ranking","aggregation","temporal"]}
+{"instance_id":"sf_local024","primary_tier":7,"tags":["nested_aggregation","ranking","country"]}
+{"instance_id":"sf_local025","primary_tier":8,"tags":["window","aggregation","join","temporal"]}
+{"instance_id":"sf_local028","primary_tier":4,"tags":["temporal","pivot","aggregation"]}
+{"instance_id":"sf_local031","primary_tier":5,"tags":["temporal","comparison","ranking","aggregation"]}
+{"instance_id":"sf_local029","primary_tier":5,"tags":["ranking","aggregation","join","multi_join"]}
+{"instance_id":"sf_local030","primary_tier":4,"tags":["aggregation","ranking","group_by","comparison"]}
+{"instance_id":"sf_local032","primary_tier":6,"tags":["aggregation","ranking","multi_join","subquery"]}
+{"instance_id":"sf_local034","primary_tier":4,"tags":["aggregation","subquery","group_by","comparison"]}
+{"instance_id":"sf_local037","primary_tier":5,"tags":["aggregation","ranking","subquery","top_k"]}
+{"instance_id":"sf_local035","primary_tier":8,"tags":["geospatial","distance","window","sort"]}
+{"instance_id":"sf_local038","primary_tier":3,"tags":["filter","aggregation","ranking"]}
+{"instance_id":"sf_local039","primary_tier":4,"tags":["join","aggregation","filter"]}
+{"instance_id":"sf_local040","primary_tier":5,"tags":["join","multi_join","aggregation","comparison"]}
+{"instance_id":"sf_local041","primary_tier":1,"tags":["aggregation","ratio","filter"]}
+{"instance_id":"sf_local049","primary_tier":4,"tags":["ranking","aggregation","temporal"]}
+{"instance_id":"sf_local054","primary_tier":4,"tags":["aggregation","filter","subquery"]}
+{"instance_id":"sf_local055","primary_tier":6,"tags":["ranking","aggregation","join","comparison","subquery"]}
+{"instance_id":"sf_local198","primary_tier":4,"tags":["aggregation","comparison","group_by"]}
+{"instance_id":"sf_local056","primary_tier":5,"tags":["window","temporal","aggregation","comparison"]}
+{"instance_id":"sf_local058","primary_tier":4,"tags":["aggregation","comparison","group_by","percent_change"]}
+{"instance_id":"sf_local059","primary_tier":5,"tags":["ranking","aggregation","group_by","top_k"]}
+{"instance_id":"sf_local060","primary_tier":9,"tags":["temporal","percent_change","ranking","subquery","comparison"]}
+{"instance_id":"sf_local063","primary_tier":9,"tags":["temporal","percent_change","ranking","subquery","comparison"]}
+{"instance_id":"sf_local061","primary_tier":10,"tags":["temporal","time_series","comparison","aggregation"]}
+{"instance_id":"sf_local050","primary_tier":11,"tags":["temporal","time_series","aggregation","comparison"]}
+{"instance_id":"sf_local062","primary_tier":7,"tags":["cohort","group_by","aggregation","comparison"]}
+{"instance_id":"sf_local067","primary_tier":6,"tags":["cohort","aggregation","comparison"]}
+{"instance_id":"sf_local070","primary_tier":8,"tags":["temporal","window","sort","filter","group_by"]}
+{"instance_id":"sf_local071","primary_tier":7,"tags":["temporal","window","aggregation","group_by"]}
+{"instance_id":"sf_local072","primary_tier":8,"tags":["temporal","window","cohort","ratio"]}
+{"instance_id":"sf_local068","primary_tier":7,"tags":["temporal","time_series","cumulative","percent_change"]}
+{"instance_id":"sf_local073","primary_tier":6,"tags":["aggregation","join","subquery","pivot"]}
+{"instance_id":"sf_local066","primary_tier":3,"tags":["aggregation","join","group_by"]}
+{"instance_id":"sf_local065","primary_tier":4,"tags":["aggregation","join","filter","comparison"]}
+{"instance_id":"sf_local074","primary_tier":7,"tags":["temporal","cumulative","window","time_series"]}
+{"instance_id":"sf_local064","primary_tier":8,"tags":["temporal","window","aggregation","comparison"]}
+{"instance_id":"sf_local297","primary_tier":11,"tags":["temporal","cumulative","window","time_series","comparison"]}
+{"instance_id":"sf_local298","primary_tier":6,"tags":["temporal","cumulative","comparison","aggregation"]}
+{"instance_id":"sf_local299","primary_tier":12,"tags":["temporal","window","cumulative","time_series","aggregation"]}
+{"instance_id":"sf_local300","primary_tier":9,"tags":["temporal","window","cumulative","aggregation"]}
+{"instance_id":"sf_local075","primary_tier":3,"tags":["aggregation","group_by","filter"]}
+{"instance_id":"sf_local077","primary_tier":8,"tags":["temporal","window","time_series","aggregation"]}
+{"instance_id":"sf_local078","primary_tier":6,"tags":["ranking","aggregation","top_k"]}
+{"instance_id":"sf_local081","primary_tier":4,"tags":["aggregation","comparison","group_by","ratio"]}
+{"instance_id":"sf_local085","primary_tier":4,"tags":["ranking","aggregation","comparison","filter"]}
+{"instance_id":"sf_local096","primary_tier":3,"tags":["aggregation","ratio","join","temporal"]}
+{"instance_id":"sf_local097","primary_tier":5,"tags":["temporal","window","aggregation","ranking"]}
+{"instance_id":"sf_local098","primary_tier":8,"tags":["cohort","window","temporal","comparison"]}
+{"instance_id":"sf_local099","primary_tier":6,"tags":["aggregation","comparison","join","subquery"]}
+{"instance_id":"sf_local100","primary_tier":8,"tags":["path","join","aggregation"]}
+{"instance_id":"sf_local114","primary_tier":6,"tags":["aggregation","join","ranking","multi_join"]}
+{"instance_id":"sf_local128","primary_tier":6,"tags":["join","filter","comparison","aggregation"]}
+{"instance_id":"sf_local130","primary_tier":5,"tags":["ranking","aggregation","comparison"]}
+{"instance_id":"sf_local131","primary_tier":1,"tags":["pivot","aggregation"]}
+{"instance_id":"sf_local133","primary_tier":5,"tags":["aggregation","comparison","pivot"]}
+{"instance_id":"sf_local132","primary_tier":6,"tags":["join","comparison","multi_join"]}
+{"instance_id":"sf_local141","primary_tier":2,"tags":["comparison","aggregation","join"]}
+{"instance_id":"sf_local152","primary_tier":5,"tags":["ranking","aggregation","comparison","top_k"]}
+{"instance_id":"sf_local230","primary_tier":6,"tags":["ranking","aggregation","join","top_k"]}
+{"instance_id":"sf_local156","primary_tier":7,"tags":["temporal","comparison","ranking","percent_change"]}
+{"instance_id":"sf_local157","primary_tier":7,"tags":["temporal","percent_change","window","aggregation"]}
+{"instance_id":"sf_local163","primary_tier":3,"tags":["comparison","aggregation","group_by"]}
+{"instance_id":"sf_local168","primary_tier":5,"tags":["join","aggregation","ranking","subquery"]}
+{"instance_id":"sf_local169","primary_tier":9,"tags":["cohort","temporal","window","ratio"]}
+{"instance_id":"sf_local171","primary_tier":7,"tags":["cohort","temporal","window","group_by"]}
+{"instance_id":"sf_local167","primary_tier":5,"tags":["aggregation","ranking","comparison"]}
+{"instance_id":"sf_local170","primary_tier":10,"tags":["cohort","temporal","ratio","comparison"]}
+{"instance_id":"sf_local193","primary_tier":8,"tags":["cohort","temporal","ratio","aggregation"]}
+{"instance_id":"sf_local194","primary_tier":7,"tags":["ranking","aggregation","join","subquery"]}
+{"instance_id":"sf_local195","primary_tier":3,"tags":["aggregation","ratio","join"]}
+{"instance_id":"sf_local196","primary_tier":8,"tags":["cohort","aggregation","comparison","window"]}
+{"instance_id":"sf_local197","primary_tier":5,"tags":["window","temporal","comparison","ranking"]}
+{"instance_id":"sf_local199","primary_tier":4,"tags":["ranking","aggregation","temporal"]}
+{"instance_id":"sf_local201","primary_tier":6,"tags":["text_search","string_match","sort","count"],"difficulty_notes":"Anagram counting is case-sensitive and grouped by word length and prefix."}
+{"instance_id":"sf_local202","primary_tier":5,"tags":["ranking","aggregation","comparison","filter"]}
+{"instance_id":"sf_local209","primary_tier":5,"tags":["join","aggregation","ratio","filter"]}
+{"instance_id":"sf_local210","primary_tier":6,"tags":["temporal","percent_change","aggregation","comparison"]}
+{"instance_id":"sf_local212","primary_tier":4,"tags":["ranking","aggregation","temporal"]}
+{"instance_id":"sf_local218","primary_tier":4,"tags":["aggregation","ranking"]}
+{"instance_id":"sf_local219","primary_tier":6,"tags":["aggregation","comparison","ranking","multi_join"],"difficulty_notes":"Need one winner per league with a tie-break to keep only one team."}
+{"instance_id":"sf_local221","primary_tier":3,"tags":["ranking","aggregation"]}
+{"instance_id":"sf_local220","primary_tier":5,"tags":["ranking","aggregation","filter"]}
+{"instance_id":"sf_local228","primary_tier":8,"tags":["ranking","multi_join","temporal","aggregation"],"difficulty_notes":"Season-level top-3 lists on both batting and bowling sides with matched output positions."}
+{"instance_id":"sf_local229","primary_tier":8,"tags":["ranking","join","aggregation","sort"],"difficulty_notes":"Pair ordering depends on player score ties and can return multiple rows per match."}
+{"instance_id":"sf_local244","primary_tier":4,"tags":["aggregation","group_by","comparison"]}
+{"instance_id":"sf_local253","primary_tier":7,"tags":["text_search","ranking","join","aggregation"],"difficulty_notes":"Salary values must be cleaned before ranking companies inside each city."}
+{"instance_id":"sf_local258","primary_tier":7,"tags":["aggregation","ratio","filter","comparison"],"difficulty_notes":"Excludes non-bowler dismissals and combines wickets, economy, strike rate, and best-match bowling."}
+{"instance_id":"sf_local259","primary_tier":10,"tags":["aggregation","ratio","ranking","join","comparison"],"difficulty_notes":"Wide career profile with many derived batting and bowling metrics."}
+{"instance_id":"sf_local262","primary_tier":11,"tags":["ranking","comparison","aggregation","subquery"],"difficulty_notes":"Requires classifying models by step/version before counting affected problems."}
+{"instance_id":"sf_local263","primary_tier":11,"tags":["ranking","aggregation","comparison","subquery"],"difficulty_notes":"Counts L1_model occurrences separately for strong and soft classifications."}
+{"instance_id":"sf_local264","primary_tier":8,"tags":["aggregation","ranking","comparison","subquery"]}
+{"instance_id":"sf_local269","primary_tier":11,"tags":["nested_aggregation","aggregation","join"],"difficulty_notes":"Needs full expansion of nested packaging before averaging leaf quantities."}
+{"instance_id":"sf_local270","primary_tier":11,"tags":["nested_aggregation","aggregation","filter","join"],"difficulty_notes":"Recursive rollup over packaging hierarchy with a threshold filter on total quantity."}
+{"instance_id":"sf_local272","primary_tier":12,"tags":["window","cumulative","join","ranking"],"difficulty_notes":"FIFO inventory allocation across order lines with strict quantity matching."}
+{"instance_id":"sf_local273","primary_tier":12,"tags":["window","cumulative","join","ratio"],"difficulty_notes":"Pick percentage comes from overlap between ordered demand and inventory lots."}
+{"instance_id":"sf_local274","primary_tier":11,"tags":["window","cumulative","join","aggregation"],"difficulty_notes":"FIFO picking is simpler than the other allocation tasks but still needs cumulative lot handling."}
+{"instance_id":"sf_local275","primary_tier":10,"tags":["time_series","window","temporal","comparison"],"difficulty_notes":"Centered moving average and seasonality-adjusted ratio checks across 2017."}
+{"instance_id":"sf_local277","primary_tier":12,"tags":["time_series","window","regression","temporal"],"difficulty_notes":"Forecasting uses seasonality adjustments plus weighted regression."}
+{"instance_id":"sf_local279","primary_tier":12,"tags":["time_series","recursive","window","temporal"],"difficulty_notes":"Recursive monthly inventory adjustment makes this an iterative state problem."}
+{"instance_id":"sf_local283","primary_tier":6,"tags":["ranking","aggregation","comparison","temporal"]}
+{"instance_id":"sf_local284","primary_tier":5,"tags":["aggregation","comparison","group_by"],"difficulty_notes":"Summary includes deviation buckets around the average loss rate."}
+{"instance_id":"sf_local285","primary_tier":7,"tags":["aggregation","group_by","comparison","temporal"],"difficulty_notes":"Multi-year category reporting with several financial measures per group."}
+{"instance_id":"sf_local286","primary_tier":7,"tags":["join","aggregation","filter","ranking"],"difficulty_notes":"Seller summary combines performance metrics with a sales threshold filter."}
+{"instance_id":"sf_local301","primary_tier":7,"tags":["time_series","temporal","comparison","percent_change"]}
+{"instance_id":"sf_local302","primary_tier":8,"tags":["time_series","comparison","aggregation","percent_change"],"difficulty_notes":"Averages percent change across several attribute types and their values."}
+{"instance_id":"sf_local329","primary_tier":4,"tags":["path_sequence","filter","count"]}
+{"instance_id":"sf_local330","primary_tier":4,"tags":["session_boundary","aggregation","count","path_sequence"],"difficulty_notes":"Count each session once per page even if the same page is both landing and exit."}
+{"instance_id":"sf_local331","primary_tier":6,"tags":["path_sequence","ranking","count"],"difficulty_notes":"Looks for the most common third page after two consecutive detail visits."}
+{"instance_id":"sf_local358","primary_tier":1,"tags":["count","group_by"]}
+{"instance_id":"sf_local360","primary_tier":6,"tags":["path_sequence","filter","count","ranking"],"difficulty_notes":"Finds sessions with the minimum count of qualifying events before the first target click."}
+{"instance_id":"sf_local344","primary_tier":10,"tags":["event_classification","temporal","comparison","external_knowledge"],"difficulty_notes":"Overtake counting depends on pit stops, retirements, and lap-state transitions."}
+{"instance_id":"sf_local336","primary_tier":9,"tags":["event_classification","temporal","count","external_knowledge"],"difficulty_notes":"Same overtake logic as the longer task, but restricted to the first five laps."}
+{"instance_id":"sf_local335","primary_tier":9,"tags":["ranking","aggregation","temporal","comparison"],"difficulty_notes":"Counts seasons where each constructor had the lowest point-scoring driver total."}
+{"instance_id":"sf_local309","primary_tier":4,"tags":["ranking","aggregation","comparison","temporal"]}
+{"instance_id":"sf_local310","primary_tier":6,"tags":["ranking","aggregation","comparison","subquery"],"difficulty_notes":"Ranks years by the sum of driver and constructor peak points from results only."}
+{"instance_id":"sf_local311","primary_tier":7,"tags":["ranking","aggregation","comparison","temporal"],"difficulty_notes":"Combines best driver and best constructor points per year."}
+{"instance_id":"sf_local354","primary_tier":8,"tags":["path_sequence","comparison","aggregation","temporal"],"difficulty_notes":"Checks constructor continuity between the first and last race within a season."}
+{"instance_id":"sf_local355","primary_tier":10,"tags":["path_sequence","aggregation","comparison","temporal"],"difficulty_notes":"Averages missed-race gaps only for drivers who switch constructors across the hiatus."}
+{"instance_id":"sf_local356","primary_tier":9,"tags":["event_classification","comparison","aggregation","temporal"],"difficulty_notes":"Compares on-track overtakes made versus suffered while excluding pit and start movements."}
+{"instance_id":"sf001","primary_tier":4,"tags":["date_range","filter","aggregation"]}
+{"instance_id":"sf003","primary_tier":6,"tags":["ranking","temporal","comparison","filter"],"difficulty_notes":"Second-highest growth rate with a minimum population threshold."}
+{"instance_id":"sf002","primary_tier":5,"tags":["ranking","filter","comparison","aggregation"],"difficulty_notes":"As-of-date ranking over active banks with an uninsured-assets percentage."}
+{"instance_id":"sf044","primary_tier":4,"tags":["time_series","comparison","percent_change"]}
+{"instance_id":"sf006","primary_tier":5,"tags":["temporal","aggregation","comparison","percent_change"],"difficulty_notes":"As-of counts at two dates drive the percent change by state."}
+{"instance_id":"sf008","primary_tier":5,"tags":["time_series","comparison","percent_change","aggregation"],"difficulty_notes":"Pairs a financial inflow measure with a seasonally adjusted index change."}
+{"instance_id":"sf010","primary_tier":7,"tags":["time_series","cumulative","ratio","aggregation"],"difficulty_notes":"Cumulative ratios by date across multiple mortgage stress categories."}
+{"instance_id":"sf037","primary_tier":9,"tags":["geospatial","distance","join","ranking"],"difficulty_notes":"Nearest-neighbor search using straight-line distance between store locations."}
+{"instance_id":"sf012","primary_tier":4,"tags":["temporal","aggregation","group_by"]}
+{"instance_id":"sf018","primary_tier":6,"tags":["event_classification","temporal","filter","aggregation"],"difficulty_notes":"One-hour window analysis of push notification engagement."}
+{"instance_id":"sf035","primary_tier":3,"tags":["temporal","group_by","count"]}
+{"instance_id":"sf029","primary_tier":8,"tags":["multi_join","aggregation","temporal","group_by"],"difficulty_notes":"Wide daily report joins sales, traffic, inventory, and net PPM data."}
+{"instance_id":"sf040","primary_tier":6,"tags":["geospatial","ranking","sort","filter"],"difficulty_notes":"Selects the northernmost addresses inside the largest Florida zip code area."}
+{"instance_id":"sf009","primary_tier":5,"tags":["pivot","comparison","aggregation","group_by"]}
+{"instance_id":"sf013","primary_tier":5,"tags":["pivot","comparison","aggregation","group_by"],"difficulty_notes":"Side-by-side road length comparison by class and subclass."}
+{"instance_id":"sf041","primary_tier":9,"tags":["multi_join","time_series","aggregation","comparison"],"difficulty_notes":"Hourly market and load report with timezone alignment and net load calculations."}
+{"instance_id":"sf011","primary_tier":6,"tags":["ratio","aggregation","comparison","join"],"difficulty_notes":"Block group population ratios are computed against census tract totals."}
+{"instance_id":"sf014","primary_tier":4,"tags":["ranking","aggregation","comparison","filter"]}

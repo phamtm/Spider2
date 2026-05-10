@@ -1,0 +1,128 @@
+"""Progress UI for Spider2 benchmark tracking.
+
+This package provides a Streamlit-based dashboard for visualizing
+Spider2 solving progress, including status tracking, tier/tag summaries,
+and LLM call log inspection.
+"""
+
+from sol01.progress_ui.constants import (
+    ANSWERED_COLOR,
+    CHART_HEIGHT,
+    CORRECT_COLOR,
+    DEFAULT_DATASET,
+    DEFAULT_SOURCE,
+    INCORRECT_COLOR,
+    OUTPUTS_ROOT,
+    QUESTION_STATUS_ORDER,
+    ROOT,
+    SECTION_GAP,
+    STATUS_COLORS,
+    STATUS_LABELS,
+    STATUS_ORDER,
+    TABLE_HEIGHT,
+    TABLE_ROW_HEIGHT,
+    TABLE_VISIBLE_ROWS,
+)
+from sol01.progress_ui.display import (
+    _status_dot_label,
+    _status_dot_style,
+    build_run_command,
+    format_question_option,
+    format_tier_summary,
+    select_question_row,
+)
+from sol01.progress_ui.filters import (
+    apply_frame_filters,
+    should_show_all_questions,
+)
+from sol01.progress_ui.loading import (
+    discover_result_files,
+    load_category_metadata_rows,
+    load_records,
+    read_dataset,
+    records_from_csv,
+    records_from_file,
+    records_from_json,
+)
+from sol01.progress_ui.models import Record
+from sol01.progress_ui.parsing import (
+    as_float,
+    classify,
+    find_instance_id,
+    normalize_item,
+    parse_args,
+    parse_timestamp,
+    read_json,
+    read_jsonl,
+    resolve_path,
+)
+from sol01.progress_ui.summaries import (
+    compute_overall_summary,
+    compute_tag_summary,
+    compute_tier_summary,
+    recommend_focus,
+)
+from sol01.progress_ui.transforms import (
+    build_status_frame,
+    dataframe_height,
+    latest_records,
+    make_progress_frame_for_ids,
+    prepare_debug_frame,
+    prepare_display_frame,
+    prepare_question_table,
+)
+
+__all__ = [
+    "Record",
+    "ROOT",
+    "DEFAULT_DATASET",
+    "DEFAULT_SOURCE",
+    "OUTPUTS_ROOT",
+    "STATUS_ORDER",
+    "STATUS_LABELS",
+    "STATUS_COLORS",
+    "CORRECT_COLOR",
+    "INCORRECT_COLOR",
+    "ANSWERED_COLOR",
+    "CHART_HEIGHT",
+    "TABLE_ROW_HEIGHT",
+    "TABLE_VISIBLE_ROWS",
+    "TABLE_HEIGHT",
+    "SECTION_GAP",
+    "QUESTION_STATUS_ORDER",
+    "parse_args",
+    "resolve_path",
+    "read_json",
+    "read_jsonl",
+    "parse_timestamp",
+    "as_float",
+    "find_instance_id",
+    "classify",
+    "normalize_item",
+    "read_dataset",
+    "records_from_json",
+    "records_from_csv",
+    "records_from_file",
+    "discover_result_files",
+    "load_records",
+    "load_category_metadata_rows",
+    "latest_records",
+    "build_status_frame",
+    "prepare_display_frame",
+    "prepare_debug_frame",
+    "prepare_question_table",
+    "dataframe_height",
+    "make_progress_frame_for_ids",
+    "compute_overall_summary",
+    "compute_tier_summary",
+    "compute_tag_summary",
+    "recommend_focus",
+    "apply_frame_filters",
+    "should_show_all_questions",
+    "format_question_option",
+    "select_question_row",
+    "_status_dot_label",
+    "_status_dot_style",
+    "build_run_command",
+    "format_tier_summary",
+]

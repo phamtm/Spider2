@@ -1,0 +1,69 @@
+{"instance_id":"sf_bq227","primary_tier":5,"tags":["temporal","aggregation","ranking","share"]}
+{"instance_id":"sf_bq232","primary_tier":2,"tags":["filter","aggregation","temporal"]}
+{"instance_id":"sf_bq228","primary_tier":2,"tags":["ranking","aggregation","filter"]}
+{"instance_id":"sf_bq229","primary_tier":5,"tags":["classification","distinct_count","anti_join","filter"]}
+{"instance_id":"sf_bq230","primary_tier":4,"tags":["aggregation","group_by","temporal","union"]}
+{"instance_id":"sf_bq326","primary_tier":7,"tags":["multi_dataset","join","percent_change","temporal"]}
+{"instance_id":"sf_bq424","primary_tier":3,"tags":["ranking","aggregation","filter"]}
+{"instance_id":"sf_bq327","primary_tier":1,"tags":["filter","count"]}
+{"instance_id":"sf_bq328","primary_tier":4,"tags":["median","aggregation","group_by","ranking"]}
+{"instance_id":"sf_bq331","primary_tier":6,"tags":["ranking","aggregation","join","comparison"],"difficulty_notes":"Need per-topic first-message identification and distinct voter counts before comparing to the overall average."}
+{"instance_id":"sf_bq380","primary_tier":6,"tags":["join","aggregation","ranking","distinct_count"],"difficulty_notes":"Need distinct upvotes in both directions from the same vote table."}
+{"instance_id":"sf_bq370","primary_tier":8,"tags":["join","aggregation","comparison","line_item_match"],"difficulty_notes":"Requires matching at both line-item and customer aggregate levels."}
+{"instance_id":"sf_bq371","primary_tier":4,"tags":["temporal","aggregation","comparison","quarter"]}
+{"instance_id":"sf_bq372","primary_tier":7,"tags":["anti_join","aggregation","comparison","ranking"],"difficulty_notes":"Use missing-invoice orders, then compare category maxima to the overall mean."}
+{"instance_id":"sf_bq373","primary_tier":6,"tags":["temporal","aggregation","median","group_by"]}
+{"instance_id":"sf_bq393","primary_tier":8,"tags":["temporal","gap_analysis","window","activity_span"],"difficulty_notes":"Need to detect a missing month inside each user's active span and report the latest such gap."}
+{"instance_id":"sf_bq403","primary_tier":5,"tags":["median","comparison","ranking","temporal"]}
+{"instance_id":"sf_bq397","primary_tier":6,"tags":["dedupe","group_by","ranking","multi_country"]}
+{"instance_id":"sf_bq402","primary_tier":4,"tags":["ratio","aggregation","filter","distinct_count"]}
+{"instance_id":"sf_bq160","primary_tier":6,"tags":["join","aggregation","ranking","forum"],"difficulty_notes":"Need topic-level rollups under the General parent forum with missing values treated as zero."}
+{"instance_id":"sf_bq167","primary_tier":7,"tags":["pairwise","join","ranking","distinct_count"],"difficulty_notes":"Requires comparing upvotes sent and returned between the same two users."}
+{"instance_id":"sf_bq171","primary_tier":4,"tags":["comparison","ranking","temporal","aggregation"]}
+{"instance_id":"sf_bq118","primary_tier":6,"tags":["filter","aggregation","comparison","age_group"],"difficulty_notes":"Compare discharge and vehicle codes only for white individuals, then aggregate by age group."}
+{"instance_id":"sf_bq072","primary_tier":7,"tags":["join","filter","aggregation","age_group"],"difficulty_notes":"Use EntityAxisConditions to link ICD-10 codes to deaths before splitting by race and cause."}
+{"instance_id":"sf_ga001","primary_tier":6,"tags":["join","ranking","aggregation","basket_analysis"]}
+{"instance_id":"sf_ga002","primary_tier":7,"tags":["join","temporal","ranking","aggregation"]}
+{"instance_id":"sf_ga003","primary_tier":3,"tags":["aggregation","group_by","temporal"]}
+{"instance_id":"sf_ga004","primary_tier":4,"tags":["comparison","aggregation","filter","user_segment"]}
+{"instance_id":"sf_ga008","primary_tier":5,"tags":["temporal","aggregation","group_by","user_average"]}
+{"instance_id":"sf_ga017","primary_tier":4,"tags":["ranking","aggregation","distinct_count"]}
+{"instance_id":"sf_ga007","primary_tier":3,"tags":["ratio","classification","temporal"]}
+{"instance_id":"sf_ga013","primary_tier":4,"tags":["path_sequence","classification","temporal"]}
+{"instance_id":"sf_ga018","primary_tier":6,"tags":["session_boundary","path_sequence","conversion_rate"]}
+{"instance_id":"sf_ga031","primary_tier":6,"tags":["session_boundary","path_sequence","conversion_rate"]}
+{"instance_id":"sf_ga032","primary_tier":5,"tags":["path_sequence","session_boundary","classification"],"difficulty_notes":"Need to compress repeated page visits while preserving the session order."}
+{"instance_id":"sf_ga006","primary_tier":6,"tags":["session_aggregation","ratio","filter","aggregation"]}
+{"instance_id":"sf_ga009","primary_tier":5,"tags":["session_aggregation","ratio","aggregation"]}
+{"instance_id":"sf_ga010","primary_tier":3,"tags":["ranking","aggregation","temporal"]}
+{"instance_id":"sf_ga014","primary_tier":4,"tags":["aggregation","group_by","temporal"]}
+{"instance_id":"sf_ga011","primary_tier":4,"tags":["ranking","string_normalization","aggregation"]}
+{"instance_id":"sf_ga012","primary_tier":7,"tags":["ranking","aggregation","join","filter"]}
+{"instance_id":"sf_ga019","primary_tier":5,"tags":["retention","ratio","temporal","cohort"]}
+{"instance_id":"sf_ga030","primary_tier":7,"tags":["cohort","retention","temporal","ranking"]}
+{"instance_id":"sf_ga005","primary_tier":7,"tags":["cohort","retention","temporal","group_by"]}
+{"instance_id":"sf_ga028","primary_tier":8,"tags":["cohort","retention","temporal","window"]}
+{"instance_id":"sf_ga020","primary_tier":8,"tags":["retention","event_classification","temporal","ranking"]}
+{"instance_id":"sf_ga021","primary_tier":8,"tags":["retention","event_classification","temporal","group_by"]}
+{"instance_id":"sf_ga022","primary_tier":8,"tags":["cohort","retention","temporal","timezone"],"difficulty_notes":"Retention windows depend on Shanghai-local dates, not raw timestamps."}
+{"instance_id":"sf_ga025","primary_tier":6,"tags":["cohort","filter","temporal","event_classification"]}
+{"instance_id":"sf_local002","primary_tier":11,"tags":["forecasting","time_series","regression","moving_average"],"difficulty_notes":"Linear regression feeds a centered moving average over future dates."}
+{"instance_id":"sf_local003","primary_tier":8,"tags":["segmentation","aggregation","ratio","external_knowledge"]}
+{"instance_id":"sf_local004","primary_tier":6,"tags":["ranking","aggregation","temporal","ratio"]}
+{"instance_id":"sf_local007","primary_tier":4,"tags":["date_diff","aggregation","temporal"]}
+{"instance_id":"sf_local008","primary_tier":4,"tags":["ranking","aggregation","multi_metric"]}
+{"instance_id":"sf_local009","primary_tier":6,"tags":["geospatial","ranking","filter","distance"]}
+{"instance_id":"sf_local010","primary_tier":7,"tags":["geospatial","group_by","ranking","distance_bucket"]}
+{"instance_id":"sf_local015","primary_tier":7,"tags":["classification","ratio","filter","aggregation"]}
+{"instance_id":"sf_local017","primary_tier":5,"tags":["ranking","temporal","comparison","aggregation"]}
+{"instance_id":"sf_local018","primary_tier":5,"tags":["percent_change","comparison","temporal","aggregation"]}
+{"instance_id":"sf_local019","primary_tier":4,"tags":["ranking","filter","join","temporal"]}
+{"instance_id":"sf_local026","primary_tier":8,"tags":["ranking","aggregation","window","join"],"difficulty_notes":"Need per-match maximum over identification before ranking bowlers globally."}
+{"instance_id":"sf_local020","primary_tier":3,"tags":["ranking","aggregation","ratio"]}
+{"instance_id":"sf_local021","primary_tier":3,"tags":["filter","aggregation","comparison"]}
+{"instance_id":"sf_local022","primary_tier":4,"tags":["join","filter","ranking"]}
+{"instance_id":"sf_local023","primary_tier":5,"tags":["ranking","aggregation","temporal"]}
+{"instance_id":"sf_local024","primary_tier":7,"tags":["nested_aggregation","ranking","country"]}
+{"instance_id":"sf_local025","primary_tier":8,"tags":["window","aggregation","join","temporal"]}
+{"instance_id":"sf_local028","primary_tier":4,"tags":["temporal","pivot","aggregation"]}
+{"instance_id":"sf_local031","primary_tier":5,"tags":["temporal","comparison","ranking","aggregation"]}

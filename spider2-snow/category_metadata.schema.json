@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://xlang.ai/spider2-snow/category_metadata.schema.json",
+  "title": "Spider2-Snow category metadata row",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["instance_id", "tier", "primary_category", "tags"],
+  "properties": {
+    "instance_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable question id, for example sf_bq011 or sf_local067."
+    },
+    "tier": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4,
+      "description": "Complexity tier from 1 to 4."
+    },
+    "primary_category": {
+      "type": "string",
+      "enum": ["lookup", "aggregate", "comparison", "ranking", "trend", "multi_step", "spatial", "text", "path", "other"],
+      "description": "Primary question shape."
+    },
+    "tags": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "aggregation",
+          "comparison",
+          "count",
+          "distinct",
+          "filter",
+          "group_by",
+          "join",
+          "multi_join",
+          "ranking",
+          "top_k",
+          "sort",
+          "temporal",
+          "date_range",
+          "time_series",
+          "window",
+          "cumulative",
+          "cohort",
+          "ratio",
+          "percent_change",
+          "string_match",
+          "text_search",
+          "external_knowledge",
+          "geospatial",
+          "distance",
+          "intersects",
+          "contains",
+          "subquery",
+          "nested_aggregation",
+          "pivot",
+          "other"
+        ]
+      },
+      "description": "Unique list of allowed tags."
+    },
+    "batch_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional batch label such as batch-01."
+    },
+    "source_line_start": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Optional 1-based start line for the source slice."
+    },
+    "source_line_end": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Optional 1-based end line for the source slice."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Short free-text note for edge cases or review comments."
+    }
+  }
+}

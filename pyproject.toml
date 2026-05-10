@@ -1,0 +1,16 @@
+[project]
+name = "spider2-workspace"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=2.3.3",
+    "plotly>=6.7.0",
+    "sol01",
+    "streamlit>=1.57.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+sol01 = { path = "methods/sol01", editable = true }

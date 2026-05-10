@@ -1,0 +1,39 @@
+set dotenv-load := true
+
+# Show available development tasks.
+default:
+    @just --list
+
+# Format Python files with Ruff.
+fmt:
+    uv run --group dev ruff format .
+
+# Lint Python files with Ruff.
+lint:
+    uv run --group dev ruff check .
+
+# Run the current sol01 test suite.
+test:
+    uv run pytest tests -q
+
+# Run the sol01 solver CLI with its current defaults.
+run:
+    uv run sol01 run
+
+# Run selected solver tasks by exact ID, glob, tier, tag, or all selector.
+run-selected +selectors:
+    uv run sol01 run {{selectors}}
+
+# Run one Spider2-snow gold SQL instance ID and score the CSV output.
+gold instance_id:
+    uv run python -m sol01.gold_run "{{instance_id}}"
+
+# Run the progress dashboard.
+progress:
+    uv run --group dev streamlit run ./sol01/progress_ui/app.py
+
+# Run format, lint, and tests together.
+check:
+    just fmt
+    just lint
+    just test

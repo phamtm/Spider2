@@ -1,0 +1,631 @@
+"""Tests for the sol01 per-task execution loop."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pandas as pd
+import pytest
+
+from sol01.coordinator import run_task
+from sol01.infra.config import RuntimeConfig
+from sol01.llm.client import PromptSpec
+from sol01.models import (
+    CandidateReviewReport,
+    ColumnSchema,
+    FinalAnswer,
+    HybridPlanningDecision,
+    Intent,
+    RetrievedSchemaObject,
+    SchemaObject,
+    SelectedSchemaObject,
+    SQLCandidate,
+    SQLCandidateBatch,
+    TableSchema,
+    Task,
+)
+from sol01.output.output import csv_path_for, ensure_run_paths
+
+SALES_TABLE = "TEST_DB.PUBLIC.SALES"
+ORDERS_TABLE = "TEST_DB.PUBLIC.ORDERS"
+
+
+@dataclass
+class FakeLLMClient:
+    """Minimal fake LLM that returns queued outputs by prompt name."""
+
+    outputs: dict[str, list[Any]]
+    prompts: dict[str, list[str]] | None = None
+
+    def load_prompt(self, prompt_name: str) -> PromptSpec:
+        return PromptSpec(
+            name=prompt_name, text=f"{prompt_name} prompt", sha256=f"hash-{prompt_name}"
+        )
+
+    def run_structured(
+        self,
+        user_prompt: str,
+        *,
+        prompt_name: str,
+        output_type: type[Any],
+        model: Any = None,
+    ) -> Any:
+        if self.prompts is not None:
+            self.prompts.setdefault(prompt_name, []).append(user_prompt)
+        queue = self.outputs.get(prompt_name, [])
+        if not queue:
+            raise AssertionError(f"No fake output queued for prompt {prompt_name}")
+        output = queue.pop(0)
+        assert isinstance(output, output_type)
+        return output
+
+    def run_structured_with_prompt(
+        self,
+        user_prompt: str,
+        *,
+        prompt: PromptSpec,
+        output_type: type[Any],
+        model: Any = None,
+    ) -> Any:
+        return self.run_structured(
+            user_prompt,
+            prompt_name=prompt.name,
+            output_type=output_type,
+            model=model,
+        )
+
+
+@pytest.fixture
+def fake_snowflake(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Return deterministic DataFrames instead of opening Snowflake connections."""
+
+    def fake_fetch_query_dataframe(sql: str, *, db: str) -> pd.DataFrame:
+        if db != "TEST_DB":
+            raise AssertionError(f"Unexpected database: {db}")
+        if "BROKEN_EXEC" in sql.upper():
+            raise RuntimeError("Object 'ORDERS' does not exist")
+        if "MISSING_COLUMN" in sql.upper():
+            raise RuntimeError("invalid identifier 'MISSING_COLUMN'")
+        if "COUNT" in sql.upper():
+            return pd.DataFrame([{"count": 1}])
+        if "ORDERS" in sql:
+            return pd.DataFrame([{"ORDER_ID": 1, "AMOUNT": 12.0}])
+        return pd.DataFrame(
+            [
+                {"CUSTOMER": "bob", "AMOUNT": 12.0},
+                {"CUSTOMER": "alice", "AMOUNT": 10.5},
+            ]
+        )
+
+    monkeypatch.setattr(
+        "sol01.candidates.evaluator.fetch_query_dataframe", fake_fetch_query_dataframe
+    )
+    monkeypatch.setattr(
+        "sol01.candidates.verification._fetch_query_dataframe", fake_fetch_query_dataframe
+    )
+
+
+@pytest.fixture
+def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
+    """Patch a compact schema index for coordinator tests."""
+
+    schema = {
+        SALES_TABLE: TableSchema(
+            name=SALES_TABLE,
+            full_name=SALES_TABLE,
+            ddl=f"CREATE TABLE {SALES_TABLE} (CUSTOMER TEXT, AMOUNT NUMBER)",
+            columns=[
+                ColumnSchema(name="CUSTOMER", type="TEXT"),
+                ColumnSchema(name="AMOUNT", type="NUMBER"),
+            ],
+            sample_rows=[{"customer": "bob", "amount": 12}],
+            searchable_text="sales customer amount",
+        ),
+        ORDERS_TABLE: TableSchema(
+            name=ORDERS_TABLE,
+            full_name=ORDERS_TABLE,
+            ddl=f"CREATE TABLE {ORDERS_TABLE} (ORDER_ID NUMBER, AMOUNT NUMBER)",
+            columns=[
+                ColumnSchema(name="ORDER_ID", type="NUMBER"),
+                ColumnSchema(name="AMOUNT", type="NUMBER"),
+            ],
+            sample_rows=[{"order_id": 1, "amount": 12}],
+            searchable_text="orders order amount",
+        ),
+    }
+    monkeypatch.setattr("sol01.coordinator.load_db_index", lambda *args, **kwargs: schema)
+    monkeypatch.setattr(
+        "sol01.candidates.verification.load_db_index", lambda *args, **kwargs: schema
+    )
+    schema_objects = [
+        SchemaObject(
+            object_id=f"table:{SALES_TABLE}",
+            object_type="table",
+            name=SALES_TABLE,
+            db="TEST_DB",
+            table_name=SALES_TABLE,
+            searchable_text="sales customer amount",
+        ),
+        SchemaObject(
+            object_id=f"table:{ORDERS_TABLE}",
+            object_type="table",
+            name=ORDERS_TABLE,
+            db="TEST_DB",
+            table_name=ORDERS_TABLE,
+            searchable_text="orders order amount",
+        ),
+    ]
+    retrieval_index = SimpleNamespace(
+        db="TEST_DB",
+        cache_key="test-cache-key",
+        objects=schema_objects,
+        chunks=[],
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.build_retrieval_index",
+        lambda *args, **kwargs: retrieval_index,
+    )
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema_objects",
+        lambda *args, **kwargs: (
+            [
+                RetrievedSchemaObject(schema_object=schema_objects[0], rank=1, score=0.9),
+                RetrievedSchemaObject(schema_object=schema_objects[1], rank=2, score=0.8),
+            ],
+            {"query": {"text": "test query"}, "candidate_count": 2},
+        ),
+    )
+    return schema
+
+
+def _planning(
+    *, object_ids: list[str] | None = None, summary: str = "Find totals."
+) -> HybridPlanningDecision:
+    return HybridPlanningDecision(
+        selected_objects=[
+            SelectedSchemaObject(object_id=object_id)
+            for object_id in (object_ids or [f"table:{SALES_TABLE}"])
+        ],
+        selected_tables=[],
+        rationale="selected needed tables",
+        confidence=0.9,
+        intent=Intent(
+            summary=summary,
+            entities=["sales"],
+            metrics=["amount"],
+            filters=[],
+            time_constraints=[],
+            output_expectation="customer and amount columns",
+            assumptions=[],
+        ),
+    )
+
+
+def _candidate(sql: str, *, confidence: float = 0.8) -> SQLCandidate:
+    return SQLCandidate(
+        sql=sql,
+        explanation="candidate",
+        assumptions=[],
+        constraint_ledger=[],
+        unsupported_assumptions=[],
+        confidence=confidence,
+    )
+
+
+def test_run_task_uses_planning_batched_generation_and_model_review(
+    tmp_path: Path,
+    fake_snowflake: None,
+    db_index: dict[str, TableSchema],
+):
+    task = Task(instance_id="sf_local003", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("success-run", outputs_root=tmp_path)
+    prompts: dict[str, list[str]] = {}
+    llm = FakeLLMClient(
+        outputs={
+            "planning": [_planning()],
+            "sql_generation_batch": [
+                SQLCandidateBatch(
+                    candidates=[
+                        _candidate(
+                            f"SELECT CUSTOMER, AMOUNT FROM {SALES_TABLE} ORDER BY AMOUNT DESC"
+                        )
+                    ]
+                )
+            ],
+            "candidate_review": [
+                CandidateReviewReport(
+                    baseline_stage="initial_1",
+                    preferred_stage="initial_1",
+                    compared_stages=["initial_1"],
+                    reasons=["The candidate matches the requested columns."],
+                    confidence=0.9,
+                    issues=[],
+                    should_repair=False,
+                )
+            ],
+        },
+        prompts=prompts,
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    assert isinstance(answer, FinalAnswer)
+    assert answer.status == "success"
+    trace = json.loads((run_paths.traces_dir / "sf_local003.json").read_text(encoding="utf-8"))
+    assert trace["prompt_hashes"] == {
+        "planning": "hash-planning",
+        "sql_generation_batch": "hash-sql_generation_batch",
+        "candidate_review": "hash-candidate_review",
+    }
+    assert trace["schema_selection"]["selected_tables"] == [SALES_TABLE]
+    assert trace["schema_retrieval_version"] == "hybrid_v1"
+    assert trace["schema_retrieval"]["index"]["cache_key"] == "test-cache-key"
+    assert len(trace["attempts"]) == 1
+    assert trace["candidate_review"]["preferred_stage"] == "initial_1"
+    assert trace["candidate_review"]["review_reason"] == (
+        "final adjudication of the only executable candidate"
+    )
+    assert set(prompts) == {"planning", "sql_generation_batch", "candidate_review"}
+    assert "Schema summary:" not in prompts["planning"][0]
+    assert "Retrieved logical schema object evidence:" in prompts["planning"][0]
+
+
+def test_run_task_reruns_old_trace_without_schema_retrieval_version(
+    tmp_path: Path,
+    fake_snowflake: None,
+    db_index: dict[str, TableSchema],
+):
+    task = Task(instance_id="sf_stale", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("stale-run", outputs_root=tmp_path)
+    csv_path = csv_path_for(run_paths, instance_id=task.instance_id)
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    csv_path.write_text("old\n", encoding="utf-8")
+    (run_paths.traces_dir / "sf_stale.json").write_text(
+        json.dumps(
+            {
+                "instance_id": task.instance_id,
+                "status": "success",
+                "final_sql": "SELECT 1",
+                "csv_path": str(csv_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    llm = FakeLLMClient(
+        outputs={
+            "planning": [_planning()],
+            "sql_generation_batch": [
+                SQLCandidateBatch(
+                    candidates=[_candidate(f"SELECT CUSTOMER, AMOUNT FROM {SALES_TABLE}")]
+                )
+            ],
+            "candidate_review": [
+                CandidateReviewReport(
+                    baseline_stage="initial_1",
+                    preferred_stage="initial_1",
+                    compared_stages=["initial_1"],
+                    reasons=["The rerun candidate matches the request."],
+                    confidence=0.9,
+                    issues=[],
+                    should_repair=False,
+                )
+            ],
+        }
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    assert answer.status == "success"
+    assert answer.sql != "SELECT 1"
+    trace = json.loads((run_paths.traces_dir / "sf_stale.json").read_text(encoding="utf-8"))
+    assert trace["schema_retrieval_version"] == "hybrid_v1"
+
+
+def test_close_executable_candidates_use_one_candidate_review(
+    tmp_path: Path,
+    fake_snowflake: None,
+    db_index: dict[str, TableSchema],
+):
+    task = Task(instance_id="sf_review", db="TEST_DB", question="Show customer totals.")
+    run_paths = ensure_run_paths("review-run", outputs_root=tmp_path)
+    llm = FakeLLMClient(
+        outputs={
+            "planning": [_planning()],
+            "sql_generation_batch": [
+                SQLCandidateBatch(
+                    candidates=[
+                        _candidate(f"SELECT CUSTOMER, AMOUNT FROM {SALES_TABLE}", confidence=0.7),
+                        _candidate(
+                            f"SELECT CUSTOMER, AMOUNT FROM {SALES_TABLE} ORDER BY AMOUNT DESC",
+                            confidence=0.8,
+                        ),
+                    ]
+                )
+            ],
+            "candidate_review": [
+                CandidateReviewReport(
+                    baseline_stage="initial_2",
+                    preferred_stage="initial_2",
+                    compared_stages=["initial_1", "initial_2"],
+                    reasons=["initial_2 preserves ordering"],
+                    confidence=0.9,
+                    issues=[],
+                    should_repair=False,
+                )
+            ],
+        }
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=2,
+    )
+
+    assert answer.status == "success"
+    trace = json.loads((run_paths.traces_dir / "sf_review.json").read_text(encoding="utf-8"))
+    assert trace["candidate_review"]["preferred_stage"] == "initial_2"
+    assert trace["final_sql"].endswith("ORDER BY AMOUNT DESC")
+
+
+def test_tiny_aggregate_is_reviewed_by_candidate_review(
+    tmp_path: Path,
+    fake_snowflake: None,
+    db_index: dict[str, TableSchema],
+):
+    task = Task(instance_id="sf_count", db="TEST_DB", question="How many customers?")
+    run_paths = ensure_run_paths("aggregate-run", outputs_root=tmp_path)
+    llm = FakeLLMClient(
+        outputs={
+            "planning": [_planning(summary="Count customers.")],
+            "sql_generation_batch": [
+                SQLCandidateBatch(
+                    candidates=[_candidate(f"SELECT COUNT(*) AS COUNT FROM {SALES_TABLE}")]
+                )
+            ],
+            "candidate_review": [
+                CandidateReviewReport(
+                    baseline_stage="initial_1",
+                    preferred_stage="initial_1",
+                    compared_stages=["initial_1"],
+                    reasons=["tiny aggregate may be a false count"],
+                    confidence=0.6,
+                    issues=["Aggregate returned a suspiciously tiny result."],
+                    should_repair=True,
+                    repair_focus="Check filters and aggregation grain.",
+                )
+            ],
+            "sql_repair": [
+                _candidate(f"SELECT CUSTOMER, AMOUNT FROM {SALES_TABLE} ORDER BY AMOUNT DESC")
+            ],
+        }
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+    )
+
+    assert answer.status == "success"
+    trace = json.loads((run_paths.traces_dir / "sf_count.json").read_text(encoding="utf-8"))
+    assert "aggregate_verification" not in trace
+    assert trace["candidate_review"]["should_repair"] is True
+    assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "critic_repair"]
+
+
+def test_schema_expansion_uses_exact_table_name_and_reuses_intent(
+    tmp_path: Path,
+    fake_snowflake: None,
+    db_index: dict[str, TableSchema],
+):
+    task = Task(instance_id="sf_expand", db="TEST_DB", question="Show order totals.")
+    run_paths = ensure_run_paths("expand-run", outputs_root=tmp_path)
+    prompts: dict[str, list[str]] = {}
+    llm = FakeLLMClient(
+        outputs={
+            "planning": [_planning()],
+            "sql_generation_batch": [
+                SQLCandidateBatch(candidates=[_candidate("SELECT MISSING_COLUMN FROM ORDERS")]),
+                SQLCandidateBatch(
+                    candidates=[_candidate(f"SELECT ORDER_ID, AMOUNT FROM {ORDERS_TABLE}")]
+                ),
+            ],
+        },
+        prompts=prompts,
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+        max_attempts=1,
+        semantic_repairs=0,
+    )
+
+    assert answer.status == "success"
+    trace = json.loads((run_paths.traces_dir / "sf_expand.json").read_text(encoding="utf-8"))
+    assert trace["schema_expansion"]["decision"]["source"] == "exact_name"
+    assert set(trace["schema_selection"]["expanded_tables"]) == {SALES_TABLE, ORDERS_TABLE}
+    assert trace["schema_expansion"]["added_tables"] == [ORDERS_TABLE]
+    assert "schema_expansion" not in prompts
+    assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "schema_expansion"]
+
+
+def test_schema_expansion_retrieves_candidates_for_missing_column(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_snowflake: None,
+    db_index: dict[str, TableSchema],
+):
+    queries: list[str] = []
+
+    def fake_retrieve_schema_objects(index: Any, question: str, **kwargs: Any):
+        queries.append(question)
+        table_name = SALES_TABLE if len(queries) == 1 else ORDERS_TABLE
+        schema_object = next(obj for obj in index.objects if obj.table_name == table_name)
+        return (
+            [RetrievedSchemaObject(schema_object=schema_object, rank=1, score=0.9)],
+            {"query": {"text": question}, "candidate_count": 1},
+        )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema_objects",
+        fake_retrieve_schema_objects,
+    )
+    task = Task(instance_id="sf_retrieve_expand", db="TEST_DB", question="Show order totals.")
+    run_paths = ensure_run_paths("retrieve-expand-run", outputs_root=tmp_path)
+    prompts: dict[str, list[str]] = {}
+    llm = FakeLLMClient(
+        outputs={
+            "planning": [
+                _planning(),
+                _planning(object_ids=[f"table:{ORDERS_TABLE}"]),
+            ],
+            "sql_generation_batch": [
+                SQLCandidateBatch(
+                    candidates=[_candidate(f"SELECT MISSING_COLUMN FROM {SALES_TABLE}")]
+                ),
+                SQLCandidateBatch(
+                    candidates=[_candidate(f"SELECT ORDER_ID, AMOUNT FROM {ORDERS_TABLE}")]
+                ),
+            ],
+        },
+        prompts=prompts,
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+        max_attempts=1,
+        semantic_repairs=0,
+    )
+
+    assert answer.status == "success"
+    assert len(queries) == 2
+    assert "Original question: Show order totals." in queries[1]
+    assert f"Failed SQL: SELECT MISSING_COLUMN FROM {SALES_TABLE}" in queries[1]
+    assert f"Current selected object ids: table:{SALES_TABLE}" in queries[1]
+    trace = json.loads(
+        (run_paths.traces_dir / "sf_retrieve_expand.json").read_text(encoding="utf-8")
+    )
+    expansion = trace["schema_expansion"]
+    assert expansion["decision"]["source"] == "retrieval"
+    assert expansion["retrieved_objects"][0]["object_id"] == f"table:{ORDERS_TABLE}"
+    assert expansion["selected_additions"][0]["object_id"] == f"table:{ORDERS_TABLE}"
+    assert expansion["added_tables"] == [ORDERS_TABLE]
+    assert expansion["resolver"]["warnings"] == []
+    assert "All available tables" not in prompts["planning"][1]
+    assert "Retrieved logical schema object evidence" in prompts["planning"][1]
+    assert trace["schema_retrieval"]["expansions"][0]["outcome"] == "expanded"
+    assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "schema_expansion"]
+
+
+def test_schema_expansion_recovers_unambiguous_table_from_execution_error(
+    tmp_path: Path,
+    fake_snowflake: None,
+    db_index: dict[str, TableSchema],
+):
+    task = Task(instance_id="sf_exec_expand", db="TEST_DB", question="Show order totals.")
+    run_paths = ensure_run_paths("exec-expand-run", outputs_root=tmp_path)
+    llm = FakeLLMClient(
+        outputs={
+            "planning": [_planning()],
+            "sql_generation_batch": [
+                SQLCandidateBatch(
+                    candidates=[
+                        _candidate(
+                            f"SELECT CUSTOMER, AMOUNT FROM {SALES_TABLE} "
+                            "WHERE CUSTOMER = 'BROKEN_EXEC'"
+                        )
+                    ]
+                ),
+                SQLCandidateBatch(
+                    candidates=[_candidate(f"SELECT ORDER_ID, AMOUNT FROM {ORDERS_TABLE}")]
+                ),
+            ],
+        },
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+        max_attempts=1,
+        semantic_repairs=0,
+    )
+
+    assert answer.status == "success"
+    trace = json.loads((run_paths.traces_dir / "sf_exec_expand.json").read_text(encoding="utf-8"))
+    assert trace["schema_expansion"]["decision"]["source"] == "exact_name"
+    assert trace["schema_expansion"]["added_tables"] == [ORDERS_TABLE]
+
+
+def test_schema_expansion_rejects_hallucinated_retrieval_selection(
+    tmp_path: Path,
+    fake_snowflake: None,
+    db_index: dict[str, TableSchema],
+):
+    task = Task(instance_id="sf_reject_expand", db="TEST_DB", question="Show order totals.")
+    run_paths = ensure_run_paths("reject-expand-run", outputs_root=tmp_path)
+    llm = FakeLLMClient(
+        outputs={
+            "planning": [
+                _planning(),
+                _planning(object_ids=["table:TEST_DB.PUBLIC.DOES_NOT_EXIST"]),
+            ],
+            "sql_generation_batch": [
+                SQLCandidateBatch(
+                    candidates=[_candidate(f"SELECT MISSING_COLUMN FROM {SALES_TABLE}")]
+                ),
+            ],
+        },
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+        max_attempts=1,
+        semantic_repairs=0,
+    )
+
+    assert answer.status == "failed"
+    trace = json.loads((run_paths.traces_dir / "sf_reject_expand.json").read_text(encoding="utf-8"))
+    expansion = trace["schema_expansion"]
+    assert expansion["decision"]["source"] == "retrieval"
+    assert expansion["selected_additions"] == []
+    assert expansion["added_tables"] == []
+    assert expansion["outcome"] == "no_new_tables"
+    assert expansion["planner"]["planner"]["rejected_object_ids"] == [
+        "table:TEST_DB.PUBLIC.DOES_NOT_EXIST"
+    ]

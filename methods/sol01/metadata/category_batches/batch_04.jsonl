@@ -1,0 +1,69 @@
+{"instance_id":"sf_bq077","primary_tier":4,"tags":["aggregation","temporal","group_by"]}
+{"instance_id":"sf_bq350","primary_tier":5,"tags":["filter","join","aggregation"]}
+{"instance_id":"sf_bq379","primary_tier":5,"tags":["aggregation","comparison","ranking"]}
+{"instance_id":"sf_bq078","primary_tier":6,"tags":["filter","ranking","join"]}
+{"instance_id":"sf_bq095","primary_tier":7,"tags":["join","filter","ranking","aggregation"]}
+{"instance_id":"sf_bq109","primary_tier":7,"tags":["aggregation","filter","subquery","ratio"],"difficulty_notes":"Multiple filters feed four summary metrics and a max-row lookup."}
+{"instance_id":"sf_bq325","primary_tier":8,"tags":["subquery","ranking","aggregation"]}
+{"instance_id":"sf_bq090","primary_tier":5,"tags":["aggregation","comparison","filter"]}
+{"instance_id":"sf_bq442","primary_tier":6,"tags":["ranking","document_lookup","aggregation","filter"],"difficulty_notes":"The answer list comes from a referenced document rather than the database alone."}
+{"instance_id":"sf_bq079","primary_tier":9,"tags":["multi_join","aggregation","temporal","comparison"],"difficulty_notes":"Latest evaluation group per state with adjusted acreage across macroplots and subplots."}
+{"instance_id":"sf_bq024","primary_tier":7,"tags":["ranking","aggregation","filter","temporal"]}
+{"instance_id":"sf_bq220","primary_tier":8,"tags":["multi_join","ranking","aggregation","temporal"]}
+{"instance_id":"sf_bq096","primary_tier":6,"tags":["temporal","ranking","filter","aggregation"]}
+{"instance_id":"sf_bq276","primary_tier":9,"tags":["geospatial","join","aggregation","ranking"],"difficulty_notes":"Port, storm, and geometry data all need to line up before counting distinct storms."}
+{"instance_id":"sf_bq277","primary_tier":9,"tags":["geospatial","ranking","join","filter"]}
+{"instance_id":"sf_bq278","primary_tier":8,"tags":["aggregation","multi_join","group_by","comparison"],"difficulty_notes":"Compares solar metrics at both postal-code and census-tract levels."}
+{"instance_id":"sf_bq102","primary_tier":4,"tags":["filter","aggregation","genomics"]}
+{"instance_id":"sf_bq445","primary_tier":7,"tags":["subquery","filter","sorting","genomics"],"difficulty_notes":"Find the BRCA1 span first, then rank missense variants inside that region."}
+{"instance_id":"sf_bq103","primary_tier":4,"tags":["aggregation","filter","genomics","group_by"]}
+{"instance_id":"sf_bq104","primary_tier":6,"tags":["temporal","ranking","filter"]}
+{"instance_id":"sf_bq411","primary_tier":6,"tags":["temporal","ranking","group_by"]}
+{"instance_id":"sf_bq105","primary_tier":8,"tags":["join","aggregation","temporal","ranking"]}
+{"instance_id":"sf_bq108","primary_tier":5,"tags":["aggregation","filter","comparison"],"difficulty_notes":"Percentage over a filtered accident subset."}
+{"instance_id":"sf_bq067","primary_tier":8,"tags":["feature_engineering","filter","aggregation","classification"],"difficulty_notes":"Builds a labeled dataset with derived speed-difference buckets and a fatality label."}
+{"instance_id":"sf_bq396","primary_tier":6,"tags":["comparison","ranking","temporal","aggregation"]}
+{"instance_id":"sf_bq441","primary_tier":6,"tags":["document_lookup","filter","aggregation"],"difficulty_notes":"The source of truth is a reference document for the 2015 crash details."}
+{"instance_id":"sf_bq097","primary_tier":5,"tags":["temporal","comparison","aggregation"]}
+{"instance_id":"sf_bq120","primary_tier":7,"tags":["ranking","join","aggregation","ratio"]}
+{"instance_id":"sf_bq110","primary_tier":5,"tags":["temporal","comparison","aggregation","filter"]}
+{"instance_id":"sf_bq395","primary_tier":7,"tags":["temporal","aggregation","comparison","ranking"],"difficulty_notes":"State-level percentage changes are compared to the national average."}
+{"instance_id":"sf_bq352","primary_tier":5,"tags":["aggregation","filter","join"]}
+{"instance_id":"sf_bq074","primary_tier":5,"tags":["comparison","aggregation","filter","temporal"]}
+{"instance_id":"sf_bq066","primary_tier":8,"tags":["correlation","temporal","aggregation","join"],"difficulty_notes":"Computes a Pearson correlation across yearly birth and census measures."}
+{"instance_id":"sf_bq114","primary_tier":9,"tags":["geospatial","join","comparison","ranking"],"difficulty_notes":"Matches city measurements by rounded coordinates before ranking the differences."}
+{"instance_id":"sf_bq116","primary_tier":6,"tags":["aggregation","filter","ranking","temporal"]}
+{"instance_id":"sf_bq015","primary_tier":8,"tags":["text_processing","join","ranking","aggregation"],"difficulty_notes":"Split Stack Overflow tags after counting Hacker News references."}
+{"instance_id":"sf_bq041","primary_tier":8,"tags":["temporal","aggregation","cohort","ratio"],"difficulty_notes":"Monthly cohorts with chained 30-day follow-up rates."}
+{"instance_id":"sf_bq121","primary_tier":5,"tags":["aggregation","group_by","comparison","temporal"]}
+{"instance_id":"sf_bq123","primary_tier":6,"tags":["temporal","ranking","aggregation"]}
+{"instance_id":"sf_bq280","primary_tier":5,"tags":["ranking","aggregation","filter"]}
+{"instance_id":"sf_bq300","primary_tier":5,"tags":["aggregation","filter","comparison"]}
+{"instance_id":"sf_bq301","primary_tier":7,"tags":["join","filter","ranking","aggregation"]}
+{"instance_id":"sf_bq302","primary_tier":4,"tags":["temporal","aggregation","ratio"]}
+{"instance_id":"sf_bq303","primary_tier":8,"tags":["join","temporal","filter","aggregation"],"difficulty_notes":"Each comment or answer has to be tied back to its parent question tags."}
+{"instance_id":"sf_bq304","primary_tier":8,"tags":["ranking","filter","text_search","group_by"]}
+{"instance_id":"sf_bq310","primary_tier":6,"tags":["ranking","filter","text_search"]}
+{"instance_id":"sf_bq305","primary_tier":9,"tags":["ranking","join","aggregation","filter"],"difficulty_notes":"Association rules for a question can come from several answer paths."}
+{"instance_id":"sf_bq306","primary_tier":8,"tags":["ranking","join","aggregation","filter"]}
+{"instance_id":"sf_bq307","primary_tier":7,"tags":["ranking","aggregation","temporal","join"]}
+{"instance_id":"sf_bq308","primary_tier":6,"tags":["temporal","aggregation","ratio"]}
+{"instance_id":"sf_bq309","primary_tier":8,"tags":["ranking","filter","join","aggregation"]}
+{"instance_id":"sf_bq124","primary_tier":5,"tags":["filter","aggregation","join"]}
+{"instance_id":"sf_bq391","primary_tier":7,"tags":["group_by","ranking","aggregation","filter"]}
+{"instance_id":"sf_bq126","primary_tier":5,"tags":["filter","join","aggregation"]}
+{"instance_id":"sf_bq366","primary_tier":6,"tags":["ranking","aggregation","group_by"]}
+{"instance_id":"sf_bq414","primary_tier":4,"tags":["filter","aggregation","formatting"]}
+{"instance_id":"sf_bq200","primary_tier":8,"tags":["join","ranking","aggregation","filter"]}
+{"instance_id":"sf_bq458","primary_tier":10,"tags":["text_processing","embedding","aggregation","normalization"],"difficulty_notes":"Builds article vectors from weighted word embeddings and normalizes them."}
+{"instance_id":"sf_bq459","primary_tier":10,"tags":["embedding","similarity","ranking","text_processing"],"difficulty_notes":"Same embedding pipeline, then cosine similarity against a query vector."}
+{"instance_id":"sf_bq460","primary_tier":10,"tags":["embedding","similarity","ranking","text_processing"],"difficulty_notes":"Derives article vectors and ranks them by similarity to one reference article."}
+{"instance_id":"sf_bq204","primary_tier":4,"tags":["aggregation","ranking","group_by"]}
+{"instance_id":"sf_bq389","primary_tier":4,"tags":["temporal","aggregation","group_by"]}
+{"instance_id":"sf_bq345","primary_tier":9,"tags":["filter","group_by","geometry","ranking"],"difficulty_notes":"Series size is only valid after excluding linked instances and bad transfer syntaxes."}
+{"instance_id":"sf_bq346","primary_tier":5,"tags":["aggregation","filter","group_by"]}
+{"instance_id":"sf_bq347","primary_tier":7,"tags":["join","aggregation","ranking","filter"]}
+{"instance_id":"sf_bq390","primary_tier":6,"tags":["join","filter","aggregation"]}
+{"instance_id":"sf_bq421","primary_tier":8,"tags":["nested_aggregation","group_by","filter"],"difficulty_notes":"Unnest specimen-prep sequences before counting code-matching pairs."}
+{"instance_id":"sf_bq422","primary_tier":8,"tags":["ranking","aggregation","comparison","temporal"],"difficulty_notes":"Compares two patient cohorts built from different variation metrics."}
+{"instance_id":"sf_bq069","primary_tier":9,"tags":["filter","geometry","aggregation","comparison"],"difficulty_notes":"Geometry checks and exclusion rules gate the final CT series report."}

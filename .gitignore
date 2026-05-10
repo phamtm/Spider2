@@ -28,6 +28,18 @@ methods/spider-agent-snow/examples/*
 !methods/spider-agent-snow/logs/README.md
 !methods/spider-agent-snow/output/README.md
 
+# sol01 generated artifacts
+methods/sol01/outputs/
+methods/sol01/.cache/
+methods/sol01/.venv/
+methods/sol01/.env
+methods/sol01/.pytest_cache/
+methods/sol01/.coverage
+methods/sol01/htmlcov/
+methods/sol01/build/
+methods/sol01/dist/
+methods/sol01/*.egg-info/
+
 spider2-lite/evaluation_suite/*
 spider2-lite/fix_rows.py
 spider2-lite/query_local.py
@@ -122,7 +134,9 @@ spider2-lite/baselines/yyx_tmp/
 
 
 
-# **/snowflake_credential.json
+**/snowflake_credential.json
+**/snowflake_credential.local.json
+!**/snowflake_credential.example.json
 # **/bigquery_credential.json
 # **/bigquery_credential*.json
 
@@ -141,3 +155,9 @@ spider2-lite/resource/databases/spider2-localdb
 credentials/
 **/credentials/
 
+
+# Beads / Dolt files (added by bd init)
+.beads/
+.dolt/
+*.db
+.beads-credential-key

@@ -1,0 +1,69 @@
+{"instance_id":"sf_bq419","primary_tier":6,"tags":["ranking","aggregation","temporal","filter"],"difficulty_notes":"Yearly top-1000 filtering changes the state ranking before the final rollup."}
+{"instance_id":"sf_bq071","primary_tier":8,"tags":["geospatial","join","aggregation","string_agg"],"difficulty_notes":"Boundary containment and sorted hurricane-name lists both need to line up per city and zip."}
+{"instance_id":"sf_bq236","primary_tier":7,"tags":["geospatial","aggregation","ranking","filter"]}
+{"instance_id":"sf_bq356","primary_tier":5,"tags":["filter","aggregation","ratio","temporal"]}
+{"instance_id":"sf_bq042","primary_tier":3,"tags":["filter","aggregation","temporal"]}
+{"instance_id":"sf_bq394","primary_tier":6,"tags":["temporal","aggregation","ranking","comparison"],"difficulty_notes":"The score comes from comparing four monthly averages, not just one metric."}
+{"instance_id":"sf_bq357","primary_tier":6,"tags":["geospatial","aggregation","ranking","filter"]}
+{"instance_id":"sf_bq181","primary_tier":5,"tags":["aggregation","ratio","comparison","filter"]}
+{"instance_id":"sf_bq045","primary_tier":6,"tags":["aggregation","comparison","temporal","ranking"]}
+{"instance_id":"sf_bq358","primary_tier":8,"tags":["geospatial","ranking","aggregation","tie_break"],"difficulty_notes":"Need the best pickup and dropoff zip pair, then break ties by zip order."}
+{"instance_id":"sf_bq290","primary_tier":6,"tags":["temporal","aggregation","comparison","join"]}
+{"instance_id":"sf_bq031","primary_tier":9,"tags":["window","time_series","aggregation","lag"],"difficulty_notes":"Moving averages and lagged differences make this a window-heavy time series task."}
+{"instance_id":"sf_bq392","primary_tier":3,"tags":["ranking","aggregation","temporal"]}
+{"instance_id":"sf_bq050","primary_tier":8,"tags":["geospatial","join","aggregation","temporal"],"difficulty_notes":"Trip-to-neighborhood mapping and weather joins both sit in the main path."}
+{"instance_id":"sf_bq426","primary_tier":7,"tags":["join","aggregation","ranking","temporal"]}
+{"instance_id":"sf_bq291","primary_tier":9,"tags":["geospatial","temporal","forecasting","aggregation"],"difficulty_notes":"Forecast-date filtering and radius-based weather selection both matter."}
+{"instance_id":"sf_bq208","primary_tier":6,"tags":["geospatial","aggregation","filter","count"]}
+{"instance_id":"sf_bq047","primary_tier":9,"tags":["correlation","aggregation","join","temporal"],"difficulty_notes":"Complaint counts are correlated against station temperature series after daily aggregation."}
+{"instance_id":"sf_bq048","primary_tier":9,"tags":["correlation","aggregation","ranking","temporal"]}
+{"instance_id":"sf_bq293","primary_tier":10,"tags":["window","time_series","cross_join","aggregation"],"difficulty_notes":"The complete zip-by-hour grid plus lags and moving averages pushes this into the hardest band."}
+{"instance_id":"sf_bq017","primary_tier":7,"tags":["geospatial","length","aggregation","ranking"]}
+{"instance_id":"sf_bq131","primary_tier":6,"tags":["geospatial","aggregation","ranking"]}
+{"instance_id":"sf_bq349","primary_tier":7,"tags":["geospatial","aggregation","ranking","median"]}
+{"instance_id":"sf_bq007","primary_tier":7,"tags":["aggregation","ranking","join","temporal"]}
+{"instance_id":"sf_bq429","primary_tier":7,"tags":["aggregation","join","comparison","ranking"]}
+{"instance_id":"sf_bq073","primary_tier":6,"tags":["aggregation","join","ranking"]}
+{"instance_id":"sf_bq410","primary_tier":7,"tags":["aggregation","ratio","join","comparison"]}
+{"instance_id":"sf_bq348","primary_tier":8,"tags":["geospatial","historical","ranking","filter"],"difficulty_notes":"The answer depends on historical features that are no longer present in the current layer."}
+{"instance_id":"sf_bq253","primary_tier":8,"tags":["geospatial","ranking","aggregation","filter"]}
+{"instance_id":"sf_bq254","primary_tier":8,"tags":["geospatial","ranking","aggregation","count"]}
+{"instance_id":"sf_bq056","primary_tier":8,"tags":["geospatial","pairwise","intersection","filter"]}
+{"instance_id":"sf_bq289","primary_tier":7,"tags":["geospatial","distance","pairwise","aggregation"]}
+{"instance_id":"sf_bq250","primary_tier":9,"tags":["geospatial","nearest_neighbor","ranking","aggregation"],"difficulty_notes":"Need the farthest grid cell after finding each cell's nearest hospital distance."}
+{"instance_id":"sf_bq083","primary_tier":8,"tags":["blockchain","token_transfer","aggregation","temporal"],"difficulty_notes":"Mint and burn inputs have to be decoded from hex before the daily rollup."}
+{"instance_id":"sf_bq184","primary_tier":8,"tags":["blockchain","cumulative","temporal","aggregation"]}
+{"instance_id":"sf_bq195","primary_tier":8,"tags":["blockchain","balance","ranking","aggregation"]}
+{"instance_id":"sf_bq256","primary_tier":9,"tags":["blockchain","balance","ranking","filter"]}
+{"instance_id":"sf_bq080","primary_tier":7,"tags":["blockchain","cumulative","temporal","aggregation"]}
+{"instance_id":"sf_bq342","primary_tier":8,"tags":["blockchain","time_series","comparison","window"]}
+{"instance_id":"sf_bq341","primary_tier":6,"tags":["blockchain","balance","ranking","filter"]}
+{"instance_id":"sf_bq444","primary_tier":5,"tags":["blockchain","event_log","filter","ordering"]}
+{"instance_id":"sf_bq340","primary_tier":7,"tags":["blockchain","balance","comparison","ranking"]}
+{"instance_id":"sf_bq005","primary_tier":8,"tags":["time_series","self_join","aggregation","temporal"]}
+{"instance_id":"sf_bq334","primary_tier":6,"tags":["bitcoin","aggregation","comparison","annual"]}
+{"instance_id":"sf_bq335","primary_tier":6,"tags":["bitcoin","ranking","group_by","tie_break"]}
+{"instance_id":"sf_bq057","primary_tier":8,"tags":["bitcoin","time_series","ratio","aggregation"]}
+{"instance_id":"sf_bq068","primary_tier":8,"tags":["double_entry","balance","aggregation","group_by"]}
+{"instance_id":"sf_bq092","primary_tier":8,"tags":["double_entry","balance","aggregation","group_by"]}
+{"instance_id":"sf_bq093","primary_tier":9,"tags":["double_entry","balance","fees","aggregation"]}
+{"instance_id":"sf_bq292","primary_tier":8,"tags":["bitcoin","time_series","ratio","aggregation"]}
+{"instance_id":"sf_bq135","primary_tier":3,"tags":["aggregation","ranking","temporal"]}
+{"instance_id":"sf_bq136","primary_tier":9,"tags":["graph","path_sequence","filter","ranking"]}
+{"instance_id":"sf_bq065","primary_tier":7,"tags":["array_unnest","aggregation","ordering","filter"]}
+{"instance_id":"sf_bq037","primary_tier":4,"tags":["aggregation","range","ratio"]}
+{"instance_id":"sf_bq012","primary_tier":8,"tags":["blockchain","balance","ranking","aggregation"]}
+{"instance_id":"sf_bq187","primary_tier":7,"tags":["token_supply","balance","aggregation"]}
+{"instance_id":"sf_bq450","primary_tier":11,"tags":["blockchain","address_profile","multi_metric","aggregation"],"difficulty_notes":"This is a broad per-address profile with many joins and metrics, not just a single balance query."}
+{"instance_id":"sf_bq034","primary_tier":5,"tags":["geospatial","radius","aggregation","filter"]}
+{"instance_id":"sf_bq383","primary_tier":6,"tags":["temporal","aggregation","validation","filter"]}
+{"instance_id":"sf_bq051","primary_tier":6,"tags":["join","aggregation","comparison","temporal"]}
+{"instance_id":"sf_bq038","primary_tier":8,"tags":["self_join","group_detection","ranking","aggregation"]}
+{"instance_id":"sf_bq053","primary_tier":7,"tags":["join","aggregation","comparison","categorization"]}
+{"instance_id":"sf_bq054","primary_tier":7,"tags":["join","aggregation","ranking","comparison"]}
+{"instance_id":"sf_bq021","primary_tier":8,"tags":["join","geospatial","ranking","comparison"]}
+{"instance_id":"sf_bq202","primary_tier":5,"tags":["aggregation","ranking","temporal"]}
+{"instance_id":"sf_bq185","primary_tier":4,"tags":["filter","aggregation","comparison"]}
+{"instance_id":"sf_bq040","primary_tier":6,"tags":["aggregation","comparison","categorization","join"]}
+{"instance_id":"sf_bq098","primary_tier":5,"tags":["aggregation","comparison","filter","categorization"]}
+{"instance_id":"sf_bq039","primary_tier":6,"tags":["filter","aggregation","ranking","fare_metrics"]}
