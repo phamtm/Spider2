@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -37,6 +38,11 @@ from sol01.output.output import (
 from sol01.output.registry import resolve_llm_call_log_path
 from sol01.schema.index import CACHE_PATH, build_index_cache
 from sol01.schema.ollama_provider import OllamaEmbeddingProvider
+from sol01.schema.retrieval_eval import (
+    DEFAULT_GOLD_TABLE_PATH,
+    load_gold_tables,
+    run_retrieval_eval,
+)
 from sol01.schema.retrieval_index import (
     DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT,
     prewarm_retrieval_indexes,
@@ -352,6 +358,89 @@ def prewarm_schema_index_command(
     )
 
 
+@app.command("retrieval-eval")
+def retrieval_eval_command(
+    gold_path: Annotated[
+        Path,
+        typer.Option(
+            "--gold-path",
+            help="Offline JSONL file with instance_id and gold_tables fields.",
+        ),
+    ] = DEFAULT_GOLD_TABLE_PATH,
+    instance_id: Annotated[
+        str | None,
+        typer.Option(help="Evaluate one exact Spider2-snow instance."),
+    ] = None,
+    db: Annotated[
+        str | None,
+        typer.Option(help="Limit evaluation to one database."),
+    ] = None,
+    question_contains: Annotated[
+        str | None,
+        typer.Option(help="Keep tasks whose question contains this text."),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option(min=0, help="Limit how many selected tasks to evaluate."),
+    ] = None,
+    object_cutoff: Annotated[
+        int | None,
+        typer.Option(min=1, help="Override the retrieval object cutoff."),
+    ] = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Print the full evaluation report as JSON."),
+    ] = False,
+    selectors: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help=(
+                "Optional task/category selectors: exact IDs, globs, tier:<n>, tag:<name>, or all."
+            ),
+        ),
+    ] = None,
+) -> None:
+    """Evaluate schema retrieval coverage against offline gold-table labels."""
+
+    report = handle_retrieval_eval(
+        gold_path=gold_path,
+        selectors=selectors or [],
+        instance_id=instance_id,
+        db=db,
+        question_contains=question_contains,
+        limit=limit,
+        object_cutoff=object_cutoff,
+    )
+    if json_output:
+        typer.echo(
+            json.dumps(
+                {
+                    "summary": report.summary(),
+                    "tasks": report.tasks,
+                    "failures": report.failures,
+                },
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return
+
+    typer.echo(f"Evaluated {report.task_count} task(s) at object cutoff {report.object_cutoff}.")
+    typer.echo(f"Pre-resolver any-gold recall: {_format_rate(report.pre_resolver_any_gold_recall)}")
+    typer.echo(
+        f"Post-resolver all-gold recall: {_format_rate(report.post_resolver_all_gold_recall)}"
+    )
+    if report.family_expansion_success is None:
+        typer.echo("Family expansion success: n/a")
+    else:
+        typer.echo(f"Family expansion success: {_format_rate(report.family_expansion_success)}")
+    typer.echo(f"Average prompt reduction: {_format_rate(report.average_prompt_reduction)}")
+    if report.failures:
+        typer.echo("Missing gold tables:")
+        for failure in report.failures[:5]:
+            typer.echo(f"- {failure['instance_id']}: {', '.join(failure['missing_gold_tables'])}")
+
+
 @app.command()
 def ask(
     db: Annotated[
@@ -512,6 +601,45 @@ def handle_analyze(*, run_id: str) -> dict[str, Any]:
     """Run the local trace analyzer for one run."""
 
     return analyze_run(run_id)
+
+
+def handle_retrieval_eval(
+    *,
+    gold_path: Path,
+    selectors: list[str] | None,
+    instance_id: str | None,
+    db: str | None,
+    question_contains: str | None,
+    limit: int | None,
+    object_cutoff: int | None = None,
+) -> Any:
+    """Run offline retrieval evaluation for selected tasks."""
+
+    tasks = _load_run_tasks(
+        selectors=selectors,
+        instance_id=instance_id,
+        db=db,
+        question_contains=question_contains,
+        limit=limit,
+    )
+    gold_tables = load_gold_tables(gold_path)
+    tasks = [task for task in tasks if task.instance_id in gold_tables]
+    if not tasks:
+        raise typer.Exit(code=1)
+
+    config = SchemaRetrievalConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
+    if object_cutoff is not None:
+        config = config.model_copy(update={"object_top_k": object_cutoff})
+    provider = OllamaEmbeddingProvider(
+        model=config.embedding_model,
+        base_url=config.ollama_base_url,
+    )
+    return run_retrieval_eval(
+        tasks,
+        gold_tables_by_instance=gold_tables,
+        config=config,
+        embedding_provider=provider,
+    )
 
 
 def handle_ask(*, db: str, question: str) -> FinalAnswer:
@@ -707,6 +835,12 @@ def _question_preview(question: str, *, max_length: int = 90) -> str:
     if len(normalized) <= max_length:
         return normalized
     return normalized[: max_length - 1].rstrip() + "…"
+
+
+def _format_rate(value: float) -> str:
+    """Render a metric as both percentage and decimal for CLI output."""
+
+    return f"{value:.1%} ({value:.3f})"
 
 
 def _stage_filtered_eval_results(
