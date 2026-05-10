@@ -175,34 +175,6 @@ def _question_preview(question: str, *, max_length: int = 120) -> str:
     return normalized[: max_length - 1].rstrip() + "…"
 
 
-def _planning_user_prompt(
-    task: Task,
-    db: str,
-    docs_context: str,
-    db_schema_summary: str,
-) -> str:
-    """Build the combined schema-selection and intent-extraction prompt."""
-
-    return (
-        f"Question: {task.question}\n\n"
-        f"Database: {db}\n\n"
-        f"Document context:\n{docs_context}\n\n"
-        "Include all tables that are plausibly required to answer the question, "
-        "including join and bridge tables. Omit only tables that are clearly irrelevant.\n\n"
-        "For metric questions, include tables at every grain that may be needed. "
-        "If one table already has the needed grouping keys, time key, filters, and a "
-        "native metric column that is clearly grounded in the answer contract or whose "
-        "semantics unambiguously match the question, that table is the preferred metric "
-        "source; also include lower-grain detail tables when the question may need "
-        "detail-level filters, grouping, output columns, an explicit formula, or when "
-        "no clearly grounded native metric exists.\n\n"
-        "Create the answer contract from the question and document context. Do not invent "
-        "filters, current/latest rules, dedupe rules, status rules, or metric formulas that "
-        "are not grounded.\n\n"
-        f"Schema summary:\n{db_schema_summary}"
-    )
-
-
 def _retrieval_planning_user_prompt(
     task: Task,
     db: str,
@@ -560,25 +532,3 @@ def schema_expansion_trigger(attempt: dict[str, Any]) -> str | None:
             return f"critic_issue: {issue}"
 
     return None
-
-
-def _schema_expansion_prompt(
-    task: Task,
-    attempt: dict[str, Any],
-    trigger: str,
-    schema: SchemaSelection,
-    db_schema_summary: str,
-) -> str:
-    """Build the prompt that asks the LLM which tables to add."""
-
-    return (
-        f"Question: {task.question}\n\n"
-        f"Current selected tables: {', '.join(schema.expanded_tables)}\n\n"
-        f"Evidence that the schema may be incomplete:\n{trigger}\n\n"
-        f"Failed SQL:\n{attempt['sql']}\n\n"
-        f"Validation:\n{json.dumps(attempt['validation'], indent=2, sort_keys=True)}\n\n"
-        f"Execution error: {attempt.get('execution_result', {}).get('error') or 'none'}\n\n"
-        f"All available tables in this database:\n{db_schema_summary}\n\n"
-        "List only tables that genuinely fix the identified gap and exist in the database above. "
-        "If the current schema already covers every table needed, set should_expand=false."
-    )
