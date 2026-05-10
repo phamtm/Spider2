@@ -32,7 +32,10 @@ Each Spider2-Snow task gives the solver:
 ```text
 Spider2-Snow task
   -> load database metadata
-  -> ask the LLM for table selection and question intent in one plan
+  -> retrieve and rerank relevant logical schema objects
+  -> ask the LLM to select from retrieved objects and describe question intent
+  -> resolve selected logical objects to physical Snowflake tables
+  -> render compact schema context for SQL generation
   -> generate several SQL candidates in one batch
   -> validate each SQL candidate
   -> execute valid candidates in Snowflake
@@ -82,8 +85,14 @@ Runtime secrets stay local:
 
 ## Schema Indexing
 
-Before SQL generation, `sol01` builds a compact schema index from the
-Spider2-Snow metadata.
+Before SQL generation, `sol01` builds two local caches from the Spider2-Snow
+metadata.
+
+The base metadata cache is built with:
+
+```bash
+uv run sol01 index
+```
 
 For each table, the index keeps:
 
@@ -91,32 +100,86 @@ For each table, the index keeps:
 - the DDL text
 - column names and types
 - column descriptions
-- sample rows and sample values
+- bounded sample rows and sample values
 
 This index is cached at `methods/sol01/.cache/snow_index.json`.
 
 The solver preserves fully qualified Snowflake table names when they are
 available, because table identity matters during validation and execution.
 
-## Planning
+The retrieval cache is built per database from the base metadata cache. It
+contains canonical schema objects, retrieval chunks, sparse BM25-style postings,
+dense embeddings, and a version manifest:
 
-For each question, the solver gives the LLM the task, document context, and a
-compact summary of every table in the target database. The LLM returns both the
-table set and the answer contract in one structured response.
+```text
+methods/sol01/.cache/schema_retrieval_index/<DB>/
+  current.json
+  versions/<cache_key>/
+    manifest.json
+    objects.jsonl
+    chunks.jsonl
+    sparse.json
+    embeddings.npy
+```
 
-The planner is asked to include:
+Build retrieval indexes before a batch run with either command:
 
-- tables needed for final output
-- tables needed for joins
-- tables needed for filters
-- metric tables at the right grain
+```bash
+uv run sol01 prewarm-schema-index E_COMMERCE
+uv run sol01 run --db E_COMMERCE --prewarm-schema-index
+```
 
-The solver sanitizes the selected tables:
+The retrieval index cache key includes the source schema hash, schema-object
+builder version, chunk renderer version, sparse-index version, embedding model
+metadata, and family similarity threshold. If one of those inputs changes, a
+new version directory is created and `current.json` is updated.
 
-- unknown table names are dropped
-- duplicate tables are dropped
-- unambiguous suffix matches are accepted
-- if no valid table survives, the selection confidence becomes `0`
+## Retrieval-First Planning
+
+The old full-schema planner mode has been removed. `sol01` no longer has an
+`llm_only` or full-schema table-selection path.
+
+That path was removed because large Spider2-Snow databases can have hundreds of
+tables or very wide tables. Passing a database-wide DDL summary into planning
+creates huge prompts, makes table selection noisy, and can bury the few relevant
+columns among irrelevant schema text.
+
+The runtime pipeline is:
+
+```text
+question
+  -> hybrid retrieval over schema chunks
+  -> local reranking
+  -> LLM planner selects retrieved logical objects
+  -> resolver expands logical families to physical tables
+  -> compact schema context is rendered
+  -> SQL generation uses only that compact context
+```
+
+Schema objects are logical, not just physical tables. They include:
+
+- table objects
+- column objects
+- column-group objects for keys, time columns, measures, and repeated prefixes
+- inferred join candidates
+- bounded categorical sample-value objects
+- table-family objects for partitioned or suffixed physical tables
+
+Hybrid retrieval combines sparse lexical scoring, dense embeddings, exact
+literal/code/date matches, and reranking. Linked markdown documents are clipped
+to passages that overlap with the question before retrieval, rather than being
+sent wholesale.
+
+For each question, the planner sees only retrieved object evidence. It returns
+selected object IDs, object roles, constraints, and the answer contract in one
+structured response.
+
+The solver sanitizes the planner output:
+
+- object IDs outside the retrieved candidate set are dropped
+- table names are normalized only when they match retrieved evidence
+- if no valid retrieved schema object survives, confidence is lowered
+- planner diagnostics record ignored or missing selections
 
 The same planning call also returns an answer contract capturing:
 
@@ -133,9 +196,80 @@ This step is important because later stages use the contract to reject SQL that
 quietly adds extra filters, drops grouping keys, uses the wrong metric source,
 or returns the wrong shape.
 
-If a question mentions a value that appears in selected table samples, the
-solver records it as a native column value. This helps avoid turning literal
-database values into invented business rules.
+The resolver turns selected logical objects into the allowed physical table set.
+For table-family objects, explicit date, year, suffix, version, or include-all
+constraints select matching members. Broad range questions can include all
+members. Ambiguous families fall back to a canonical member and record a
+warning. The resolver then renders the compact schema context used by SQL
+generation.
+
+## Sample-Value Policy
+
+Sample values are indexed only when they are bounded, low-cardinality
+categorical evidence. The retrieval index excludes high-cardinality,
+opaque, free-text, and sensitive-looking values because they can create noisy
+retrieval hits, leak irrelevant literals into prompts, and encourage the model
+to treat arbitrary examples as business rules.
+
+Sample-value objects are excluded for:
+
+- key-like columns such as IDs, UUIDs, hashes, and foreign keys
+- temporal columns and date-like values
+- numeric, temporal, and semi-structured column types
+- raw text, description, body, email, URL, JSON, payload, and similar columns
+- values longer than the short label/code threshold
+- columns with too many distinct sample values
+- columns where every sampled value is distinct unless the column name is
+  explicitly categorical
+
+Included sample values are sparse/exact-match evidence by default, not dense
+embedding targets. If a question mentions an included sample value, the solver
+can keep that value tied to its native column instead of converting it into an
+invented rule.
+
+## Ollama Requirements
+
+Schema retrieval runs against local Ollama providers:
+
+- embedding model: `qwen3-embedding:4b`
+- reranker model: `qwen3-reranker:4b` or another local Qwen3-Reranker-4B tag
+  configured with `SOL01_SCHEMA_RERANKER_MODEL`
+
+The reranker must expose usable yes/no `logprobs` or `top_logprobs` from
+Ollama `/api/generate`. If Ollama is down, a model tag is missing, or reranker
+logprobs are unavailable, retrieval fails with an actionable provider error.
+
+Relevant runtime settings:
+
+- `SOL01_OLLAMA_BASE_URL`, default `http://127.0.0.1:11434`
+- `SOL01_SCHEMA_EMBEDDING_MODEL`, default `qwen3-embedding:4b`
+- `SOL01_SCHEMA_RERANKER_MODEL`, default `qwen3-reranker:4b`
+- `SOL01_SCHEMA_CHUNK_TOP_K`, default `80`
+- `SOL01_SCHEMA_RERANK_TOP_K`, default `20`
+- `SOL01_SCHEMA_OBJECT_TOP_K`, default `12`
+- `SOL01_SCHEMA_FAMILY_TOP_K`, default `8`
+- `SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD`, default `0.82`
+- `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
+- `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
+- `SOL01_SCHEMA_RETRIEVAL_VERSION`, default `hybrid_v1`
+
+These can be set in the shell or in `methods/sol01/.env`.
+
+## Retrieval Evaluation
+
+Offline retrieval coverage can be checked with:
+
+```bash
+uv run sol01 retrieval-eval
+uv run sol01 retrieval-eval --db E_COMMERCE --json
+```
+
+The command reports pre-resolver any-gold recall, post-resolver all-gold
+recall, family expansion success, and prompt reduction. By default it reads
+offline labels from `methods/gold-tables/spider2-snow-gold-tables.jsonl`;
+`--gold-path <path>` is only for alternate local label files. Gold tables are
+offline-only labels for measuring retrieval coverage. They are not available to
+runtime planning, SQL generation, repair, or candidate review.
 
 ## SQL Generation
 
@@ -144,9 +278,9 @@ batch call.
 
 Each SQL prompt includes:
 
-- the selected table context
+- the compact resolved schema context
 - DDL and column details
-- sample rows
+- bounded sample rows and categorical sample values
 - linked document text
 - the extracted answer contract
 - guidance about aggregate grain and metric source when available
@@ -271,6 +405,16 @@ The trace contains the full local decision path: schema selection, intent,
 prompt hashes, attempts, scores, candidate review output, final SQL, and final
 execution summary.
 
+Retrieval traces also include:
+
+- `schema_retrieval_version`
+- effective `schema_retrieval_config`
+- retrieval diagnostics for sparse, dense, exact, and rerank stages
+- retrieved object IDs, scores, evidence, and chunk snippets
+- planner sanitization diagnostics
+- resolver entries, allowed tables, and resolver warnings
+- schema expansion retrieval diagnostics when repair expands schema context
+
 ## Official Evaluation
 
 After the solver writes CSVs, it runs the official Spider2-Snow evaluator in
@@ -346,6 +490,7 @@ Useful commands:
 uv run sol01 analyze --run-id <run_id>
 uv run sol01 llm-calls --run-id <run_id> --instance-id <instance_id>
 uv run sol01 llm-calls --run-id <run_id> --instance-id <instance_id> --call-id <call_id>
+uv run sol01 retrieval-eval --limit 20
 just progress
 ```
 
@@ -365,8 +510,13 @@ trace races.
 ## Main Files
 
 - `sol01/tasks.py`: loads and filters Spider2-Snow tasks.
-- `sol01/index.py`: builds the Snowflake schema index.
-- `sol01/retrieval.py`: loads and renders compact schema-index helpers.
+- `sol01/schema/index.py`: builds the Snowflake metadata cache.
+- `sol01/schema/objects.py`: builds canonical logical schema objects.
+- `sol01/schema/chunks.py`: renders retrieval chunks from schema objects.
+- `sol01/schema/retrieval_index.py`: builds versioned sparse and dense retrieval indexes.
+- `sol01/schema/hybrid_retrieval.py`: runs sparse, dense, exact, and rerank retrieval.
+- `sol01/schema/resolver.py`: resolves selected logical objects to physical table context.
+- `sol01/schema/retrieval_eval.py`: evaluates offline retrieval coverage.
 - `sol01/docs.py`: loads linked markdown documents.
 - `sol01/llm/client.py`: runs structured LLM calls and logs raw call data.
 - `sol01/prompt_builders.py`: builds the prompts for each pipeline stage.
