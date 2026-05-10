@@ -535,8 +535,11 @@ def schema_expansion_trigger(attempt: dict[str, Any]) -> str | None:
     """
     validation = attempt.get("validation", {})
     for error in validation.get("errors", []):
-        if "unknown table referenced" in error.lower():
+        error_lower = error.lower()
+        if "unknown table referenced" in error_lower:
             return f"validation_unknown_table: {error}"
+        if "unknown column" in error_lower:
+            return f"validation_unknown_column: {error}"
 
     for warning in validation.get("warnings", []):
         if "no selected table has it" in warning.lower():

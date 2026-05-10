@@ -86,6 +86,8 @@ def fake_snowflake(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_fetch_query_dataframe(sql: str, *, db: str) -> pd.DataFrame:
         if db != "TEST_DB":
             raise AssertionError(f"Unexpected database: {db}")
+        if "BROKEN_EXEC" in sql.upper():
+            raise RuntimeError("Object 'ORDERS' does not exist")
         if "MISSING_COLUMN" in sql.upper():
             raise RuntimeError("invalid identifier 'MISSING_COLUMN'")
         if "COUNT" in sql.upper():
@@ -432,7 +434,7 @@ def test_tiny_aggregate_is_reviewed_by_candidate_review(
     assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "critic_repair"]
 
 
-def test_schema_expansion_uses_deterministic_table_name_and_reuses_intent(
+def test_schema_expansion_uses_exact_table_name_and_reuses_intent(
     tmp_path: Path,
     fake_snowflake: None,
     db_index: dict[str, TableSchema],
@@ -465,7 +467,165 @@ def test_schema_expansion_uses_deterministic_table_name_and_reuses_intent(
 
     assert answer.status == "success"
     trace = json.loads((run_paths.traces_dir / "sf_expand.json").read_text(encoding="utf-8"))
-    assert trace["schema_expansion"]["decision"]["source"] == "deterministic"
-    assert trace["schema_selection"]["expanded_tables"] == [SALES_TABLE, ORDERS_TABLE]
+    assert trace["schema_expansion"]["decision"]["source"] == "exact_name"
+    assert set(trace["schema_selection"]["expanded_tables"]) == {SALES_TABLE, ORDERS_TABLE}
+    assert trace["schema_expansion"]["added_tables"] == [ORDERS_TABLE]
     assert "schema_expansion" not in prompts
     assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "schema_expansion"]
+
+
+def test_schema_expansion_retrieves_candidates_for_missing_column(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fake_snowflake: None,
+    db_index: dict[str, TableSchema],
+):
+    queries: list[str] = []
+
+    def fake_retrieve_schema_objects(index: Any, question: str, **kwargs: Any):
+        queries.append(question)
+        table_name = SALES_TABLE if len(queries) == 1 else ORDERS_TABLE
+        schema_object = next(obj for obj in index.objects if obj.table_name == table_name)
+        return (
+            [RetrievedSchemaObject(schema_object=schema_object, rank=1, score=0.9)],
+            {"query": {"text": question}, "candidate_count": 1},
+        )
+
+    monkeypatch.setattr(
+        "sol01.coordinator.retrieve_schema_objects",
+        fake_retrieve_schema_objects,
+    )
+    task = Task(instance_id="sf_retrieve_expand", db="TEST_DB", question="Show order totals.")
+    run_paths = ensure_run_paths("retrieve-expand-run", outputs_root=tmp_path)
+    prompts: dict[str, list[str]] = {}
+    llm = FakeLLMClient(
+        outputs={
+            "planning": [
+                _planning(),
+                _planning(object_ids=[f"table:{ORDERS_TABLE}"]),
+            ],
+            "sql_generation_batch": [
+                SQLCandidateBatch(
+                    candidates=[_candidate(f"SELECT MISSING_COLUMN FROM {SALES_TABLE}")]
+                ),
+                SQLCandidateBatch(
+                    candidates=[_candidate(f"SELECT ORDER_ID, AMOUNT FROM {ORDERS_TABLE}")]
+                ),
+            ],
+        },
+        prompts=prompts,
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+        max_attempts=1,
+        semantic_repairs=0,
+    )
+
+    assert answer.status == "success"
+    assert len(queries) == 2
+    assert "Original question: Show order totals." in queries[1]
+    assert f"Failed SQL: SELECT MISSING_COLUMN FROM {SALES_TABLE}" in queries[1]
+    assert f"Current selected object ids: table:{SALES_TABLE}" in queries[1]
+    trace = json.loads(
+        (run_paths.traces_dir / "sf_retrieve_expand.json").read_text(encoding="utf-8")
+    )
+    expansion = trace["schema_expansion"]
+    assert expansion["decision"]["source"] == "retrieval"
+    assert expansion["retrieved_objects"][0]["object_id"] == f"table:{ORDERS_TABLE}"
+    assert expansion["selected_additions"][0]["object_id"] == f"table:{ORDERS_TABLE}"
+    assert expansion["added_tables"] == [ORDERS_TABLE]
+    assert expansion["resolver"]["warnings"] == []
+    assert "All available tables" not in prompts["planning"][1]
+    assert "Retrieved logical schema object evidence" in prompts["planning"][1]
+    assert trace["schema_retrieval"]["expansions"][0]["outcome"] == "expanded"
+    assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "schema_expansion"]
+
+
+def test_schema_expansion_recovers_unambiguous_table_from_execution_error(
+    tmp_path: Path,
+    fake_snowflake: None,
+    db_index: dict[str, TableSchema],
+):
+    task = Task(instance_id="sf_exec_expand", db="TEST_DB", question="Show order totals.")
+    run_paths = ensure_run_paths("exec-expand-run", outputs_root=tmp_path)
+    llm = FakeLLMClient(
+        outputs={
+            "planning": [_planning()],
+            "sql_generation_batch": [
+                SQLCandidateBatch(
+                    candidates=[
+                        _candidate(
+                            f"SELECT CUSTOMER, AMOUNT FROM {SALES_TABLE} "
+                            "WHERE CUSTOMER = 'BROKEN_EXEC'"
+                        )
+                    ]
+                ),
+                SQLCandidateBatch(
+                    candidates=[_candidate(f"SELECT ORDER_ID, AMOUNT FROM {ORDERS_TABLE}")]
+                ),
+            ],
+        },
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+        max_attempts=1,
+        semantic_repairs=0,
+    )
+
+    assert answer.status == "success"
+    trace = json.loads((run_paths.traces_dir / "sf_exec_expand.json").read_text(encoding="utf-8"))
+    assert trace["schema_expansion"]["decision"]["source"] == "exact_name"
+    assert trace["schema_expansion"]["added_tables"] == [ORDERS_TABLE]
+
+
+def test_schema_expansion_rejects_hallucinated_retrieval_selection(
+    tmp_path: Path,
+    fake_snowflake: None,
+    db_index: dict[str, TableSchema],
+):
+    task = Task(instance_id="sf_reject_expand", db="TEST_DB", question="Show order totals.")
+    run_paths = ensure_run_paths("reject-expand-run", outputs_root=tmp_path)
+    llm = FakeLLMClient(
+        outputs={
+            "planning": [
+                _planning(),
+                _planning(object_ids=["table:TEST_DB.PUBLIC.DOES_NOT_EXIST"]),
+            ],
+            "sql_generation_batch": [
+                SQLCandidateBatch(
+                    candidates=[_candidate(f"SELECT MISSING_COLUMN FROM {SALES_TABLE}")]
+                ),
+            ],
+        },
+    )
+
+    answer = run_task(
+        task,
+        run_paths=run_paths,
+        config=RuntimeConfig(api_key="test-key"),
+        llm_client=llm,
+        initial_candidates=1,
+        max_attempts=1,
+        semantic_repairs=0,
+    )
+
+    assert answer.status == "failed"
+    trace = json.loads((run_paths.traces_dir / "sf_reject_expand.json").read_text(encoding="utf-8"))
+    expansion = trace["schema_expansion"]
+    assert expansion["decision"]["source"] == "retrieval"
+    assert expansion["selected_additions"] == []
+    assert expansion["added_tables"] == []
+    assert expansion["outcome"] == "no_new_tables"
+    assert expansion["planner"]["planner"]["rejected_object_ids"] == [
+        "table:TEST_DB.PUBLIC.DOES_NOT_EXIST"
+    ]
