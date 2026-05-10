@@ -14,10 +14,12 @@ from sol01.infra.config import (
     DEFAULT_SCHEMA_EMBEDDING_MODEL,
     DEFAULT_SCHEMA_RERANKER_MODEL,
 )
+from sol01.infra.logging import get_logger
 from sol01.schema.embedding import SchemaProviderError, normalize_vector
 
 EMBED_ENDPOINT = "/api/embed"
 GENERATE_ENDPOINT = "/api/generate"
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -103,10 +105,28 @@ class OllamaEmbeddingProvider:
         """Embed texts in batches and return unit-normalized vectors."""
 
         embeddings: list[list[float]] = []
-        for start in range(0, len(texts), self.batch_size):
+        total_texts = len(texts)
+        if total_texts:
+            logger.info(
+                "ollama embedding start",
+                model=self.model,
+                text_count=total_texts,
+                batch_size=self.batch_size,
+            )
+        total_batches = math.ceil(total_texts / self.batch_size) if total_texts else 0
+        for start in range(0, total_texts, self.batch_size):
             batch = list(texts[start : start + self.batch_size])
             if not batch:
                 continue
+            batch_number = start // self.batch_size + 1
+            logger.info(
+                "ollama embedding batch start",
+                model=self.model,
+                batch_number=batch_number,
+                batch_count=total_batches,
+                batch_size=len(batch),
+                text_count=total_texts,
+            )
             response = _post_or_raise(
                 self.transport,
                 EMBED_ENDPOINT,
@@ -122,6 +142,21 @@ class OllamaEmbeddingProvider:
                     f"Ollama embedding endpoint {EMBED_ENDPOINT} with model {self.model} "
                     "returned an unusable embedding vector"
                 ) from exc
+            logger.info(
+                "ollama embedding batch complete",
+                model=self.model,
+                batch_number=batch_number,
+                batch_count=total_batches,
+                embedded_count=len(embeddings),
+                text_count=total_texts,
+            )
+        if total_texts:
+            logger.info(
+                "ollama embedding complete",
+                model=self.model,
+                text_count=total_texts,
+                embedding_count=len(embeddings),
+            )
         return embeddings
 
 

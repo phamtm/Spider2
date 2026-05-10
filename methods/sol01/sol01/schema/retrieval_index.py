@@ -19,6 +19,7 @@ from uuid import uuid4
 import numpy as np
 
 from sol01.infra.config import SchemaRetrievalConfig
+from sol01.infra.logging import get_logger
 from sol01.infra.paths import REPO_ROOT
 from sol01.models import RetrievalChunk, SchemaObject, TableSchema
 from sol01.schema.chunks import render_schema_chunks
@@ -37,6 +38,7 @@ DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT = (
 DEFAULT_LOCK_TIMEOUT_SECONDS = 60.0
 DEFAULT_LOCK_POLL_SECONDS = 0.1
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
+logger = get_logger(__name__)
 
 
 class RetrievalIndexError(RuntimeError):
@@ -76,6 +78,7 @@ def build_retrieval_index(
 ) -> SchemaRetrievalIndex:
     """Build or load the versioned retrieval index for one database."""
 
+    started_at = time.perf_counter()
     config = config or SchemaRetrievalConfig()
     db_index = dict(db_index) if db_index is not None else _load_db_index(db)
     source_hash = schema_source_hash(db_index)
@@ -102,6 +105,15 @@ def build_retrieval_index(
     version_dir = _version_dir(cache_root, db, cache_key)
     current_path = _current_pointer_path(cache_root, db)
     lock_path = _build_lock_path(cache_root, db)
+    logger.info(
+        "schema retrieval index start",
+        db=db,
+        table_count=len(db_index),
+        object_count=len(objects),
+        chunk_count=len(chunks),
+        embedding_model=config.embedding_model,
+        cache_key=cache_key,
+    )
 
     existing = _load_valid_index(
         db=db,
@@ -111,8 +123,16 @@ def build_retrieval_index(
     )
     if existing is not None:
         _write_current_pointer(current_path, db=db, cache_key=cache_key, cache_dir=version_dir)
+        logger.info(
+            "schema retrieval index cache hit",
+            db=db,
+            cache_key=cache_key,
+            cache_dir=str(version_dir),
+            elapsed_seconds=round(time.perf_counter() - started_at, 3),
+        )
         return existing
 
+    logger.info("schema retrieval index lock wait", db=db, cache_key=cache_key)
     lock_token = _acquire_build_lock_or_wait(
         lock_path,
         db=db,
@@ -131,6 +151,13 @@ def build_retrieval_index(
             expected_source_hash=source_hash,
         )
         if loaded is not None:
+            logger.info(
+                "schema retrieval index loaded after wait",
+                db=db,
+                cache_key=cache_key,
+                cache_dir=str(version_dir),
+                elapsed_seconds=round(time.perf_counter() - started_at, 3),
+            )
             return loaded
         loaded = _load_current_if_matching(
             db=db,
@@ -139,12 +166,20 @@ def build_retrieval_index(
             expected_source_hash=source_hash,
         )
         if loaded is not None:
+            logger.info(
+                "schema retrieval index current loaded after wait",
+                db=db,
+                cache_key=cache_key,
+                cache_dir=str(loaded.cache_dir),
+                elapsed_seconds=round(time.perf_counter() - started_at, 3),
+            )
             return loaded
         raise RetrievalIndexLockTimeout(
             f"timed out waiting for retrieval index build lock for {db}"
         )
 
     try:
+        logger.info("schema retrieval index build start", db=db, cache_key=cache_key)
         existing = _load_valid_index(
             db=db,
             cache_key=cache_key,
@@ -153,6 +188,13 @@ def build_retrieval_index(
         )
         if existing is not None:
             _write_current_pointer(current_path, db=db, cache_key=cache_key, cache_dir=version_dir)
+            logger.info(
+                "schema retrieval index cache hit after lock",
+                db=db,
+                cache_key=cache_key,
+                cache_dir=str(version_dir),
+                elapsed_seconds=round(time.perf_counter() - started_at, 3),
+            )
             return existing
 
         if version_dir.exists():
@@ -200,6 +242,13 @@ def build_retrieval_index(
                     cache_key=cache_key,
                     cache_dir=version_dir,
                 )
+                logger.info(
+                    "schema retrieval index loaded existing published version",
+                    db=db,
+                    cache_key=cache_key,
+                    cache_dir=str(version_dir),
+                    elapsed_seconds=round(time.perf_counter() - started_at, 3),
+                )
                 return loaded
         except BaseException:
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -214,6 +263,15 @@ def build_retrieval_index(
         )
         if loaded is None:
             raise RetrievalIndexError("published retrieval index failed validation")
+        logger.info(
+            "schema retrieval index published",
+            db=db,
+            cache_key=cache_key,
+            cache_dir=str(version_dir),
+            object_count=len(objects),
+            chunk_count=len(chunks),
+            elapsed_seconds=round(time.perf_counter() - started_at, 3),
+        )
         return loaded
     finally:
         _release_build_lock(lock_path, lock_token)
@@ -247,7 +305,9 @@ def prewarm_retrieval_indexes(
     """Build retrieval indexes for unique databases before worker threads start."""
 
     unique_dbs = sorted({db.strip() for db in dbs if db.strip()})
-    return [
+    logger.info("schema retrieval prewarm start", database_count=len(unique_dbs), dbs=unique_dbs)
+    started_at = time.perf_counter()
+    indexes = [
         build_retrieval_index(
             db,
             embedding_provider=embedding_provider,
@@ -256,6 +316,12 @@ def prewarm_retrieval_indexes(
         )
         for db in unique_dbs
     ]
+    logger.info(
+        "schema retrieval prewarm complete",
+        database_count=len(indexes),
+        elapsed_seconds=round(time.perf_counter() - started_at, 3),
+    )
+    return indexes
 
 
 def schema_source_hash(db_index: Mapping[str, TableSchema]) -> str:
@@ -312,8 +378,25 @@ def _write_index_artifacts(
     """Write one complete version directory before it is published."""
 
     cache_dir.mkdir(parents=True, exist_ok=True)
+    logger.info("schema retrieval sparse index start", db=db, cache_key=cache_key)
     sparse = _build_sparse_index(chunks)
+    dense_count = sum(
+        1 for chunk in chunks if chunk.include_dense_embedding and chunk.embedding_text.strip()
+    )
+    logger.info(
+        "schema retrieval embeddings start",
+        db=db,
+        cache_key=cache_key,
+        dense_text_count=dense_count,
+        chunk_count=len(chunks),
+    )
     embeddings = _build_embedding_matrix(chunks, embedding_provider)
+    logger.info(
+        "schema retrieval embeddings complete",
+        db=db,
+        cache_key=cache_key,
+        embedding_shape=list(embeddings.shape),
+    )
     manifest = {
         "manifest_version": MANIFEST_VERSION,
         "db": db,
@@ -335,6 +418,14 @@ def _write_index_artifacts(
     _write_json(cache_dir / "sparse.json", sparse)
     np.save(cache_dir / "embeddings.npy", embeddings)
     _write_json(cache_dir / "manifest.json", manifest)
+    logger.info(
+        "schema retrieval artifacts written",
+        db=db,
+        cache_key=cache_key,
+        cache_dir=str(cache_dir),
+        object_count=len(objects),
+        chunk_count=len(chunks),
+    )
 
 
 def _build_sparse_index(chunks: Sequence[RetrievalChunk]) -> dict[str, Any]:
