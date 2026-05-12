@@ -15,6 +15,7 @@ from sol01.models import (
     SelectedSchemaObject,
     TableSchema,
 )
+from sol01.schema.reference_context import render_table_reference
 
 MAX_FAMILY_MEMBERS_IN_PROMPT = 16
 MAX_VARIANT_COLUMNS_IN_PROMPT = 12
@@ -360,17 +361,7 @@ def _render_family(
 def _render_table(table: TableSchema, *, header: str | None = None) -> list[str]:
     """Render one table schema for SQL generation."""
 
-    table_name = table.full_name or table.name
-    lines = [f"{header or 'Table'}: {table_name}"]
-    if table.ddl.strip():
-        lines.extend(["DDL:", "```sql", table.ddl.strip(), "```"])
-    elif table.columns:
-        lines.append("Columns:")
-        lines.extend(_bullet_lines(_column_line(column) for column in table.columns))
-    if table.sample_rows:
-        row_count = min(len(table.sample_rows), 3)
-        lines.append(f"Sample rows available: {row_count} shown by upstream table context.")
-    return lines
+    return render_table_reference(table, header=header)
 
 
 def _retrieval_evidence_lines(retrieval_evidence: Sequence[RetrievedSchemaObject]) -> list[str]:
@@ -522,17 +513,6 @@ def _suffix_dimension_lines(raw_dimensions: object) -> list[str]:
         if kind:
             lines.append(f"{kind}: values={', '.join(values)} raw={', '.join(raw_values)}")
     return lines
-
-
-def _column_line(column: Any) -> str:
-    line = str(column.name)
-    if column.type:
-        line += f" [{column.type}]"
-    if column.description:
-        line += f" - {column.description}"
-    if column.sample_values:
-        line += f" - sample values: {', '.join(column.sample_values[:3])}"
-    return line
 
 
 def _bullet_lines(values: Iterable[str]) -> list[str]:

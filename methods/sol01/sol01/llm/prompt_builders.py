@@ -17,6 +17,7 @@ from sol01.models import (
     TableSchema,
     Task,
 )
+from sol01.schema.reference_context import render_sql_reference_context
 
 # Execution error substrings that suggest a missing table in the schema.
 _EXEC_TABLE_MISSING_SUBSTRINGS = (
@@ -119,51 +120,11 @@ def _sql_reference_context(
 ) -> str:
     """Render deterministic selected-table context for cache-friendly SQL prompts."""
 
-    lines = [
-        "SQL reference context:",
-        f"Database: {schema.db}",
-        "Selected tables:",
-    ]
-    for table_name in sorted(schema.expanded_tables):
-        lines.append(f"- {table_name}")
-
-    if not table_schemas:
-        return "\n".join(lines)
-
-    lines.append("")
-    lines.append("Selected table details:")
-    for table_name in sorted(table_schemas):
-        table = table_schemas[table_name]
-        lines.append(f"Table: {table.full_name or table_name}")
-        if table.ddl.strip():
-            lines.append("DDL:")
-            lines.append("```sql")
-            lines.append(table.ddl.strip())
-            lines.append("```")
-        if table.columns:
-            lines.append("Columns:")
-            for column in table.columns:
-                lines.append(f"- {_column_context_line(column)}")
-        if table.sample_rows:
-            lines.append("Sample rows:")
-            for row in table.sample_rows[:3]:
-                lines.append(json.dumps(row, sort_keys=True))
-        lines.append("")
-    return "\n".join(lines).rstrip()
-
-
-def _column_context_line(column: Any) -> str:
-    """Render one compact column line with exact name, type, docs, and samples."""
-
-    line = column.name
-    if column.type:
-        line += f" [{column.type}]"
-    if column.description:
-        line += f" - {column.description}"
-    if column.sample_values:
-        preview = ", ".join(column.sample_values[:3])
-        line += f" - sample values: {preview}"
-    return line
+    return render_sql_reference_context(
+        db=schema.db,
+        expanded_tables=schema.expanded_tables,
+        table_schemas=table_schemas,
+    )
 
 
 def _question_preview(question: str, *, max_length: int = 120) -> str:

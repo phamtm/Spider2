@@ -183,6 +183,61 @@ def test_validation_accepts_non_canonical_family_member_from_resolved_allowed_ta
     assert report.referenced_tables == ["DB.PUBLIC.SALES_2024"]
 
 
+def test_resolver_renders_large_schema_summary_without_raw_table_metadata():
+    table_name = "COVID19_USA.COVID19_USAFACTS.CONFIRMED_CASES"
+    index = {
+        table_name: TableSchema(
+            name="CONFIRMED_CASES",
+            database_name="COVID19_USA",
+            schema_name="COVID19_USAFACTS",
+            full_name=table_name,
+            ddl="CREATE TABLE CONFIRMED_CASES (SECRET_DDL_MARKER TEXT);",
+            columns=[
+                ColumnSchema(name="state", type="TEXT"),
+                ColumnSchema(name="county_name", type="TEXT"),
+                ColumnSchema(name="_2020_01_01", type="NUMBER"),
+            ],
+            sample_rows=[{"SECRET_SAMPLE_MARKER": "hidden"}],
+            searchable_text="covid confirmed cases",
+        )
+    }
+    table = _object(index, "table")
+
+    context = resolve_schema_context(
+        db="COVID19_USA",
+        selected_objects=[SelectedSchemaObject(object_id=table.object_id, role="primary")],
+        canonical_schema_objects=build_schema_objects(index),
+        db_index=index,
+        question="Show confirmed cases by county.",
+    )
+
+    assert context.allowed_tables == [table_name]
+    assert "Large-schema summary: covid19_usafacts_wide_daily_counts" in context.prompt_context
+    assert "CONFIRMED_CASES and DEATHS repeat daily count columns named _YYYY_MM_DD" in (
+        context.prompt_context
+    )
+    assert "Wide date columns begin with an underscore and must be quoted" in (
+        context.prompt_context
+    )
+    assert "CREATE TABLE" not in context.prompt_context
+    assert "SECRET_DDL_MARKER" not in context.prompt_context
+    assert "SECRET_SAMPLE_MARKER" not in context.prompt_context
+
+    valid = validate_sql(
+        f'SELECT "state" FROM {table_name}',
+        allowed_tables=context.allowed_tables,
+        table_schemas=context.table_schemas,
+    )
+    invented = validate_sql(
+        f"SELECT invented_column FROM {table_name}",
+        allowed_tables=context.allowed_tables,
+        table_schemas=context.table_schemas,
+    )
+
+    assert valid.ok is True
+    assert invented.ok is False
+
+
 def _resolve_family(
     index: dict[str, TableSchema],
     *,

@@ -2,9 +2,12 @@
 
 from sol01.llm.prompt_builders import (
     _retrieval_planning_user_prompt,
+    _sql_reference_context,
+    _sql_repair_prompt,
     sanitize_hybrid_planning_decision,
 )
 from sol01.models import (
+    ColumnSchema,
     HybridPlanningConstraints,
     HybridPlanningDecision,
     Intent,
@@ -12,7 +15,9 @@ from sol01.models import (
     RetrievedChunk,
     RetrievedSchemaObject,
     SchemaObject,
+    SchemaSelection,
     SelectedSchemaObject,
+    TableSchema,
     Task,
 )
 
@@ -111,6 +116,54 @@ def test_sanitize_hybrid_planning_sets_zero_confidence_when_nothing_valid_remain
     assert sanitized.confidence == 0.0
     assert diagnostics["selected_object_count"] == 0
     assert "No valid retrieved schema objects" in sanitized.rationale
+
+
+def test_sql_reference_and_repair_prompts_use_large_schema_summary_context():
+    table_name = "COVID19_USA.COVID19_USAFACTS.CONFIRMED_CASES"
+    table_schemas = {
+        table_name: TableSchema(
+            name="CONFIRMED_CASES",
+            database_name="COVID19_USA",
+            schema_name="COVID19_USAFACTS",
+            full_name=table_name,
+            ddl="CREATE TABLE CONFIRMED_CASES (SECRET_DDL_MARKER TEXT);",
+            columns=[ColumnSchema(name="state", type="TEXT")],
+            sample_rows=[{"SECRET_SAMPLE_MARKER": "hidden"}],
+            searchable_text="covid confirmed cases",
+        )
+    }
+    schema = SchemaSelection(
+        db="COVID19_USA",
+        selected_object_ids=[f"table:{table_name}"],
+        selected_tables=[table_name],
+        expanded_tables=[table_name],
+        allowed_tables=[table_name],
+        rationale="selected covered table",
+        confidence=0.9,
+    )
+
+    reference_context = _sql_reference_context(schema, table_schemas)
+    repair_prompt = _sql_repair_prompt(
+        Task(instance_id="sf_bq_test", db="COVID19_USA", question="Show confirmed cases."),
+        _intent(),
+        {
+            "sql": f"SELECT state FROM {table_name}",
+            "validation": {"ok": False, "errors": ["unknown column: bad_column"]},
+            "execution_result": {"ok": False, "error": "unknown column"},
+        },
+        reference_context,
+        "Confirmed cases are county-level.",
+    )
+
+    assert "Large-schema summary: covid19_usafacts_wide_daily_counts" in reference_context
+    assert "CONFIRMED_CASES" in reference_context
+    assert "CREATE TABLE" not in reference_context
+    assert "SECRET_DDL_MARKER" not in reference_context
+    assert "SECRET_SAMPLE_MARKER" not in reference_context
+    assert "unknown column: bad_column" in repair_prompt
+    assert "Large-schema summary: covid19_usafacts_wide_daily_counts" in repair_prompt
+    assert "CREATE TABLE" not in repair_prompt
+    assert "SECRET_DDL_MARKER" not in repair_prompt
 
 
 def _intent() -> Intent:
