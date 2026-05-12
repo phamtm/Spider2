@@ -1,9 +1,10 @@
 # Retrieval Schema Selection Verification
 
-Last verified: 2026-05-10.
+Last verified: 2026-05-13.
 
 This note records the final verification for the retrieval-first schema
-selection work tracked by `sp-tvm.14`.
+selection work tracked by `sp-tvm.14` and the lexical summary retrieval cleanup
+tracked by `sp-4rb.10`.
 
 ## Code Audit
 
@@ -11,6 +12,8 @@ selection work tracked by `sp-tvm.14`.
   versioned retrieval index, retrieves schema objects, calls
   `_retrieval_planning_user_prompt()`, sanitizes selected object IDs, and
   resolves selected logical objects to physical tables.
+- Schema retrieval is local lexical/exact matching over persisted schema
+  chunks, with no separate model-backed retrieval service.
 - The legacy full-schema planning and schema-expansion prompt builders were
   removed from `sol01/llm/prompt_builders.py`.
 - Remaining `db_schema_summary` usage is limited to offline retrieval-eval
@@ -19,6 +22,10 @@ selection work tracked by `sp-tvm.14`.
 - Runtime code imports offline gold-table labels only through the
   `retrieval-eval` CLI path. The coordinator, planner, SQL generation, repair,
   and candidate review paths do not import or load gold-table data.
+- Curated large-schema summaries live in
+  `methods/sol01/metadata/large_schema_summaries.json`. Edits are validated by
+  `sol01/schema/large_schema_summaries.py`, and the summary registry hash is
+  part of the retrieval cache key.
 
 ## Focused Tests
 
@@ -34,7 +41,8 @@ Result: `48 passed`.
 These tests cover retrieval-scoped planning prompts, planner sanitization,
 trace `schema_retrieval_version` and `schema_retrieval` diagnostics, retrieval
 schema expansion, offline retrieval-eval accounting, resolver expansion,
-lexical retrieval, retrieval index caching, schema objects, and chunk rendering.
+lexical retrieval, large-schema summaries, retrieval index caching, schema
+objects, and chunk rendering.
 
 ## Full Quality Gates
 
@@ -46,9 +54,23 @@ uv run ruff format --check .
 
 Results:
 
-- `260 passed`
+- `just check`: passed on 2026-05-13
 - `ruff check`: passed
-- `ruff format --check`: passed after formatting `sol01/llm/prompt_builders.py`
+- `ruff format`: passed
+- `pytest tests -q`: passed
+
+## Prompt Budget And Hallucinated Columns
+
+Prompt budget diagnostics are recorded in each task trace under
+`schema_retrieval.prompt_budget`. The diagnostics include planning and resolved
+context character counts and whether each value stayed within
+`SOL01_SCHEMA_MAX_PROMPT_CHARS`.
+
+`uv run sol01 retrieval-eval --output-id <id>` persists prompt-reduction and
+prompt-size-win reporting under `outputs/<id>/retrieval_eval/`. Add
+`--trace-run-id <run_id>` to scan saved solver traces for hallucinated-column
+validation failures. Runtime validation blocks unknown columns before
+Snowflake execution when selected schema context is specific enough.
 
 ## Retrieval-Eval Smoke
 

@@ -76,11 +76,12 @@ just gold sf_bq320
 task workers start. `uv run sol01 prewarm-schema-index <DB>...` builds the same
 cache artifacts without running solver tasks.
 
-`sol01 retrieval-eval` measures schema-retrieval coverage against the offline
-gold-table JSONL file at `methods/gold-tables/spider2-snow-gold-tables.jsonl`
-by default. Use `--gold-path <path>` only when evaluating another local label
-file. Gold tables are evaluation labels only; runtime planning, SQL generation,
-repair, and candidate review do not receive gold tables.
+`sol01 retrieval-eval` measures lexical/exact schema-retrieval coverage against
+the offline gold-table JSONL file at
+`methods/gold-tables/spider2-snow-gold-tables.jsonl` by default. Use
+`--gold-path <path>` only when evaluating another local label file. Gold tables
+are evaluation labels only; runtime planning, SQL generation, repair, and
+candidate review do not receive gold tables.
 Use `--covered-only` to limit the report to gold tables covered by curated
 large-schema summaries. `--baseline-path <report.json|tasks.jsonl>` compares
 recall to a previous report, `--trace-run-id <run_id>` scans saved traces for
@@ -135,12 +136,14 @@ The local registry lives in `methods/sol01/outputs/registry/` with:
 ## Schema Retrieval
 
 `sol01` uses retrieval-first schema selection. The old `llm_only` and
-full-schema planner modes no longer exist.
+full-schema planner modes no longer exist. Schema retrieval is local
+lexical/exact matching over persisted schema chunks, with no separate
+model-backed retrieval service.
 
 The runtime path is:
 
 ```text
-question -> lexical retrieval -> planner object selection
+question -> lexical/exact retrieval -> planner object selection
   -> resolver expansion -> compact schema context -> SQL generation
 ```
 
@@ -156,6 +159,23 @@ Cache layout:
   the active retrieval index version
 - `methods/sol01/.cache/schema_retrieval_index/<DB>/versions/<cache_key>/`:
   `manifest.json`, `objects.jsonl`, `chunks.jsonl`, and `sparse.json`
+
+Large-schema summaries live in
+`methods/sol01/metadata/large_schema_summaries.json`. Add or edit one summary
+when a schema has repeated table families or very wide repeated column groups
+that should be represented compactly. Each summary must define:
+
+- `summary_id`: lower_snake_case stable ID
+- `schema_copies`: database/schema locations covered by the same shape
+- `match`: exact `table_names` or a regex `table_pattern`, optionally with an
+  inclusive suffix range
+- `purpose`, `grain`, stable columns, repeated-column rules, quoting rules,
+  examples, and aliases
+
+Do not include benchmark answers, gold SQL, instance IDs, or question-specific
+hints. Registry validation rejects those tokens, and the retrieval cache key
+includes the summary registry hash, so summary edits naturally create a new
+cache version.
 
 Runtime config can be set in the shell or `methods/sol01/.env`:
 
@@ -176,6 +196,19 @@ Each task trace records `schema_retrieval_version`, effective retrieval config,
 retrieved object evidence, sparse/exact diagnostics, planner
 sanitization diagnostics, resolver entries, allowed tables, and schema
 expansion diagnostics when repair adds schema context.
+
+To verify prompt size, inspect `schema_retrieval.prompt_budget` in
+`traces/<instance_id>.json`, or run:
+
+```bash
+uv run sol01 retrieval-eval --db <DB> --limit <n> --output-id <id>
+```
+
+The persisted report under `outputs/<id>/retrieval_eval/` includes prompt
+reduction and prompt-size wins. Add `--trace-run-id <run_id>` to scan existing
+solver traces for hallucinated-column validation failures. Runtime validation
+also blocks SQL that references unknown columns when selected schema context is
+specific enough, so those failures are caught before Snowflake execution.
 
 ## Statuses
 

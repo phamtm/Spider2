@@ -108,8 +108,8 @@ The solver preserves fully qualified Snowflake table names when they are
 available, because table identity matters during validation and execution.
 
 The retrieval cache is built per database from the base metadata cache. It
-contains canonical schema objects, retrieval chunks, sparse BM25-style postings,
-and a version manifest:
+contains canonical schema objects, retrieval chunks, local lexical postings, and
+a version manifest:
 
 ```text
 methods/sol01/.cache/schema_retrieval_index/<DB>/
@@ -136,7 +136,9 @@ is created and `current.json` is updated.
 ## Retrieval-First Planning
 
 The old full-schema planner mode has been removed. `sol01` no longer has an
-`llm_only` or full-schema table-selection path.
+`llm_only` or full-schema table-selection path. Runtime schema retrieval is
+local lexical/exact matching over persisted schema chunks, with no separate
+model-backed retrieval service.
 
 That path was removed because large Spider2-Snow databases can have hundreds of
 tables or very wide tables. Passing a database-wide DDL summary into planning
@@ -147,7 +149,7 @@ The runtime pipeline is:
 
 ```text
 question
-  -> lexical retrieval over schema chunks
+  -> lexical/exact retrieval over schema chunks
   -> LLM planner selects retrieved logical objects
   -> resolver expands logical families to physical tables
   -> compact schema context is rendered
@@ -163,7 +165,7 @@ Schema objects are logical, not just physical tables. They include:
 - bounded categorical sample-value objects
 - table-family objects for partitioned or suffixed physical tables
 
-Lexical retrieval combines sparse scoring with exact literal, code, and date
+Lexical retrieval combines local term scoring with exact literal, code, and date
 matches. Linked markdown documents are clipped to passages that overlap with
 the question before retrieval, rather than being sent wholesale.
 
@@ -223,6 +225,29 @@ Included sample values are sparse/exact-match evidence. If a question mentions
 an included sample value, the solver can keep that value tied to its native
 column instead of converting it into an invented rule.
 
+## Curated Large-Schema Summaries
+
+Curated summaries live in
+`methods/sol01/metadata/large_schema_summaries.json`. They compact repeated
+table families and wide repeated column groups before retrieval chunks are
+rendered.
+
+Add or edit a summary when a schema family has a stable shape that should be
+retrieved as one logical object. Each entry defines:
+
+- `summary_id`: lower_snake_case stable ID
+- `schema_copies`: database/schema locations covered by the same shape
+- `match`: either exact `table_names` or a regex `table_pattern`, optionally
+  with an inclusive suffix range
+- `purpose` and `grain`
+- stable columns, repeated-column rules, inclusive ranges, quoting rules,
+  examples, and aliases
+
+Summaries must describe schema shape only. Do not include benchmark answers,
+gold SQL, instance IDs, or question-specific hints. The registry validator
+rejects those tokens, and the retrieval cache key includes the summary registry
+hash, so a summary edit creates a fresh cache version.
+
 Relevant runtime settings:
 
 - `SOL01_SCHEMA_CHUNK_TOP_K`, default `80`
@@ -250,6 +275,13 @@ offline labels from `methods/gold-tables/spider2-snow-gold-tables.jsonl`;
 `--gold-path <path>` is only for alternate local label files. Gold tables are
 offline-only labels for measuring retrieval coverage. They are not available to
 runtime planning, SQL generation, repair, or candidate review.
+
+Use `--covered-only` to focus on tasks whose gold tables touch curated
+large-schema summaries. Use `--baseline-path <report.json|tasks.jsonl>` to
+check for recall regressions, `--trace-run-id <run_id>` to scan saved solver
+traces for hallucinated-column validation failures, and `--output-id <id>` to
+persist `summary.json`, `tasks.jsonl`, `failures.json`, `report.json`, and
+`summary.md` under `outputs/<id>/retrieval_eval/`.
 
 ## SQL Generation
 
@@ -284,6 +316,10 @@ Validation checks that the SQL:
 - uses known columns when the selected schema is clear enough
 
 Invalid SQL is not executed. It can still be used as repair feedback.
+
+Unknown-column validation is the runtime guard for hallucinated columns. The
+offline retrieval-eval command can also scan saved traces with
+`--trace-run-id <run_id>` and report those validation failures.
 
 ## Execution
 
@@ -395,6 +431,12 @@ Retrieval traces also include:
 - resolver entries, allowed tables, and resolver warnings
 - schema expansion retrieval diagnostics when repair expands schema context
 
+Prompt budget diagnostics live in `schema_retrieval.prompt_budget` inside each
+task trace. They record planning and resolved-context character counts against
+`SOL01_SCHEMA_MAX_PROMPT_CHARS`. `uv run sol01 retrieval-eval --output-id <id>`
+also writes prompt reduction and prompt-size wins to
+`outputs/<id>/retrieval_eval/`.
+
 ## Official Evaluation
 
 After the solver writes CSVs, it runs the official Spider2-Snow evaluator in
@@ -493,8 +535,8 @@ trace races.
 - `sol01/schema/index.py`: builds the Snowflake metadata cache.
 - `sol01/schema/objects.py`: builds canonical logical schema objects.
 - `sol01/schema/chunks.py`: renders retrieval chunks from schema objects.
-- `sol01/schema/retrieval_index.py`: builds versioned sparse retrieval indexes.
-- `sol01/schema/hybrid_retrieval.py`: runs sparse and exact retrieval.
+- `sol01/schema/retrieval_index.py`: builds versioned lexical retrieval indexes.
+- `sol01/schema/hybrid_retrieval.py`: runs lexical and exact retrieval.
 - `sol01/schema/resolver.py`: resolves selected logical objects to physical table context.
 - `sol01/schema/retrieval_eval.py`: evaluates offline retrieval coverage.
 - `sol01/docs.py`: loads linked markdown documents.
