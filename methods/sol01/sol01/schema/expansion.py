@@ -323,7 +323,7 @@ def _schema_expansion_query(
     attempt: dict[str, Any],
     trigger: str,
 ) -> str:
-    """Build the augmented retrieval query used to find expansion candidates."""
+    """Build the augmented planning question used to find expansion candidates."""
 
     validation = attempt.get("validation", {})
     execution = attempt.get("execution_result", {})

@@ -341,11 +341,11 @@ def prewarm_schema_index_command(
         typer.Argument(help="Database names to prewarm, for example E_COMMERCE."),
     ],
 ) -> None:
-    """Build retrieval index cache artifacts before running batch workers."""
+    """Build schema metadata cache artifacts before running batch workers."""
 
     indexes = _prewarm_schema_retrieval_indexes(dbs)
     typer.echo(
-        f"Prewarmed {len(indexes)} schema retrieval index(es) into "
+        f"Prewarmed {len(indexes)} schema metadata cache(s) into "
         f"{DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT}"
     )
 
@@ -377,7 +377,7 @@ def retrieval_eval_command(
     ] = None,
     object_cutoff: Annotated[
         int | None,
-        typer.Option(min=1, help="Override the retrieval object cutoff."),
+        typer.Option(min=1, help="Override the schema-context object cutoff for eval."),
     ] = None,
     covered_only: Annotated[
         bool,
@@ -709,7 +709,7 @@ def handle_ask(*, db: str, question: str) -> FinalAnswer:
 
 
 def _prewarm_schema_retrieval_indexes(dbs: Iterable[str]) -> list[Any]:
-    """Build schema retrieval indexes once before concurrent solver work begins."""
+    """Build schema metadata caches once before concurrent solver work begins."""
 
     config = SchemaRetrievalConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
     return prewarm_retrieval_indexes(dbs, config=config)

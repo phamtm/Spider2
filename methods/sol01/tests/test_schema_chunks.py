@@ -104,7 +104,7 @@ def test_chunks_do_not_render_full_schema_blobs_or_oversized_sample_values():
     rendered_text = "\n".join(
         "\n".join(
             [
-                chunk.bm25_text,
+                chunk.search_text,
                 chunk.prompt_text,
                 chunk.source_definition,
             ]
@@ -128,7 +128,7 @@ def test_chunks_do_not_render_full_schema_blobs_or_oversized_sample_values():
     )
     sample_chunk = render_schema_chunks([long_value_object])[0]
 
-    assert "x" * 100 not in sample_chunk.bm25_text
+    assert "x" * 100 not in sample_chunk.search_text
     assert len(sample_chunk.prompt_text) < 160
 
 
@@ -153,7 +153,7 @@ def test_sample_value_chunks_are_exact_oriented():
     )
 
     assert sample_chunk.source == "sample"
-    assert "STATUS" in sample_chunk.bm25_text
+    assert "STATUS" in sample_chunk.search_text
     assert "exact filter evidence" in sample_chunk.inferred_usage
 
 
@@ -202,7 +202,7 @@ def test_covered_large_table_chunk_uses_curated_summary_not_raw_metadata():
     )
 
     assert "Large-schema summary: github_repos_day_events." in table_chunk.prompt_text
-    assert "daily github archive" in table_chunk.bm25_text
+    assert "daily github archive" in table_chunk.search_text
     assert "CREATE TABLE" not in table_chunk.prompt_text
     assert "SECRET_DDL_MARKER" not in table_chunk.prompt_text
     assert "SECRET_COLUMN_MARKER" not in table_chunk.prompt_text
@@ -236,5 +236,5 @@ def test_covered_large_table_family_chunk_uses_curated_summary_not_member_dump()
 
     assert "Large-schema summary: github_repos_day_events." in family_chunk.prompt_text
     assert "Member preview" not in family_chunk.prompt_text
-    assert "daily github archive" in family_chunk.bm25_text
+    assert "daily github archive" in family_chunk.search_text
     assert family_chunk.metadata["summary_ids"] == ["github_repos_day_events"]

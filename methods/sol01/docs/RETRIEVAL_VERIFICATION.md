@@ -2,18 +2,17 @@
 
 Last verified: 2026-05-13.
 
-This note records the final verification for the retrieval-first schema
-selection work tracked by `sp-tvm.14` and the lexical summary retrieval cleanup
-tracked by `sp-4rb.10`.
+This note records verification for the schema-context selection work tracked by
+`sp-tvm.14`, `sp-4rb.10`, and the BM25 removal follow-up.
 
 ## Code Audit
 
 - Runtime planning enters `_run_planning()` in `sol01/coordinator.py`, builds a
-  versioned retrieval index, retrieves schema objects, calls
+  versioned schema-context cache, selects available schema objects, calls
   `_retrieval_planning_user_prompt()`, sanitizes selected object IDs, and
   resolves selected logical objects to physical tables.
-- Schema retrieval is local lexical/exact matching over persisted schema
-  chunks, with no separate model-backed retrieval service.
+- Schema context selection does not use embeddings, BM25, lexical ranking, or a
+  separate model-backed retrieval service.
 - The legacy full-schema planning and schema-expansion prompt builders were
   removed from `sol01/llm/prompt_builders.py`.
 - Remaining `db_schema_summary` usage is limited to offline retrieval-eval
@@ -25,7 +24,7 @@ tracked by `sp-4rb.10`.
 - Curated large-schema summaries live in
   `methods/sol01/metadata/large_schema_summaries.json`. Edits are validated by
   `sol01/schema/large_schema_summaries.py`, and the summary registry hash is
-  part of the retrieval cache key.
+  part of the schema-context cache key.
 
 ## Focused Tests
 
@@ -38,11 +37,10 @@ uv run pytest tests/test_retrieval_planning.py tests/test_coordinator.py \
 
 Result: `48 passed`.
 
-These tests cover retrieval-scoped planning prompts, planner sanitization,
-trace `schema_retrieval_version` and `schema_retrieval` diagnostics, retrieval
-schema expansion, offline retrieval-eval accounting, resolver expansion,
-lexical retrieval, large-schema summaries, retrieval index caching, schema
-objects, and chunk rendering.
+These tests cover schema-context planning prompts, planner sanitization, trace
+`schema_retrieval_version` and `schema_retrieval` diagnostics, schema expansion,
+offline retrieval-eval accounting, resolver expansion, large-schema summaries,
+schema-context caching, schema objects, and chunk rendering.
 
 ## Full Quality Gates
 

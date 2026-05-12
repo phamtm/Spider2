@@ -460,7 +460,7 @@ def _top_evidence(
     for item in retrieved_objects:
         for retrieved_chunk in item.chunks:
             chunk = retrieved_chunk.chunk
-            text = chunk.prompt_text or chunk.source_definition or chunk.bm25_text or chunk.text
+            text = chunk.prompt_text or chunk.source_definition or chunk.search_text or chunk.text
             evidence.append(
                 {
                     "object_id": item.schema_object.object_id,

@@ -1,4 +1,4 @@
-"""Tests for versioned schema retrieval index caching."""
+"""Tests for versioned schema metadata context caching."""
 
 from __future__ import annotations
 
@@ -75,11 +75,9 @@ def test_builds_loads_and_validates_retrieval_index_for_one_database(tmp_path):
         "manifest.json",
         "objects.jsonl",
         "chunks.jsonl",
-        "sparse.json",
     }
     assert not (index.cache_dir / "embeddings.npy").exists()
-    assert index.sparse["chunk_ids"] == [chunk.chunk_id for chunk in index.chunks]
-    assert max(index.sparse["document_frequency"].values()) <= len(index.chunks)
+    assert index.chunks
 
     loaded = load_current_retrieval_index("DB", cache_root=tmp_path)
 
@@ -157,12 +155,12 @@ def test_current_pointer_update_uses_os_replace(tmp_path, monkeypatch):
 
 def test_stale_missing_cache_artifact_is_rebuilt_under_same_key(tmp_path):
     first = _build(tmp_path)
-    (first.cache_dir / "sparse.json").unlink()
+    (first.cache_dir / "chunks.jsonl").unlink()
 
     rebuilt = _build(tmp_path)
 
     assert rebuilt.cache_key == first.cache_key
-    assert (rebuilt.cache_dir / "sparse.json").exists()
+    assert (rebuilt.cache_dir / "chunks.jsonl").exists()
     assert list(rebuilt.cache_dir.parent.glob(".*.invalid.*"))
 
 
@@ -178,7 +176,6 @@ def test_embedding_era_cache_artifacts_are_not_reused(tmp_path):
         "manifest.json",
         "objects.jsonl",
         "chunks.jsonl",
-        "sparse.json",
     }
     assert list(rebuilt.cache_dir.parent.glob(".*.invalid.*"))
 

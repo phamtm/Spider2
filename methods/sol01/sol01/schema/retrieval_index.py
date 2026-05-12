@@ -1,4 +1,4 @@
-"""Build and publish reusable schema retrieval indexes."""
+"""Build and publish reusable schema metadata contexts."""
 
 from __future__ import annotations
 
@@ -9,7 +9,6 @@ import re
 import shutil
 import tempfile
 import time
-from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,11 +30,8 @@ from sol01.schema.retrieval import load_db_index
 
 OBJECT_BUILDER_VERSION = "schema-objects-v1"
 CHUNK_RENDER_VERSION = "schema-chunks-v1"
-SPARSE_INDEX_VERSION = "bm25-v1"
 MANIFEST_VERSION = 2
-REQUIRED_INDEX_ARTIFACTS = frozenset(
-    {"objects.jsonl", "chunks.jsonl", "sparse.json", "manifest.json"}
-)
+REQUIRED_INDEX_ARTIFACTS = frozenset({"objects.jsonl", "chunks.jsonl", "manifest.json"})
 REQUIRED_MANIFEST_FIELDS = frozenset(
     {
         "manifest_version",
@@ -46,7 +42,6 @@ REQUIRED_MANIFEST_FIELDS = frozenset(
         "chunk_render_version",
         "curated_summary_registry_hash",
         "curated_summary_registry_version",
-        "sparse_index_version",
         "family_similarity_threshold",
         "object_count",
         "chunk_count",
@@ -57,7 +52,6 @@ DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT = (
 ).resolve()
 DEFAULT_LOCK_TIMEOUT_SECONDS = 60.0
 DEFAULT_LOCK_POLL_SECONDS = 0.1
-_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 logger = get_logger(__name__)
 
 
@@ -71,7 +65,7 @@ class RetrievalIndexLockTimeout(RetrievalIndexError):
 
 @dataclass(frozen=True)
 class SchemaRetrievalIndex:
-    """A loaded schema retrieval index and its on-disk artifacts."""
+    """A loaded schema metadata context and its on-disk artifacts."""
 
     db: str
     cache_key: str
@@ -79,7 +73,6 @@ class SchemaRetrievalIndex:
     manifest: dict[str, Any]
     objects: list[SchemaObject]
     chunks: list[RetrievalChunk]
-    sparse: dict[str, Any]
 
 
 def build_retrieval_index(
@@ -95,7 +88,7 @@ def build_retrieval_index(
     lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
     lock_poll_seconds: float = DEFAULT_LOCK_POLL_SECONDS,
 ) -> SchemaRetrievalIndex:
-    """Build or load the versioned retrieval index for one database."""
+    """Build or load the versioned schema metadata context for one database."""
 
     started_at = time.perf_counter()
     config = config or SchemaRetrievalConfig()
@@ -321,7 +314,7 @@ def prewarm_retrieval_indexes(
     config: SchemaRetrievalConfig | None = None,
     cache_root: Path = DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT,
 ) -> list[SchemaRetrievalIndex]:
-    """Build retrieval indexes for unique databases before worker threads start."""
+    """Build schema metadata contexts for unique databases before worker threads start."""
 
     unique_dbs = sorted({db.strip() for db in dbs if db.strip()})
     logger.info("schema retrieval prewarm start", database_count=len(unique_dbs), dbs=unique_dbs)
@@ -373,7 +366,6 @@ def retrieval_index_cache_key(
             "family_similarity_threshold": family_similarity_threshold,
             "object_builder_version": object_builder_version,
             "source_schema_hash": source_schema_hash,
-            "sparse_index_version": SPARSE_INDEX_VERSION,
         }
     )
 
@@ -395,8 +387,6 @@ def _write_index_artifacts(
     """Write one complete version directory before it is published."""
 
     cache_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("schema retrieval sparse index start", db=db, cache_key=cache_key)
-    sparse = _build_sparse_index(chunks)
     manifest = {
         "manifest_version": MANIFEST_VERSION,
         "db": db,
@@ -406,7 +396,6 @@ def _write_index_artifacts(
         "chunk_render_version": chunk_render_version,
         "curated_summary_registry_hash": curated_summary_registry_hash,
         "curated_summary_registry_version": curated_summary_registry_version,
-        "sparse_index_version": SPARSE_INDEX_VERSION,
         "family_similarity_threshold": family_similarity_threshold,
         "object_count": len(objects),
         "chunk_count": len(chunks),
@@ -414,7 +403,6 @@ def _write_index_artifacts(
 
     _write_jsonl(cache_dir / "objects.jsonl", [obj.model_dump(mode="json") for obj in objects])
     _write_jsonl(cache_dir / "chunks.jsonl", [chunk.model_dump(mode="json") for chunk in chunks])
-    _write_json(cache_dir / "sparse.json", sparse)
     _write_json(cache_dir / "manifest.json", manifest)
     logger.info(
         "schema retrieval artifacts written",
@@ -424,39 +412,6 @@ def _write_index_artifacts(
         object_count=len(objects),
         chunk_count=len(chunks),
     )
-
-
-def _build_sparse_index(chunks: Sequence[RetrievalChunk]) -> dict[str, Any]:
-    """Build a deterministic local BM25-style sparse index payload."""
-
-    documents: list[dict[str, Any]] = []
-    document_frequency: Counter[str] = Counter()
-    lengths: list[int] = []
-
-    for chunk in chunks:
-        terms = _tokenize(chunk.bm25_text or chunk.text)
-        counts = Counter(terms)
-        lengths.append(len(terms))
-        document_frequency.update(counts.keys())
-        documents.append(
-            {
-                "chunk_id": chunk.chunk_id,
-                "terms": dict(sorted(counts.items())),
-            }
-        )
-
-    average_length = sum(lengths) / len(lengths) if lengths else 0.0
-    return {
-        "version": SPARSE_INDEX_VERSION,
-        "algorithm": "bm25",
-        "parameters": {"k1": 1.2, "b": 0.75},
-        "chunk_ids": [chunk.chunk_id for chunk in chunks],
-        "document_count": len(chunks),
-        "document_lengths": lengths,
-        "average_document_length": average_length,
-        "document_frequency": dict(sorted(document_frequency.items())),
-        "documents": documents,
-    }
 
 
 def _load_valid_index(
@@ -489,17 +444,10 @@ def _load_valid_index(
         chunks = [
             RetrievalChunk.model_validate(row) for row in _read_jsonl(cache_dir / "chunks.jsonl")
         ]
-        sparse = _read_json(cache_dir / "sparse.json")
     except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError):
         return None
 
     if manifest.get("object_count") != len(objects) or manifest.get("chunk_count") != len(chunks):
-        return None
-    if manifest.get("sparse_index_version") != SPARSE_INDEX_VERSION:
-        return None
-    if sparse.get("version") != SPARSE_INDEX_VERSION:
-        return None
-    if sparse.get("chunk_ids") != [chunk.chunk_id for chunk in chunks]:
         return None
     object_ids = {obj.object_id for obj in objects}
     if any(chunk.object_id not in object_ids for chunk in chunks):
@@ -512,7 +460,6 @@ def _load_valid_index(
         manifest=manifest,
         objects=objects,
         chunks=chunks,
-        sparse=sparse,
     )
 
 
@@ -696,10 +643,6 @@ def _new_temp_version_dir(cache_root: Path, db: str, cache_key: str) -> Path:
 def _safe_path_segment(value: str) -> str:
     segment = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
     return segment or "default"
-
-
-def _tokenize(text: str) -> list[str]:
-    return [match.group(0).casefold() for match in _TOKEN_RE.finditer(text)]
 
 
 def _stable_hash(payload: object) -> str:

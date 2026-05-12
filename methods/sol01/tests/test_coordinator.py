@@ -283,7 +283,7 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
         "candidate_review": "hash-candidate_review",
     }
     assert trace["schema_selection"]["selected_tables"] == [SALES_TABLE]
-    assert trace["schema_retrieval_version"] == "lexical_v1"
+    assert trace["schema_retrieval_version"] == "metadata_context_v1"
     assert trace["schema_retrieval"]["index"]["cache_key"] == "test-cache-key"
     prompt_budget = trace["schema_selection"]["diagnostics"]["prompt_budget"]
     assert prompt_budget["planning_prompt_chars"] <= prompt_budget["max_schema_prompt_chars"]
@@ -296,7 +296,7 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
     )
     assert set(prompts) == {"planning", "sql_generation_batch", "candidate_review"}
     assert "Schema summary:" not in prompts["planning"][0]
-    assert "Retrieved logical schema object evidence:" in prompts["planning"][0]
+    assert "Available schema metadata evidence:" in prompts["planning"][0]
 
 
 def test_run_task_reruns_old_trace_without_schema_retrieval_version(
@@ -353,7 +353,7 @@ def test_run_task_reruns_old_trace_without_schema_retrieval_version(
     assert answer.status == "success"
     assert answer.sql != "SELECT 1"
     trace = json.loads((run_paths.traces_dir / "sf_stale.json").read_text(encoding="utf-8"))
-    assert trace["schema_retrieval_version"] == "lexical_v1"
+    assert trace["schema_retrieval_version"] == "metadata_context_v1"
 
 
 def test_close_executable_candidates_use_one_candidate_review(
@@ -559,7 +559,7 @@ def test_schema_expansion_retrieves_candidates_for_missing_column(
     assert expansion["added_tables"] == [ORDERS_TABLE]
     assert expansion["resolver"]["warnings"] == []
     assert "All available tables" not in prompts["planning"][1]
-    assert "Retrieved logical schema object evidence" in prompts["planning"][1]
+    assert "Available schema metadata evidence" in prompts["planning"][1]
     assert trace["schema_retrieval"]["expansions"][0]["outcome"] == "expanded"
     assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "schema_expansion"]
 

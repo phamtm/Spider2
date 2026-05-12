@@ -17,7 +17,7 @@ from sol01.schema.retrieval_eval import (
     run_retrieval_eval,
     write_retrieval_eval_report,
 )
-from sol01.schema.retrieval_index import SchemaRetrievalIndex, _build_sparse_index
+from sol01.schema.retrieval_index import SchemaRetrievalIndex
 
 
 def test_load_gold_tables_reads_offline_jsonl(tmp_path: Path):
@@ -309,21 +309,21 @@ def _retrieval_index() -> SchemaRetrievalIndex:
                 "table:DB.PUBLIC.SALES_2022",
                 "table:DB.PUBLIC.SALES_2023",
             ],
-            bm25_text="historical sales table family 2022 2023",
+            search_text="historical sales table family 2022 2023",
             prompt_text="Sales table family with annual physical members.",
         ),
         RetrievalChunk(
             chunk_id="table:DB.PUBLIC.SALES_2022::table",
             object_id="table:DB.PUBLIC.SALES_2022",
             chunk_type="table",
-            bm25_text="sales table 2022 amount",
+            search_text="sales table 2022 amount",
             prompt_text="Sales table for 2022.",
         ),
         RetrievalChunk(
             chunk_id="table:DB.PUBLIC.SALES_2023::table",
             object_id="table:DB.PUBLIC.SALES_2023",
             chunk_type="table",
-            bm25_text="sales table 2023 amount",
+            search_text="sales table 2023 amount",
             prompt_text="Sales table for 2023.",
         ),
     ]
@@ -334,5 +334,4 @@ def _retrieval_index() -> SchemaRetrievalIndex:
         manifest={},
         objects=objects,
         chunks=chunks,
-        sparse=_build_sparse_index(chunks),
     )

@@ -107,9 +107,9 @@ This index is cached at `methods/sol01/.cache/snow_index.json`.
 The solver preserves fully qualified Snowflake table names when they are
 available, because table identity matters during validation and execution.
 
-The retrieval cache is built per database from the base metadata cache. It
-contains canonical schema objects, retrieval chunks, local lexical postings, and
-a version manifest:
+The schema-context cache is built per database from the base metadata cache. It
+contains canonical schema objects, rendered schema chunks, and a version
+manifest:
 
 ```text
 methods/sol01/.cache/schema_retrieval_index/<DB>/
@@ -118,27 +118,27 @@ methods/sol01/.cache/schema_retrieval_index/<DB>/
     manifest.json
     objects.jsonl
     chunks.jsonl
-    sparse.json
 ```
 
-Build retrieval indexes before a batch run with either command:
+Build schema-context caches before a batch run with either command:
 
 ```bash
 uv run sol01 prewarm-schema-index E_COMMERCE
 uv run sol01 run --db E_COMMERCE
 ```
 
-The retrieval index cache key includes the source schema hash, schema-object
-builder version, chunk renderer version, sparse-index version, and family
-similarity threshold. If one of those inputs changes, a new version directory
-is created and `current.json` is updated.
+The schema-context cache key includes the source schema hash, schema-object
+builder version, chunk renderer version, curated summary registry hash/version,
+and family similarity threshold. If one of those inputs changes, a new version
+directory is created and `current.json` is updated.
 
 ## Retrieval-First Planning
 
-The old full-schema planner mode has been removed. `sol01` no longer has an
-`llm_only` or full-schema table-selection path. Runtime schema retrieval is
-local lexical/exact matching over persisted schema chunks, with no separate
-model-backed retrieval service.
+The old BM25/lexical retrieval path has been removed. Runtime schema context is
+deterministic: use curated large-schema summary objects when they cover the
+database; otherwise pass the built database metadata objects directly. There is
+no embedding, BM25, exact-match ranking, or separate model-backed retrieval
+service.
 
 That path was removed because large Spider2-Snow databases can have hundreds of
 tables or very wide tables. Passing a database-wide DDL summary into planning
@@ -149,8 +149,8 @@ The runtime pipeline is:
 
 ```text
 question
-  -> lexical/exact retrieval over schema chunks
-  -> LLM planner selects retrieved logical objects
+  -> deterministic schema metadata context
+  -> LLM planner selects available logical objects
   -> resolver expands logical families to physical tables
   -> compact schema context is rendered
   -> SQL generation uses only that compact context
@@ -165,19 +165,18 @@ Schema objects are logical, not just physical tables. They include:
 - bounded categorical sample-value objects
 - table-family objects for partitioned or suffixed physical tables
 
-Lexical retrieval combines local term scoring with exact literal, code, and date
-matches. Linked markdown documents are clipped to passages that overlap with
-the question before retrieval, rather than being sent wholesale.
+Linked markdown documents are clipped to passages that overlap with the
+question before planning, rather than being sent wholesale.
 
-For each question, the planner sees only retrieved object evidence. It returns
+For each question, the planner sees available schema metadata evidence. It returns
 selected object IDs, object roles, constraints, and the answer contract in one
 structured response.
 
 The solver sanitizes the planner output:
 
-- object IDs outside the retrieved candidate set are dropped
-- table names are normalized only when they match retrieved evidence
-- if no valid retrieved schema object survives, confidence is lowered
+- object IDs outside the available schema metadata are dropped
+- table names are normalized only when they match available metadata
+- if no valid schema object survives, confidence is lowered
 - planner diagnostics record ignored or missing selections
 
 The same planning call also returns an answer contract capturing:
@@ -221,9 +220,9 @@ Sample-value objects are excluded for:
 - columns where every sampled value is distinct unless the column name is
   explicitly categorical
 
-Included sample values are sparse/exact-match evidence. If a question mentions
-an included sample value, the solver can keep that value tied to its native
-column instead of converting it into an invented rule.
+Included sample values are schema metadata evidence. If a question mentions an
+included sample value, the solver can keep that value tied to its native column
+instead of converting it into an invented rule.
 
 ## Curated Large-Schema Summaries
 
@@ -420,12 +419,12 @@ The trace contains the full local decision path: schema selection, intent,
 prompt hashes, attempts, scores, candidate review output, final SQL, and final
 execution summary.
 
-Retrieval traces also include:
+Schema-context traces also include:
 
 - `schema_retrieval_version`
 - effective `schema_retrieval_config`
-- retrieval diagnostics for sparse and exact stages
-- retrieved object IDs, scores, evidence, and chunk snippets
+- context mode and object counts
+- available object IDs, evidence, and chunk snippets
 - planner sanitization diagnostics
 - resolver entries, allowed tables, and resolver warnings
 - schema expansion retrieval diagnostics when repair expands schema context
@@ -533,9 +532,9 @@ trace races.
 - `sol01/tasks.py`: loads and filters Spider2-Snow tasks.
 - `sol01/schema/index.py`: builds the Snowflake metadata cache.
 - `sol01/schema/objects.py`: builds canonical logical schema objects.
-- `sol01/schema/chunks.py`: renders retrieval chunks from schema objects.
-- `sol01/schema/retrieval_index.py`: builds versioned lexical retrieval indexes.
-- `sol01/schema/hybrid_retrieval.py`: runs lexical and exact retrieval.
+- `sol01/schema/chunks.py`: renders schema-context chunks from schema objects.
+- `sol01/schema/retrieval_index.py`: builds versioned schema-context caches.
+- `sol01/schema/hybrid_retrieval.py`: selects deterministic schema context.
 - `sol01/schema/resolver.py`: resolves selected logical objects to physical table context.
 - `sol01/schema/retrieval_eval.py`: evaluates offline retrieval coverage.
 - `sol01/docs.py`: loads linked markdown documents.

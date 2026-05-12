@@ -1,4 +1,4 @@
-"""Tests for hybrid schema retrieval and object aggregation."""
+"""Tests for deterministic schema context selection."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from sol01.schema.hybrid_retrieval import (
     retrieve_schema_objects,
 )
 from sol01.schema.objects import build_schema_objects
-from sol01.schema.retrieval_index import SchemaRetrievalIndex, _build_sparse_index
+from sol01.schema.retrieval_index import SchemaRetrievalIndex
 
 
 def test_query_construction_extracts_signals_and_clips_linked_docs_by_overlap():
@@ -46,95 +46,51 @@ def test_query_construction_extracts_signals_and_clips_linked_docs_by_overlap():
     assert clipped == "target revenue status paragraph."
 
 
-def test_hybrid_retrieval_merges_sparse_and_exact_hits():
+def test_full_database_metadata_context_returns_all_schema_objects_without_ranking():
     index = _fake_index()
 
     objects, diagnostics = retrieve_schema_objects(
         index,
         "Find ORDERS where status is 'closed'",
-        config=SchemaRetrievalConfig(object_top_k=6),
+        config=SchemaRetrievalConfig(object_top_k=2),
     )
 
     selected_ids = [obj.schema_object.object_id for obj in objects]
-    assert "table:DB.PUBLIC.ORDERS" in selected_ids
-    assert "sample_value:DB.PUBLIC.ORDERS#STATUS:11111111" in selected_ids
-
-    evidence = {item["chunk_id"]: item["sources"] for item in diagnostics["candidate_evidence"]}
-    assert {"sparse", "exact"}.issubset(evidence["table:DB.PUBLIC.ORDERS::table"])
-    assert {"sparse", "exact"}.issubset(
-        evidence["sample_value:DB.PUBLIC.ORDERS#STATUS:11111111::sample_value"]
-    )
-    assert set(diagnostics["hit_counts"]) == {"sparse", "exact"}
-    assert set(diagnostics["candidate_counts"]) == {"merged", "by_type"}
-
-
-def test_type_quotas_deduplicate_and_limit_candidates():
-    index = _fake_index()
-
-    _, diagnostics = retrieve_schema_objects(
-        index,
-        "orders status customer amount",
-        config=SchemaRetrievalConfig(object_top_k=4),
-        type_quotas={
-            "table": 20,
-            "column": 1,
-            "column_group": 20,
-            "join_candidate": 20,
-            "sample_value": 20,
-            "table_family": 20,
-        },
-    )
-
-    assert diagnostics["candidate_counts"]["by_type"]["column"] == 1
+    assert selected_ids == [
+        "family:DB.PUBLIC:orders_family:deadbeef",
+        "table:DB.PUBLIC.CUSTOMERS",
+        "table:DB.PUBLIC.ORDERS",
+        "column:DB.PUBLIC.ORDERS#AMOUNT",
+        "column:DB.PUBLIC.ORDERS#STATUS",
+        "join_candidate:DB.PUBLIC.ORDERS#CUSTOMER_ID->DB.PUBLIC.CUSTOMERS#CUSTOMER_ID:abcdef12",
+        "sample_value:DB.PUBLIC.ORDERS#STATUS:11111111",
+    ]
+    assert diagnostics["mode"] == "full_database_metadata"
+    assert diagnostics["candidate_counts"] == {
+        "objects_total": 7,
+        "chunks_total": 7,
+        "available_objects": 7,
+    }
+    assert all(obj.score is None for obj in objects)
 
 
-def test_object_aggregation_lifts_parent_tables_and_families_from_child_hits():
+def test_top_k_is_explicit_only_and_does_not_use_config_object_limit():
     index = _fake_index()
 
     objects, _ = retrieve_schema_objects(
         index,
-        "Which customers have closed order status?",
-        config=SchemaRetrievalConfig(object_top_k=8),
+        "orders status customer amount",
+        config=SchemaRetrievalConfig(object_top_k=1),
+        top_k_objects=2,
     )
 
-    scores = {obj.schema_object.object_id: obj.score for obj in objects}
-    assert scores["table:DB.PUBLIC.ORDERS"] > scores["column:DB.PUBLIC.ORDERS#STATUS"]
-    assert scores["table:DB.PUBLIC.CUSTOMERS"] > 0
-    assert scores["family:DB.PUBLIC:orders_family:deadbeef"] > 0
+    assert [obj.schema_object.object_id for obj in objects] == [
+        "family:DB.PUBLIC:orders_family:deadbeef",
+        "table:DB.PUBLIC.CUSTOMERS",
+    ]
 
 
-def test_exact_date_table_and_column_terms_lift_objects_without_sparse_hits():
-    index = _exact_only_index()
-
-    objects, diagnostics = retrieve_schema_objects(
-        index,
-        "Count DB.PUBLIC._20240103 rows by CREATED_AT on 2024-01-03",
-        config=SchemaRetrievalConfig(object_top_k=5),
-    )
-
-    assert diagnostics["hit_counts"]["sparse"] == 0
-    assert diagnostics["hit_counts"]["exact"] >= 2
-    selected = [obj.schema_object.object_id for obj in objects]
-    assert "table:DB.PUBLIC._20240103" in selected
-    assert "column:DB.PUBLIC._20240103#CREATED_AT" in selected
-    assert all(hasattr(obj, "schema_object") and hasattr(obj, "chunks") for obj in objects)
-
-
-def test_curated_summary_aliases_are_exact_retrieval_terms():
-    index = _exact_only_index()
-
-    objects, diagnostics = retrieve_schema_objects(
-        index,
-        "Use the daily github archive for event counts",
-        config=SchemaRetrievalConfig(object_top_k=5),
-    )
-
-    assert diagnostics["hit_counts"]["sparse"] == 0
-    assert diagnostics["hit_counts"]["exact"] >= 1
-    assert objects[0].schema_object.object_id == "family:DB.PUBLIC:github_events:12345678"
-
-
-def test_curated_summary_aliases_are_searchable_from_rendered_chunks():
+def test_summary_backed_context_uses_only_curated_large_schema_objects():
     table = TableSchema(
         name="_20240103",
         database_name="GITHUB_REPOS_DATE",
@@ -155,7 +111,22 @@ def test_curated_summary_aliases_are_searchable_from_rendered_chunks():
         sample_rows=[],
         searchable_text="github events",
     )
-    objects = build_schema_objects({"GITHUB_REPOS_DATE.DAY._20240103": table})
+    uncovered_table = TableSchema(
+        name="REPOSITORIES",
+        database_name="GITHUB_REPOS_DATE",
+        schema_name="DAY",
+        full_name="GITHUB_REPOS_DATE.DAY.REPOSITORIES",
+        ddl="CREATE TABLE REPOSITORIES (ID TEXT, NAME TEXT);",
+        columns=[ColumnSchema(name="ID", type="TEXT"), ColumnSchema(name="NAME", type="TEXT")],
+        sample_rows=[],
+        searchable_text="repository metadata",
+    )
+    objects = build_schema_objects(
+        {
+            "GITHUB_REPOS_DATE.DAY._20240103": table,
+            "GITHUB_REPOS_DATE.DAY.REPOSITORIES": uncovered_table,
+        }
+    )
     chunks = render_schema_chunks(objects)
     index = SchemaRetrievalIndex(
         db="GITHUB_REPOS_DATE",
@@ -164,21 +135,30 @@ def test_curated_summary_aliases_are_searchable_from_rendered_chunks():
         manifest={},
         objects=objects,
         chunks=chunks,
-        sparse=_build_sparse_index(chunks),
     )
 
     retrieved, diagnostics = retrieve_schema_objects(
         index,
         "Count daily github archive repository events",
-        config=SchemaRetrievalConfig(object_top_k=5),
+        config=SchemaRetrievalConfig(object_top_k=1),
     )
 
-    assert diagnostics["hit_counts"]["sparse"] > 0
-    assert diagnostics["hit_counts"]["exact"] > 0
-    assert retrieved[0].schema_object.object_id == "table:GITHUB_REPOS_DATE.DAY._20240103"
-    assert (
-        "Large-schema summary: github_repos_day_events." in retrieved[0].chunks[0].chunk.prompt_text
+    assert diagnostics["mode"] == "large_schema_summary"
+    retrieved_ids = [item.schema_object.object_id for item in retrieved]
+    assert "table:GITHUB_REPOS_DATE.DAY._20240103" in retrieved_ids
+    assert "column:GITHUB_REPOS_DATE.DAY._20240103#payload" not in retrieved_ids
+    assert "table:GITHUB_REPOS_DATE.DAY.REPOSITORIES" in retrieved_ids
+    assert "column:GITHUB_REPOS_DATE.DAY.REPOSITORIES#NAME" in retrieved_ids
+    summary_object = next(
+        item
+        for item in retrieved
+        if item.schema_object.object_id == "table:GITHUB_REPOS_DATE.DAY._20240103"
     )
+    assert (
+        "Large-schema summary: github_repos_day_events."
+        in summary_object.chunks[0].chunk.prompt_text
+    )
+    assert "SECRET_DDL_MARKER" not in summary_object.chunks[0].chunk.prompt_text
 
 
 def _fake_index() -> SchemaRetrievalIndex:
@@ -247,14 +227,12 @@ def _fake_index() -> SchemaRetrievalIndex:
             chunk_id="table:DB.PUBLIC.ORDERS::table",
             object_id="table:DB.PUBLIC.ORDERS",
             chunk_type="table",
-            bm25_text="ORDERS status customer DB.PUBLIC.ORDERS",
             prompt_text="Orders table with status and customer fields.",
         ),
         RetrievalChunk(
             chunk_id="table:DB.PUBLIC.CUSTOMERS::table",
             object_id="table:DB.PUBLIC.CUSTOMERS",
             chunk_type="table",
-            bm25_text="CUSTOMERS customer DB.PUBLIC.CUSTOMERS",
             prompt_text="Customers table.",
         ),
         RetrievalChunk(
@@ -262,7 +240,6 @@ def _fake_index() -> SchemaRetrievalIndex:
             object_id="column:DB.PUBLIC.ORDERS#STATUS",
             chunk_type="column",
             parent_object_ids=["table:DB.PUBLIC.ORDERS"],
-            bm25_text="STATUS closed open order status",
             prompt_text="Order status column.",
         ),
         RetrievalChunk(
@@ -270,7 +247,6 @@ def _fake_index() -> SchemaRetrievalIndex:
             object_id="column:DB.PUBLIC.ORDERS#AMOUNT",
             chunk_type="column",
             parent_object_ids=["table:DB.PUBLIC.ORDERS"],
-            bm25_text="AMOUNT amount revenue",
             prompt_text="Order amount column.",
         ),
         RetrievalChunk(
@@ -281,7 +257,6 @@ def _fake_index() -> SchemaRetrievalIndex:
                 "table:DB.PUBLIC.ORDERS",
                 "column:DB.PUBLIC.ORDERS#STATUS",
             ],
-            bm25_text="closed STATUS DB.PUBLIC.ORDERS",
             prompt_text="Sample value closed for order status.",
         ),
         RetrievalChunk(
@@ -294,7 +269,6 @@ def _fake_index() -> SchemaRetrievalIndex:
                 "table:DB.PUBLIC.CUSTOMERS",
                 "column:DB.PUBLIC.CUSTOMERS#CUSTOMER_ID",
             ],
-            bm25_text="orders customers customer_id join",
             prompt_text="Join orders to customers on customer id.",
         ),
         RetrievalChunk(
@@ -302,7 +276,6 @@ def _fake_index() -> SchemaRetrievalIndex:
             object_id="family:DB.PUBLIC:orders_family:deadbeef",
             chunk_type="table_family",
             parent_object_ids=["table:DB.PUBLIC.ORDERS"],
-            bm25_text="orders family DB.PUBLIC.ORDERS",
             prompt_text="Orders table family.",
         ),
     ]
@@ -313,81 +286,4 @@ def _fake_index() -> SchemaRetrievalIndex:
         manifest={},
         objects=objects,
         chunks=chunks,
-        sparse=_build_sparse_index(chunks),
-    )
-
-
-def _exact_only_index() -> SchemaRetrievalIndex:
-    objects = [
-        SchemaObject(
-            object_id="table:DB.PUBLIC._20240103",
-            object_type="table",
-            name="_20240103",
-            db="DB",
-            table_name="DB.PUBLIC._20240103",
-            searchable_text="partition table",
-        ),
-        SchemaObject(
-            object_id="column:DB.PUBLIC._20240103#CREATED_AT",
-            object_type="column",
-            name="CREATED_AT",
-            db="DB",
-            table_name="DB.PUBLIC._20240103",
-            column_name="CREATED_AT",
-            searchable_text="timestamp column",
-        ),
-        SchemaObject(
-            object_id="family:DB.PUBLIC:github_events:12345678",
-            object_type="family",
-            name="github_events",
-            db="DB",
-            searchable_text="github events family",
-            metadata={"member_table_refs": ["DB.PUBLIC._20240103"]},
-        ),
-    ]
-    chunks = [
-        RetrievalChunk(
-            chunk_id="table:DB.PUBLIC._20240103::table",
-            object_id="table:DB.PUBLIC._20240103",
-            chunk_type="table",
-            bm25_text="partition shard",
-            prompt_text="Table DB.PUBLIC._20240103 with CREATED_AT.",
-            metadata={
-                "table_name": "DB.PUBLIC._20240103",
-                "short_name": "_20240103",
-            },
-        ),
-        RetrievalChunk(
-            chunk_id="column:DB.PUBLIC._20240103#CREATED_AT::column",
-            object_id="column:DB.PUBLIC._20240103#CREATED_AT",
-            chunk_type="column",
-            parent_object_ids=["table:DB.PUBLIC._20240103"],
-            bm25_text="timestamp field",
-            prompt_text="Column CREATED_AT on DB.PUBLIC._20240103.",
-            metadata={
-                "table_name": "DB.PUBLIC._20240103",
-                "column_name": "CREATED_AT",
-            },
-        ),
-        RetrievalChunk(
-            chunk_id="family:DB.PUBLIC:github_events:12345678::table_family",
-            object_id="family:DB.PUBLIC:github_events:12345678",
-            chunk_type="table_family",
-            parent_object_ids=["table:DB.PUBLIC._20240103"],
-            bm25_text="partition shard",
-            prompt_text="Curated table family.",
-            metadata={
-                "member_table_refs": ["DB.PUBLIC._20240103"],
-                "summary_aliases": ["daily github archive", "repository event"],
-            },
-        ),
-    ]
-    return SchemaRetrievalIndex(
-        db="DB",
-        cache_key="test-exact",
-        cache_dir=Path("/tmp/test-schema-index-exact"),
-        manifest={},
-        objects=objects,
-        chunks=chunks,
-        sparse=_build_sparse_index(chunks),
     )

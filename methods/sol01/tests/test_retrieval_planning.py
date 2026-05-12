@@ -40,7 +40,7 @@ def test_retrieval_planning_prompt_uses_retrieved_objects_without_full_schema_su
 
     assert "Question: Revenue for closed orders in 2024" in prompt
     assert "Document context:" in prompt
-    assert "Retrieved logical schema object evidence:" in prompt
+    assert "Available schema metadata evidence:" in prompt
     assert "Available object ids:" in prompt
     assert "table:DB.PUBLIC.ORDERS" in prompt
     assert "column:DB.PUBLIC.ORDERS#AMOUNT" in prompt
@@ -200,7 +200,7 @@ def test_sanitize_hybrid_planning_rejects_hallucinated_ids_and_normalizes_exact_
     assert diagnostics["rejected_object_ids"] == ["table:DB.PUBLIC.MISSING"]
     assert diagnostics["rejected_table_names"] == ["DB.PUBLIC.MISSING"]
     assert diagnostics["normalized_table_names"] == ["DB.PUBLIC.ORDERS"]
-    assert "outside retrieved candidates" in sanitized.rationale
+    assert "outside available schema metadata" in sanitized.rationale
 
 
 def test_sanitize_hybrid_planning_sets_zero_confidence_when_nothing_valid_remains():
@@ -217,7 +217,7 @@ def test_sanitize_hybrid_planning_sets_zero_confidence_when_nothing_valid_remain
     assert sanitized.selected_objects == []
     assert sanitized.confidence == 0.0
     assert diagnostics["selected_object_count"] == 0
-    assert "No valid retrieved schema objects" in sanitized.rationale
+    assert "No valid schema objects" in sanitized.rationale
 
 
 def test_sql_reference_and_repair_prompts_use_large_schema_summary_context():

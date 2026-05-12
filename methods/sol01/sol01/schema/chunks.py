@@ -68,7 +68,7 @@ def _table_chunk(obj: SchemaObject) -> RetrievalChunk:
             _field_list("Columns", displayed_columns),
         ]
     )
-    bm25_terms = _identifier_terms(
+    search_terms = _identifier_terms(
         obj,
         extra=[*_column_names(columns), *_normalized_tokens(column_names)],
     )
@@ -76,7 +76,7 @@ def _table_chunk(obj: SchemaObject) -> RetrievalChunk:
         chunk_id=f"{obj.object_id}::table",
         object_id=obj.object_id,
         chunk_type="table",
-        bm25_text=_join_text(bm25_terms),
+        search_text=_join_text(search_terms),
         prompt_text=prompt_text,
         source_definition=source_definition,
         source="schema",
@@ -113,7 +113,7 @@ def _column_chunk(obj: SchemaObject) -> RetrievalChunk:
         object_id=obj.object_id,
         chunk_type="column",
         parent_object_ids=_table_parent_ids(obj),
-        bm25_text=_join_text(_identifier_terms(obj, extra=_sample_values(obj))),
+        search_text=_join_text(_identifier_terms(obj, extra=_sample_values(obj))),
         prompt_text=prompt_text,
         source_definition=source_definition,
         inferred_usage=inferred_usage,
@@ -137,7 +137,7 @@ def _column_group_chunk(obj: SchemaObject) -> RetrievalChunk:
         object_id=obj.object_id,
         chunk_type="column_group",
         parent_object_ids=[*_table_parent_ids(obj), *_column_parent_ids(obj.table_name, columns)],
-        bm25_text=_join_text(
+        search_text=_join_text(
             _identifier_terms(obj, extra=[*columns, *_normalized_tokens(columns)])
         ),
         prompt_text=_join_sentences(
@@ -177,7 +177,7 @@ def _join_candidate_chunk(obj: SchemaObject) -> RetrievalChunk:
         object_id=obj.object_id,
         chunk_type="join_candidate",
         parent_object_ids=_join_parent_ids(left, right),
-        bm25_text=_join_text(
+        search_text=_join_text(
             _identifier_terms(
                 obj,
                 extra=[
@@ -218,7 +218,7 @@ def _sample_value_chunk(obj: SchemaObject) -> RetrievalChunk:
             *_table_parent_ids(obj),
             *_column_parent_ids(obj.table_name, [obj.column_name]),
         ],
-        bm25_text=_join_text(
+        search_text=_join_text(
             [
                 obj.object_id,
                 obj.db,
@@ -268,7 +268,7 @@ def _table_family_chunk(obj: SchemaObject) -> RetrievalChunk:
         object_id=obj.object_id,
         chunk_type="table_family",
         parent_object_ids=_table_parent_ids_from_names(members),
-        bm25_text=_join_text(
+        search_text=_join_text(
             _identifier_terms(obj, extra=[*members, *common_columns, *_normalized_tokens(members)])
         ),
         prompt_text=_join_sentences(
@@ -297,11 +297,11 @@ def _summary_table_chunk(
         chunk_id=f"{obj.object_id}::table",
         object_id=obj.object_id,
         chunk_type="table",
-        bm25_text=_join_text(
+        search_text=_join_text(
             [
                 *_identifier_terms(obj),
                 table_ref,
-                *_summary_bm25_terms(summaries),
+                *_summary_search_terms(summaries),
             ]
         ),
         prompt_text=_join_sentences(
@@ -335,10 +335,10 @@ def _summary_table_family_chunk(
         object_id=obj.object_id,
         chunk_type="table_family",
         parent_object_ids=_table_parent_ids_from_names(members),
-        bm25_text=_join_text(
+        search_text=_join_text(
             [
                 *_identifier_terms(obj, extra=[canonical, *common_columns]),
-                *_summary_bm25_terms(summaries),
+                *_summary_search_terms(summaries),
             ]
         ),
         prompt_text=_join_sentences(
@@ -459,7 +459,7 @@ def _summary_text(summaries: list[LargeSchemaSummary]) -> str:
     return _join_sentences(lines)
 
 
-def _summary_bm25_terms(summaries: list[LargeSchemaSummary]) -> list[str]:
+def _summary_search_terms(summaries: list[LargeSchemaSummary]) -> list[str]:
     terms: list[str] = []
     for summary in summaries:
         terms.extend(

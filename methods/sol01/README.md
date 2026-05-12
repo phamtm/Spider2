@@ -71,11 +71,11 @@ just gold sf_bq320
 `SOL01_CONCURRENCY` or the default value of `4`.
 `sol01 run <selector>...` accepts exact IDs, globs, `tier:<n>`,
 `tag:<name>`, or `all`.
-`sol01 run` builds retrieval caches for selected databases before task workers
-start. `uv run sol01 prewarm-schema-index <DB>...` builds the same cache
+`sol01 run` builds schema metadata caches for selected databases before task
+workers start. `uv run sol01 prewarm-schema-index <DB>...` builds the same cache
 artifacts without running solver tasks.
 
-`sol01 retrieval-eval` measures lexical/exact schema-retrieval coverage against
+`sol01 retrieval-eval` measures deterministic schema-context coverage against
 the offline gold-table JSONL file at
 `methods/gold-tables/spider2-snow-gold-tables.jsonl` by default. Use
 `--gold-path <path>` only when evaluating another local label file. Gold tables
@@ -134,30 +134,29 @@ The local registry lives in `methods/sol01/outputs/registry/` with:
 
 ## Schema Retrieval
 
-`sol01` uses retrieval-first schema selection. The old `llm_only` and
-full-schema planner modes no longer exist. Schema retrieval is local
-lexical/exact matching over persisted schema chunks, with no separate
-model-backed retrieval service.
+`sol01` uses deterministic schema-context selection. It does not use embeddings,
+BM25, lexical ranking, or a model-backed retrieval service. If a database has
+curated large-schema summary coverage, planning sees the summary-backed logical
+objects. Otherwise, planning sees the database metadata objects directly.
 
 The runtime path is:
 
 ```text
-question -> lexical/exact retrieval -> planner object selection
+question -> schema metadata context -> planner object selection
   -> resolver expansion -> compact schema context -> SQL generation
 ```
 
-This replaced full-schema selection because large Spider2-Snow databases can
-have hundreds of tables or very wide tables. Sending the whole schema to the
-planner produces large prompts and makes relevant tables harder to select.
+Large-schema summaries keep very wide or repeated schemas compact. For ordinary
+schemas, the planner is not forced through a retrieval guess first.
 
 Cache layout:
 
 - `methods/sol01/.cache/snow_index.json`: base metadata cache from
   `uv run sol01 index`
 - `methods/sol01/.cache/schema_retrieval_index/<DB>/current.json`: pointer to
-  the active retrieval index version
+  the active schema-context version
 - `methods/sol01/.cache/schema_retrieval_index/<DB>/versions/<cache_key>/`:
-  `manifest.json`, `objects.jsonl`, `chunks.jsonl`, and `sparse.json`
+  `manifest.json`, `objects.jsonl`, and `chunks.jsonl`
 
 Large-schema summaries live in
 `methods/sol01/metadata/large_schema_summaries.json`. Add or edit one summary
@@ -172,8 +171,8 @@ that should be represented compactly. Each summary must define:
   examples, and aliases
 
 Do not include benchmark answers, gold SQL, instance IDs, or question-specific
-hints. Registry validation rejects those tokens, and the retrieval cache key
-includes the summary registry hash, so summary edits naturally create a new
+hints. Registry validation rejects those tokens, and the schema-context cache
+key includes the summary registry hash, so summary edits naturally create a new
 cache version.
 
 Runtime config can be set in the shell or `methods/sol01/.env`:
@@ -185,15 +184,15 @@ Runtime config can be set in the shell or `methods/sol01/.env`:
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
 - `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
 
-Sample values are indexed only for bounded, low-cardinality categorical
+Sample-value objects are built only for bounded, low-cardinality categorical
 evidence. High-cardinality, opaque, free-text, numeric, temporal,
 semi-structured, URL, email, UUID, hash, key-like, and raw text values are
-excluded so retrieval does not promote arbitrary literals into SQL prompts.
+excluded so arbitrary literals are not promoted into SQL prompts.
 
 Each task trace records `schema_retrieval_version`, effective retrieval config,
-retrieved object evidence, sparse/exact diagnostics, planner
-sanitization diagnostics, resolver entries, allowed tables, and schema
-expansion diagnostics when repair adds schema context.
+available schema-object evidence, context diagnostics, planner sanitization
+diagnostics, resolver entries, allowed tables, and schema expansion diagnostics
+when repair adds schema context.
 
 To verify prompt size, inspect `schema_retrieval.prompt_budget` in
 `traces/<instance_id>.json`, or run:

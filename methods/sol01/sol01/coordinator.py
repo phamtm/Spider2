@@ -1,4 +1,4 @@
-"""Coordinate retrieval, LLM calls, validation, execution, and trace writing."""
+"""Coordinate schema context, LLM calls, validation, execution, and trace writing."""
 
 from __future__ import annotations
 
@@ -175,7 +175,7 @@ def _prewarm_schema_indexes(
     cache_path: Path = CACHE_PATH,
     schema_retrieval_config: SchemaRetrievalConfig,
 ) -> None:
-    """Build each selected database retrieval index before workers start."""
+    """Build each selected database schema-context cache before workers start."""
 
     seen: set[str] = set()
     for task in tasks:
@@ -443,7 +443,7 @@ def _run_planning(
     *,
     schema_retrieval_config: SchemaRetrievalConfig,
 ) -> tuple[SchemaSelection, Intent, dict[str, Any], str, dict[str, Any]]:
-    """Retrieve schema objects and run the retrieval-scoped planning call."""
+    """Select schema metadata objects and run the schema-scoped planning call."""
 
     db_index = load_db_index(task.db)
     retrieval_index = build_retrieval_index(

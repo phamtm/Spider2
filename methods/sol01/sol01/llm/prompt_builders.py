@@ -160,7 +160,7 @@ def _retrieval_planning_user_prompt(
     max_evidence_chars: int = _RETRIEVAL_PLANNING_EVIDENCE_CHAR_LIMIT,
     max_total_chars: int | None = None,
 ) -> str:
-    """Build a planner prompt limited to retrieved logical schema objects."""
+    """Build a planner prompt from deterministic schema metadata objects."""
 
     docs_limit = max(0, max_docs_chars)
     evidence_limit = max(0, max_evidence_chars)
@@ -214,14 +214,15 @@ def _format_retrieval_planning_user_prompt(
         f"Question: {task.question}\n\n"
         f"Database: {db}\n\n"
         f"Document context:\n{_clip_context(docs_context, max_docs_chars)}\n\n"
-        "Retrieved logical schema object evidence:\n"
+        "Available schema metadata evidence:\n"
         f"{_retrieved_object_evidence(retrieved_objects, max_chars=max_evidence_chars)}\n\n"
         "Available object ids:\n"
         f"{json.dumps(available_ids, indent=2)}\n\n"
-        "Select only logical schema objects from the retrieved candidates above. "
+        "Select only logical schema objects from the available schema metadata above. "
         "Do not invent object ids, table names, column names, joins, families, suffixes, "
         "versions, or date constraints that are not grounded in the question, documents, "
-        "or retrieved evidence. Do not use any full database DDL or schema summary.\n\n"
+        "or available schema metadata. For large schemas, rely on curated summaries instead "
+        "of raw wide-schema DDL.\n\n"
         "Return a HybridPlanningDecision. Populate selected_objects with object ids from "
         "Available object ids and roles such as primary, supporting, join, filter, metric, "
         "dimension, or unknown. Populate constraints with any grounded date_start, date_end, "
@@ -286,12 +287,12 @@ def sanitize_hybrid_planning_decision(
     rationale = decision.rationale.strip()
     if rejected_object_ids or rejected_table_names:
         rationale = (
-            f"{rationale} Ignored ids or table names outside retrieved candidates."
+            f"{rationale} Ignored ids or table names outside available schema metadata."
         ).strip()
     if duplicate_object_ids:
         rationale = f"{rationale} Ignored duplicate selections.".strip()
     if not selected:
-        rationale = f"{rationale} No valid retrieved schema objects were selected.".strip()
+        rationale = f"{rationale} No valid schema objects were selected.".strip()
 
     sanitized = decision.model_copy(
         update={
@@ -323,7 +324,7 @@ def _retrieved_object_evidence(
     *,
     max_chars: int,
 ) -> str:
-    """Render retrieved object evidence without expanding full database schema text."""
+    """Render schema object evidence with prompt-size bounds."""
 
     lines: list[str] = []
     remaining = max_chars
