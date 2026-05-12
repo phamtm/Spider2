@@ -21,6 +21,11 @@ from sol01.infra.logging import get_logger
 from sol01.infra.paths import REPO_ROOT
 from sol01.models import RetrievalChunk, SchemaObject, TableSchema
 from sol01.schema.chunks import render_schema_chunks
+from sol01.schema.large_schema_summaries import (
+    DEFAULT_LARGE_SCHEMA_SUMMARY_PATH,
+    LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
+    large_schema_summary_registry_hash,
+)
 from sol01.schema.objects import build_schema_objects
 from sol01.schema.retrieval import load_db_index
 
@@ -28,6 +33,25 @@ OBJECT_BUILDER_VERSION = "schema-objects-v1"
 CHUNK_RENDER_VERSION = "schema-chunks-v1"
 SPARSE_INDEX_VERSION = "bm25-v1"
 MANIFEST_VERSION = 2
+REQUIRED_INDEX_ARTIFACTS = frozenset(
+    {"objects.jsonl", "chunks.jsonl", "sparse.json", "manifest.json"}
+)
+REQUIRED_MANIFEST_FIELDS = frozenset(
+    {
+        "manifest_version",
+        "db",
+        "cache_key",
+        "source_schema_hash",
+        "object_builder_version",
+        "chunk_render_version",
+        "curated_summary_registry_hash",
+        "curated_summary_registry_version",
+        "sparse_index_version",
+        "family_similarity_threshold",
+        "object_count",
+        "chunk_count",
+    }
+)
 DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT = (
     REPO_ROOT / "methods" / "sol01" / ".cache" / "schema_retrieval_index"
 ).resolve()
@@ -66,6 +90,8 @@ def build_retrieval_index(
     cache_root: Path = DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT,
     object_builder_version: str = OBJECT_BUILDER_VERSION,
     chunk_render_version: str = CHUNK_RENDER_VERSION,
+    curated_summary_registry_path: Path = DEFAULT_LARGE_SCHEMA_SUMMARY_PATH,
+    curated_summary_registry_version: str = LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
     lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
     lock_poll_seconds: float = DEFAULT_LOCK_POLL_SECONDS,
 ) -> SchemaRetrievalIndex:
@@ -80,12 +106,17 @@ def build_retrieval_index(
         family_similarity_threshold=config.family_similarity_threshold,
     )
     chunks = render_schema_chunks(objects)
+    curated_summary_registry_hash = large_schema_summary_registry_hash(
+        curated_summary_registry_path
+    )
     cache_key = retrieval_index_cache_key(
         db=db,
         source_schema_hash=source_hash,
         object_builder_version=object_builder_version,
         chunk_render_version=chunk_render_version,
         family_similarity_threshold=config.family_similarity_threshold,
+        curated_summary_registry_hash=curated_summary_registry_hash,
+        curated_summary_registry_version=curated_summary_registry_version,
     )
     version_dir = _version_dir(cache_root, db, cache_key)
     current_path = _current_pointer_path(cache_root, db)
@@ -194,6 +225,8 @@ def build_retrieval_index(
                 object_builder_version=object_builder_version,
                 chunk_render_version=chunk_render_version,
                 family_similarity_threshold=config.family_similarity_threshold,
+                curated_summary_registry_hash=curated_summary_registry_hash,
+                curated_summary_registry_version=curated_summary_registry_version,
                 objects=objects,
                 chunks=chunks,
             )
@@ -319,6 +352,8 @@ def retrieval_index_cache_key(
     object_builder_version: str,
     chunk_render_version: str,
     family_similarity_threshold: float,
+    curated_summary_registry_hash: str,
+    curated_summary_registry_version: str,
 ) -> str:
     """Return a deterministic cache key for all inputs that affect retrieval artifacts."""
 
@@ -326,6 +361,8 @@ def retrieval_index_cache_key(
         {
             "cache_schema": MANIFEST_VERSION,
             "chunk_render_version": chunk_render_version,
+            "curated_summary_registry_hash": curated_summary_registry_hash,
+            "curated_summary_registry_version": curated_summary_registry_version,
             "db": db,
             "family_similarity_threshold": family_similarity_threshold,
             "object_builder_version": object_builder_version,
@@ -344,6 +381,8 @@ def _write_index_artifacts(
     object_builder_version: str,
     chunk_render_version: str,
     family_similarity_threshold: float,
+    curated_summary_registry_hash: str,
+    curated_summary_registry_version: str,
     objects: Sequence[SchemaObject],
     chunks: Sequence[RetrievalChunk],
 ) -> None:
@@ -359,6 +398,8 @@ def _write_index_artifacts(
         "source_schema_hash": source_hash,
         "object_builder_version": object_builder_version,
         "chunk_render_version": chunk_render_version,
+        "curated_summary_registry_hash": curated_summary_registry_hash,
+        "curated_summary_registry_version": curated_summary_registry_version,
         "sparse_index_version": SPARSE_INDEX_VERSION,
         "family_similarity_threshold": family_similarity_threshold,
         "object_count": len(objects),
@@ -422,7 +463,11 @@ def _load_valid_index(
     """Load one version directory, returning None when validation fails."""
 
     try:
+        if _artifact_names(cache_dir) != REQUIRED_INDEX_ARTIFACTS:
+            return None
         manifest = _read_json(cache_dir / "manifest.json")
+        if not REQUIRED_MANIFEST_FIELDS.issubset(manifest):
+            return None
         if manifest.get("manifest_version") != MANIFEST_VERSION:
             return None
         if manifest.get("db") != db or manifest.get("cache_key") != cache_key:
@@ -443,6 +488,10 @@ def _load_valid_index(
         return None
 
     if manifest.get("object_count") != len(objects) or manifest.get("chunk_count") != len(chunks):
+        return None
+    if manifest.get("sparse_index_version") != SPARSE_INDEX_VERSION:
+        return None
+    if sparse.get("version") != SPARSE_INDEX_VERSION:
         return None
     if sparse.get("chunk_ids") != [chunk.chunk_id for chunk in chunks]:
         return None
@@ -604,6 +653,10 @@ def _read_current_pointer(current_path: Path) -> dict[str, Any]:
     if not isinstance(pointer, dict):
         raise RetrievalIndexError(f"invalid current retrieval index pointer: {current_path}")
     return pointer
+
+
+def _artifact_names(cache_dir: Path) -> frozenset[str]:
+    return frozenset(path.name for path in cache_dir.iterdir())
 
 
 def _load_db_index(db: str) -> dict[str, TableSchema]:

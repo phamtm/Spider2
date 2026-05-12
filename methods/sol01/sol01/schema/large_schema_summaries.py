@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from functools import cache
@@ -15,6 +16,7 @@ from sol01.infra.paths import REPO_ROOT
 DEFAULT_LARGE_SCHEMA_SUMMARY_PATH = (
     REPO_ROOT / "methods" / "sol01" / "metadata" / "large_schema_summaries.json"
 )
+LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION = "large-schema-summaries-v1"
 
 FORBIDDEN_SUMMARY_TOKENS = (
     "gold sql",
@@ -269,6 +271,16 @@ def load_large_schema_summary_registry(
 
     signature = _path_signature(path)
     return _load_large_schema_summary_registry(str(path.resolve()), signature)
+
+
+def large_schema_summary_registry_hash(
+    path: Path = DEFAULT_LARGE_SCHEMA_SUMMARY_PATH,
+) -> str:
+    """Return a stable hash for the curated summary registry payload."""
+
+    raw_payload = json.loads(path.read_text(encoding="utf-8"))
+    encoded = json.dumps(raw_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 @cache
