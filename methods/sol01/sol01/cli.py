@@ -37,7 +37,6 @@ from sol01.output.output import (
 )
 from sol01.output.registry import resolve_llm_call_log_path
 from sol01.schema.index import CACHE_PATH, build_index_cache
-from sol01.schema.ollama_provider import OllamaEmbeddingProvider
 from sol01.schema.retrieval_eval import (
     DEFAULT_GOLD_TABLE_PATH,
     load_gold_tables,
@@ -630,15 +629,10 @@ def handle_retrieval_eval(
     config = SchemaRetrievalConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
     if object_cutoff is not None:
         config = config.model_copy(update={"object_top_k": object_cutoff})
-    provider = OllamaEmbeddingProvider(
-        model=config.embedding_model,
-        base_url=config.ollama_base_url,
-    )
     return run_retrieval_eval(
         tasks,
         gold_tables_by_instance=gold_tables,
         config=config,
-        embedding_provider=provider,
     )
 
 
@@ -686,11 +680,7 @@ def _prewarm_schema_retrieval_indexes(dbs: Iterable[str]) -> list[Any]:
     """Build schema retrieval indexes once before concurrent solver work begins."""
 
     config = SchemaRetrievalConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
-    provider = OllamaEmbeddingProvider(
-        model=config.embedding_model,
-        base_url=config.ollama_base_url,
-    )
-    return prewarm_retrieval_indexes(dbs, embedding_provider=provider, config=config)
+    return prewarm_retrieval_indexes(dbs, config=config)
 
 
 def _load_filtered_tasks(

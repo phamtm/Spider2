@@ -224,7 +224,7 @@ def test_retrieval_core_models_construct_and_validate_object_types():
         object_id=schema_object.object_id,
         text="Orders table with amount and customer fields.",
     )
-    retrieved_chunk = RetrievedChunk(chunk=chunk, rank=1, embedding_score=0.82)
+    retrieved_chunk = RetrievedChunk(chunk=chunk, rank=1, score=0.82)
     retrieved_object = RetrievedSchemaObject(
         schema_object=schema_object,
         chunks=[retrieved_chunk],

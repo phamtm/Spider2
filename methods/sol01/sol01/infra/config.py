@@ -11,12 +11,8 @@ DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "deepseek/deepseek-v4-pro"
 DEFAULT_PROVIDER_ONLY = "deepseek"
 DEFAULT_CONCURRENCY = 4
-DEFAULT_SCHEMA_RETRIEVAL_VERSION = "hybrid_v1"
-DEFAULT_OLLAMA_BASE_URL = "http://127.0.0.1:11434"
-DEFAULT_SCHEMA_EMBEDDING_MODEL = "qwen3-embedding:4b"
-DEFAULT_SCHEMA_RERANKER_MODEL = "qwen3-reranker:4b"
+DEFAULT_SCHEMA_RETRIEVAL_VERSION = "lexical_v1"
 DEFAULT_RETRIEVAL_CHUNK_TOP_K = 80
-DEFAULT_RETRIEVAL_RERANK_TOP_K = 20
 DEFAULT_RETRIEVAL_OBJECT_TOP_K = 12
 DEFAULT_RETRIEVAL_FAMILY_TOP_K = 8
 DEFAULT_FAMILY_SIMILARITY_THRESHOLD = 0.82
@@ -90,11 +86,7 @@ class SchemaRetrievalConfig(BaseModel):
     """Local schema-retrieval settings used before LLM planning."""
 
     schema_retrieval_version: str = DEFAULT_SCHEMA_RETRIEVAL_VERSION
-    ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
-    embedding_model: str = DEFAULT_SCHEMA_EMBEDDING_MODEL
-    reranker_model: str = DEFAULT_SCHEMA_RERANKER_MODEL
     chunk_top_k: int = Field(default=DEFAULT_RETRIEVAL_CHUNK_TOP_K, ge=1)
-    rerank_top_k: int = Field(default=DEFAULT_RETRIEVAL_RERANK_TOP_K, ge=1)
     object_top_k: int = Field(default=DEFAULT_RETRIEVAL_OBJECT_TOP_K, ge=1)
     family_top_k: int = Field(default=DEFAULT_RETRIEVAL_FAMILY_TOP_K, ge=1)
     family_similarity_threshold: float = Field(
@@ -115,20 +107,9 @@ class SchemaRetrievalConfig(BaseModel):
             schema_retrieval_version=(
                 _env_first("SOL01_SCHEMA_RETRIEVAL_VERSION") or DEFAULT_SCHEMA_RETRIEVAL_VERSION
             ),
-            ollama_base_url=_env_first("SOL01_OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL,
-            embedding_model=(
-                _env_first("SOL01_SCHEMA_EMBEDDING_MODEL") or DEFAULT_SCHEMA_EMBEDDING_MODEL
-            ),
-            reranker_model=(
-                _env_first("SOL01_SCHEMA_RERANKER_MODEL") or DEFAULT_SCHEMA_RERANKER_MODEL
-            ),
             chunk_top_k=_env_positive_int(
                 "SOL01_SCHEMA_CHUNK_TOP_K",
                 default=DEFAULT_RETRIEVAL_CHUNK_TOP_K,
-            ),
-            rerank_top_k=_env_positive_int(
-                "SOL01_SCHEMA_RERANK_TOP_K",
-                default=DEFAULT_RETRIEVAL_RERANK_TOP_K,
             ),
             object_top_k=_env_positive_int(
                 "SOL01_SCHEMA_OBJECT_TOP_K",

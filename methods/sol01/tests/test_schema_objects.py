@@ -218,7 +218,6 @@ def test_sample_values_include_only_bounded_categorical_values():
     for sample_value in sample_values:
         assert sample_value.metadata["sample_size"] == 3
         assert sample_value.metadata["distinct_count"] == 2
-        assert sample_value.metadata["dense_embedding_default"] is False
         assert sample_value.metadata["inclusion_reason"] == "repeated_bounded_sample"
 
 

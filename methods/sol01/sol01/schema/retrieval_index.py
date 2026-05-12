@@ -16,22 +16,18 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-import numpy as np
-
 from sol01.infra.config import SchemaRetrievalConfig
 from sol01.infra.logging import get_logger
 from sol01.infra.paths import REPO_ROOT
 from sol01.models import RetrievalChunk, SchemaObject, TableSchema
 from sol01.schema.chunks import render_schema_chunks
-from sol01.schema.embedding import EmbeddingProvider, SchemaProviderError
 from sol01.schema.objects import build_schema_objects
-from sol01.schema.ollama_provider import OllamaEmbeddingProvider
 from sol01.schema.retrieval import load_db_index
 
 OBJECT_BUILDER_VERSION = "schema-objects-v1"
 CHUNK_RENDER_VERSION = "schema-chunks-v1"
 SPARSE_INDEX_VERSION = "bm25-v1"
-MANIFEST_VERSION = 1
+MANIFEST_VERSION = 2
 DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT = (
     REPO_ROOT / "methods" / "sol01" / ".cache" / "schema_retrieval_index"
 ).resolve()
@@ -60,17 +56,14 @@ class SchemaRetrievalIndex:
     objects: list[SchemaObject]
     chunks: list[RetrievalChunk]
     sparse: dict[str, Any]
-    embeddings: np.ndarray
 
 
 def build_retrieval_index(
     db: str,
     *,
     db_index: Mapping[str, TableSchema] | None = None,
-    embedding_provider: EmbeddingProvider | None = None,
     config: SchemaRetrievalConfig | None = None,
     cache_root: Path = DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT,
-    model_metadata: Mapping[str, object] | None = None,
     object_builder_version: str = OBJECT_BUILDER_VERSION,
     chunk_render_version: str = CHUNK_RENDER_VERSION,
     lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
@@ -87,19 +80,11 @@ def build_retrieval_index(
         family_similarity_threshold=config.family_similarity_threshold,
     )
     chunks = render_schema_chunks(objects)
-    provider = embedding_provider or _default_embedding_provider(config)
-    model_fingerprint = _embedding_model_fingerprint(
-        provider,
-        configured_model=config.embedding_model,
-        explicit_metadata=model_metadata,
-    )
     cache_key = retrieval_index_cache_key(
         db=db,
         source_schema_hash=source_hash,
         object_builder_version=object_builder_version,
         chunk_render_version=chunk_render_version,
-        embedding_model=config.embedding_model,
-        embedding_model_metadata=model_fingerprint,
         family_similarity_threshold=config.family_similarity_threshold,
     )
     version_dir = _version_dir(cache_root, db, cache_key)
@@ -111,7 +96,6 @@ def build_retrieval_index(
         table_count=len(db_index),
         object_count=len(objects),
         chunk_count=len(chunks),
-        embedding_model=config.embedding_model,
         cache_key=cache_key,
     )
 
@@ -209,12 +193,9 @@ def build_retrieval_index(
                 source_hash=source_hash,
                 object_builder_version=object_builder_version,
                 chunk_render_version=chunk_render_version,
-                embedding_model=config.embedding_model,
-                embedding_model_metadata=model_fingerprint,
                 family_similarity_threshold=config.family_similarity_threshold,
                 objects=objects,
                 chunks=chunks,
-                embedding_provider=provider,
             )
             loaded_temp = _load_valid_index(
                 db=db,
@@ -298,7 +279,6 @@ def load_current_retrieval_index(
 def prewarm_retrieval_indexes(
     dbs: Iterable[str],
     *,
-    embedding_provider: EmbeddingProvider | None = None,
     config: SchemaRetrievalConfig | None = None,
     cache_root: Path = DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT,
 ) -> list[SchemaRetrievalIndex]:
@@ -310,7 +290,6 @@ def prewarm_retrieval_indexes(
     indexes = [
         build_retrieval_index(
             db,
-            embedding_provider=embedding_provider,
             config=config,
             cache_root=cache_root,
         )
@@ -339,8 +318,6 @@ def retrieval_index_cache_key(
     source_schema_hash: str,
     object_builder_version: str,
     chunk_render_version: str,
-    embedding_model: str,
-    embedding_model_metadata: Mapping[str, object],
     family_similarity_threshold: float,
 ) -> str:
     """Return a deterministic cache key for all inputs that affect retrieval artifacts."""
@@ -350,8 +327,6 @@ def retrieval_index_cache_key(
             "cache_schema": MANIFEST_VERSION,
             "chunk_render_version": chunk_render_version,
             "db": db,
-            "embedding_model": embedding_model,
-            "embedding_model_metadata": dict(embedding_model_metadata),
             "family_similarity_threshold": family_similarity_threshold,
             "object_builder_version": object_builder_version,
             "source_schema_hash": source_schema_hash,
@@ -368,35 +343,15 @@ def _write_index_artifacts(
     source_hash: str,
     object_builder_version: str,
     chunk_render_version: str,
-    embedding_model: str,
-    embedding_model_metadata: Mapping[str, object],
     family_similarity_threshold: float,
     objects: Sequence[SchemaObject],
     chunks: Sequence[RetrievalChunk],
-    embedding_provider: EmbeddingProvider,
 ) -> None:
     """Write one complete version directory before it is published."""
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     logger.info("schema retrieval sparse index start", db=db, cache_key=cache_key)
     sparse = _build_sparse_index(chunks)
-    dense_count = sum(
-        1 for chunk in chunks if chunk.include_dense_embedding and chunk.embedding_text.strip()
-    )
-    logger.info(
-        "schema retrieval embeddings start",
-        db=db,
-        cache_key=cache_key,
-        dense_text_count=dense_count,
-        chunk_count=len(chunks),
-    )
-    embeddings = _build_embedding_matrix(chunks, embedding_provider)
-    logger.info(
-        "schema retrieval embeddings complete",
-        db=db,
-        cache_key=cache_key,
-        embedding_shape=list(embeddings.shape),
-    )
     manifest = {
         "manifest_version": MANIFEST_VERSION,
         "db": db,
@@ -405,18 +360,14 @@ def _write_index_artifacts(
         "object_builder_version": object_builder_version,
         "chunk_render_version": chunk_render_version,
         "sparse_index_version": SPARSE_INDEX_VERSION,
-        "embedding_model": embedding_model,
-        "embedding_model_metadata": dict(embedding_model_metadata),
         "family_similarity_threshold": family_similarity_threshold,
         "object_count": len(objects),
         "chunk_count": len(chunks),
-        "embedding_shape": list(embeddings.shape),
     }
 
     _write_jsonl(cache_dir / "objects.jsonl", [obj.model_dump(mode="json") for obj in objects])
     _write_jsonl(cache_dir / "chunks.jsonl", [chunk.model_dump(mode="json") for chunk in chunks])
     _write_json(cache_dir / "sparse.json", sparse)
-    np.save(cache_dir / "embeddings.npy", embeddings)
     _write_json(cache_dir / "manifest.json", manifest)
     logger.info(
         "schema retrieval artifacts written",
@@ -461,39 +412,6 @@ def _build_sparse_index(chunks: Sequence[RetrievalChunk]) -> dict[str, Any]:
     }
 
 
-def _build_embedding_matrix(
-    chunks: Sequence[RetrievalChunk],
-    embedding_provider: EmbeddingProvider,
-) -> np.ndarray:
-    """Return one embedding row per chunk, with zero rows for sparse-only chunks."""
-
-    dense_positions: list[int] = []
-    dense_texts: list[str] = []
-    for index, chunk in enumerate(chunks):
-        if not chunk.include_dense_embedding or not chunk.embedding_text.strip():
-            continue
-        dense_positions.append(index)
-        dense_texts.append(chunk.embedding_text)
-
-    dense_vectors = embedding_provider.embed_texts(dense_texts) if dense_texts else []
-    if len(dense_vectors) != len(dense_texts):
-        raise SchemaProviderError(
-            "embedding provider returned a different number of vectors than input texts"
-        )
-    if not dense_vectors:
-        return np.zeros((len(chunks), 0), dtype=np.float32)
-
-    dimensions = len(dense_vectors[0])
-    if dimensions < 1:
-        raise SchemaProviderError("embedding provider returned an empty vector")
-    matrix = np.zeros((len(chunks), dimensions), dtype=np.float32)
-    for position, vector in zip(dense_positions, dense_vectors, strict=True):
-        if len(vector) != dimensions:
-            raise SchemaProviderError("embedding provider returned inconsistent vector dimensions")
-        matrix[position] = np.asarray(vector, dtype=np.float32)
-    return matrix
-
-
 def _load_valid_index(
     *,
     db: str,
@@ -505,6 +423,8 @@ def _load_valid_index(
 
     try:
         manifest = _read_json(cache_dir / "manifest.json")
+        if manifest.get("manifest_version") != MANIFEST_VERSION:
+            return None
         if manifest.get("db") != db or manifest.get("cache_key") != cache_key:
             return None
         if (
@@ -519,13 +439,10 @@ def _load_valid_index(
             RetrievalChunk.model_validate(row) for row in _read_jsonl(cache_dir / "chunks.jsonl")
         ]
         sparse = _read_json(cache_dir / "sparse.json")
-        embeddings = np.load(cache_dir / "embeddings.npy")
     except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError):
         return None
 
     if manifest.get("object_count") != len(objects) or manifest.get("chunk_count") != len(chunks):
-        return None
-    if embeddings.shape[0] != len(chunks):
         return None
     if sparse.get("chunk_ids") != [chunk.chunk_id for chunk in chunks]:
         return None
@@ -541,7 +458,6 @@ def _load_valid_index(
         objects=objects,
         chunks=chunks,
         sparse=sparse,
-        embeddings=embeddings,
     )
 
 
@@ -688,39 +604,6 @@ def _read_current_pointer(current_path: Path) -> dict[str, Any]:
     if not isinstance(pointer, dict):
         raise RetrievalIndexError(f"invalid current retrieval index pointer: {current_path}")
     return pointer
-
-
-def _embedding_model_fingerprint(
-    provider: EmbeddingProvider,
-    *,
-    configured_model: str,
-    explicit_metadata: Mapping[str, object] | None,
-) -> dict[str, object]:
-    """Collect model metadata that should affect cache invalidation when available."""
-
-    fingerprint: dict[str, object] = {
-        "configured_model": configured_model,
-        "provider_class": f"{provider.__class__.__module__}.{provider.__class__.__qualname__}",
-    }
-    for attribute in ("model", "model_digest", "digest"):
-        value = getattr(provider, attribute, None)
-        if value is not None:
-            fingerprint[attribute] = _json_safe(value)
-    provider_metadata = getattr(provider, "model_metadata", None)
-    if callable(provider_metadata):
-        provider_metadata = provider_metadata()
-    if provider_metadata is not None:
-        fingerprint["provider_metadata"] = _json_safe(provider_metadata)
-    if explicit_metadata:
-        fingerprint["explicit_metadata"] = _json_safe(dict(explicit_metadata))
-    return fingerprint
-
-
-def _default_embedding_provider(config: SchemaRetrievalConfig) -> EmbeddingProvider:
-    return OllamaEmbeddingProvider(
-        model=config.embedding_model,
-        base_url=config.ollama_base_url,
-    )
 
 
 def _load_db_index(db: str) -> dict[str, TableSchema]:

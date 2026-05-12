@@ -18,7 +18,6 @@ from sol01.models import (
     TableSchema,
     Task,
 )
-from sol01.schema.embedding import EmbeddingProvider, RerankerProvider
 from sol01.schema.hybrid_retrieval import retrieve_schema_objects
 from sol01.schema.resolver import resolve_schema_context
 from sol01.schema.retrieval import db_schema_summary, load_db_index
@@ -78,11 +77,9 @@ def run_retrieval_eval(
     *,
     gold_tables_by_instance: Mapping[str, Sequence[str]],
     config: SchemaRetrievalConfig | None = None,
-    embedding_provider: EmbeddingProvider | None = None,
-    reranker_provider: RerankerProvider | None = None,
     db_index_loader: Callable[[str], Mapping[str, TableSchema]] = load_db_index,
     retrieval_index_loader: Callable[
-        [str, Mapping[str, TableSchema], SchemaRetrievalConfig, EmbeddingProvider | None],
+        [str, Mapping[str, TableSchema], SchemaRetrievalConfig],
         SchemaRetrievalIndex,
     ]
     | None = None,
@@ -103,14 +100,12 @@ def run_retrieval_eval(
             continue
 
         db_index = dict(db_index_loader(task.db))
-        retrieval_index = retrieval_index_loader(task.db, db_index, config, embedding_provider)
+        retrieval_index = retrieval_index_loader(task.db, db_index, config)
         linked_docs = _task_linked_docs(task, document_loader)
         retrieved_objects, retrieval_diagnostics = retrieve_schema_objects(
             retrieval_index,
             task.question,
             linked_docs=linked_docs,
-            embedding_provider=embedding_provider,
-            reranker_provider=reranker_provider,
             config=config,
         )
         cutoff_objects = list(retrieved_objects[: config.object_top_k])
@@ -185,14 +180,12 @@ def _build_index_for_eval(
     db: str,
     db_index: Mapping[str, TableSchema],
     config: SchemaRetrievalConfig,
-    embedding_provider: EmbeddingProvider | None,
 ) -> SchemaRetrievalIndex:
     """Build retrieval artifacts without touching runtime coordinator paths."""
 
     return build_retrieval_index(
         db,
         db_index=db_index,
-        embedding_provider=embedding_provider,
         config=config,
     )
 
@@ -313,7 +306,7 @@ def _top_evidence(
     for item in retrieved_objects:
         for retrieved_chunk in item.chunks:
             chunk = retrieved_chunk.chunk
-            text = chunk.prompt_text or chunk.rerank_text or chunk.bm25_text or chunk.text
+            text = chunk.prompt_text or chunk.source_definition or chunk.bm25_text or chunk.text
             evidence.append(
                 {
                     "object_id": item.schema_object.object_id,

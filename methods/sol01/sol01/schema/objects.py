@@ -921,7 +921,6 @@ def _sample_value_objects(
                         "sample_size": decision.sample_size,
                         "distinct_count": decision.distinct_count,
                         "inclusion_reason": decision.reason,
-                        "dense_embedding_default": False,
                         "provenance": {
                             "source": "load_db_index",
                             "table_key": table_key,

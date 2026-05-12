@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from sol01.models import ColumnSchema, TableSchema
-from sol01.schema.embedding import FakeEmbeddingProvider
 from sol01.schema.retrieval_index import (
     RetrievalIndexError,
     RetrievalIndexLockTimeout,
@@ -58,11 +57,9 @@ def _db_index(*, extra_column: bool = False) -> dict[str, TableSchema]:
 
 
 def _build(tmp_path: Path, **kwargs):
-    provider = FakeEmbeddingProvider(dimensions=4)
     return build_retrieval_index(
         "DB",
         db_index=_db_index(),
-        embedding_provider=provider,
         cache_root=tmp_path,
         lock_timeout_seconds=0.1,
         lock_poll_seconds=0.01,
@@ -78,8 +75,6 @@ def test_builds_loads_and_validates_retrieval_index_for_one_database(tmp_path):
     assert (index.cache_dir / "objects.jsonl").exists()
     assert (index.cache_dir / "chunks.jsonl").exists()
     assert (index.cache_dir / "sparse.json").exists()
-    assert (index.cache_dir / "embeddings.npy").exists()
-    assert index.embeddings.shape[0] == len(index.chunks)
     assert index.sparse["chunk_ids"] == [chunk.chunk_id for chunk in index.chunks]
     assert max(index.sparse["document_frequency"].values()) <= len(index.chunks)
 
@@ -96,8 +91,6 @@ def test_cache_key_changes_for_schema_versions_model_metadata_and_family_thresho
         "source_schema_hash": source_hash,
         "object_builder_version": "objects-v1",
         "chunk_render_version": "chunks-v1",
-        "embedding_model": "embed-a",
-        "embedding_model_metadata": {"digest": "sha-a"},
         "family_similarity_threshold": 0.82,
     }
 
@@ -106,11 +99,6 @@ def test_cache_key_changes_for_schema_versions_model_metadata_and_family_thresho
     assert retrieval_index_cache_key(**{**base, "source_schema_hash": "different"}) != baseline
     assert retrieval_index_cache_key(**{**base, "object_builder_version": "objects-v2"}) != baseline
     assert retrieval_index_cache_key(**{**base, "chunk_render_version": "chunks-v2"}) != baseline
-    assert retrieval_index_cache_key(**{**base, "embedding_model": "embed-b"}) != baseline
-    assert (
-        retrieval_index_cache_key(**{**base, "embedding_model_metadata": {"digest": "sha-b"}})
-        != baseline
-    )
     assert retrieval_index_cache_key(**{**base, "family_similarity_threshold": 0.9}) != baseline
 
 
@@ -154,13 +142,12 @@ def test_current_pointer_update_uses_os_replace(tmp_path, monkeypatch):
 
 def test_stale_missing_cache_artifact_is_rebuilt_under_same_key(tmp_path):
     first = _build(tmp_path)
-    (first.cache_dir / "embeddings.npy").unlink()
+    (first.cache_dir / "sparse.json").unlink()
 
     rebuilt = _build(tmp_path)
 
     assert rebuilt.cache_key == first.cache_key
-    assert (rebuilt.cache_dir / "embeddings.npy").exists()
-    assert rebuilt.embeddings.shape[0] == len(rebuilt.chunks)
+    assert (rebuilt.cache_dir / "sparse.json").exists()
     assert list(rebuilt.cache_dir.parent.glob(".*.invalid.*"))
 
 

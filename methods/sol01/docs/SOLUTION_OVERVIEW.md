@@ -32,7 +32,7 @@ Each Spider2-Snow task gives the solver:
 ```text
 Spider2-Snow task
   -> load database metadata
-  -> retrieve and rerank relevant logical schema objects
+  -> retrieve relevant logical schema objects
   -> ask the LLM to select from retrieved objects and describe question intent
   -> resolve selected logical objects to physical Snowflake tables
   -> render compact schema context for SQL generation
@@ -109,7 +109,7 @@ available, because table identity matters during validation and execution.
 
 The retrieval cache is built per database from the base metadata cache. It
 contains canonical schema objects, retrieval chunks, sparse BM25-style postings,
-dense embeddings, and a version manifest:
+and a version manifest:
 
 ```text
 methods/sol01/.cache/schema_retrieval_index/<DB>/
@@ -119,7 +119,6 @@ methods/sol01/.cache/schema_retrieval_index/<DB>/
     objects.jsonl
     chunks.jsonl
     sparse.json
-    embeddings.npy
 ```
 
 Build retrieval indexes before a batch run with either command:
@@ -130,9 +129,9 @@ uv run sol01 run --db E_COMMERCE --prewarm-schema-index
 ```
 
 The retrieval index cache key includes the source schema hash, schema-object
-builder version, chunk renderer version, sparse-index version, embedding model
-metadata, and family similarity threshold. If one of those inputs changes, a
-new version directory is created and `current.json` is updated.
+builder version, chunk renderer version, sparse-index version, and family
+similarity threshold. If one of those inputs changes, a new version directory
+is created and `current.json` is updated.
 
 ## Retrieval-First Planning
 
@@ -148,8 +147,7 @@ The runtime pipeline is:
 
 ```text
 question
-  -> hybrid retrieval over schema chunks
-  -> local reranking
+  -> lexical retrieval over schema chunks
   -> LLM planner selects retrieved logical objects
   -> resolver expands logical families to physical tables
   -> compact schema context is rendered
@@ -165,10 +163,9 @@ Schema objects are logical, not just physical tables. They include:
 - bounded categorical sample-value objects
 - table-family objects for partitioned or suffixed physical tables
 
-Hybrid retrieval combines sparse lexical scoring, dense embeddings, exact
-literal/code/date matches, and reranking. Linked markdown documents are clipped
-to passages that overlap with the question before retrieval, rather than being
-sent wholesale.
+Lexical retrieval combines sparse scoring with exact literal, code, and date
+matches. Linked markdown documents are clipped to passages that overlap with
+the question before retrieval, rather than being sent wholesale.
 
 For each question, the planner sees only retrieved object evidence. It returns
 selected object IDs, object roles, constraints, and the answer contract in one
@@ -222,36 +219,19 @@ Sample-value objects are excluded for:
 - columns where every sampled value is distinct unless the column name is
   explicitly categorical
 
-Included sample values are sparse/exact-match evidence by default, not dense
-embedding targets. If a question mentions an included sample value, the solver
-can keep that value tied to its native column instead of converting it into an
-invented rule.
-
-## Ollama Requirements
-
-Schema retrieval runs against local Ollama providers:
-
-- embedding model: `qwen3-embedding:4b`
-- reranker model: `qwen3-reranker:4b` or another local Qwen3-Reranker-4B tag
-  configured with `SOL01_SCHEMA_RERANKER_MODEL`
-
-The reranker must expose usable yes/no `logprobs` or `top_logprobs` from
-Ollama `/api/generate`. If Ollama is down, a model tag is missing, or reranker
-logprobs are unavailable, retrieval fails with an actionable provider error.
+Included sample values are sparse/exact-match evidence. If a question mentions
+an included sample value, the solver can keep that value tied to its native
+column instead of converting it into an invented rule.
 
 Relevant runtime settings:
 
-- `SOL01_OLLAMA_BASE_URL`, default `http://127.0.0.1:11434`
-- `SOL01_SCHEMA_EMBEDDING_MODEL`, default `qwen3-embedding:4b`
-- `SOL01_SCHEMA_RERANKER_MODEL`, default `qwen3-reranker:4b`
 - `SOL01_SCHEMA_CHUNK_TOP_K`, default `80`
-- `SOL01_SCHEMA_RERANK_TOP_K`, default `20`
 - `SOL01_SCHEMA_OBJECT_TOP_K`, default `12`
 - `SOL01_SCHEMA_FAMILY_TOP_K`, default `8`
 - `SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD`, default `0.82`
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
 - `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
-- `SOL01_SCHEMA_RETRIEVAL_VERSION`, default `hybrid_v1`
+- `SOL01_SCHEMA_RETRIEVAL_VERSION`, default `lexical_v1`
 
 These can be set in the shell or in `methods/sol01/.env`.
 
@@ -409,7 +389,7 @@ Retrieval traces also include:
 
 - `schema_retrieval_version`
 - effective `schema_retrieval_config`
-- retrieval diagnostics for sparse, dense, exact, and rerank stages
+- retrieval diagnostics for sparse and exact stages
 - retrieved object IDs, scores, evidence, and chunk snippets
 - planner sanitization diagnostics
 - resolver entries, allowed tables, and resolver warnings
@@ -513,8 +493,8 @@ trace races.
 - `sol01/schema/index.py`: builds the Snowflake metadata cache.
 - `sol01/schema/objects.py`: builds canonical logical schema objects.
 - `sol01/schema/chunks.py`: renders retrieval chunks from schema objects.
-- `sol01/schema/retrieval_index.py`: builds versioned sparse and dense retrieval indexes.
-- `sol01/schema/hybrid_retrieval.py`: runs sparse, dense, exact, and rerank retrieval.
+- `sol01/schema/retrieval_index.py`: builds versioned sparse retrieval indexes.
+- `sol01/schema/hybrid_retrieval.py`: runs sparse and exact retrieval.
 - `sol01/schema/resolver.py`: resolves selected logical objects to physical table context.
 - `sol01/schema/retrieval_eval.py`: evaluates offline retrieval coverage.
 - `sol01/docs.py`: loads linked markdown documents.

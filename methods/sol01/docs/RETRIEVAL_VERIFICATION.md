@@ -8,7 +8,7 @@ selection work tracked by `sp-tvm.14`.
 ## Code Audit
 
 - Runtime planning enters `_run_planning()` in `sol01/coordinator.py`, builds a
-  versioned retrieval index, retrieves/reranks schema objects, calls
+  versioned retrieval index, retrieves schema objects, calls
   `_retrieval_planning_user_prompt()`, sanitizes selected object IDs, and
   resolves selected logical objects to physical tables.
 - The legacy full-schema planning and schema-expansion prompt builders were
@@ -34,7 +34,7 @@ Result: `48 passed`.
 These tests cover retrieval-scoped planning prompts, planner sanitization,
 trace `schema_retrieval_version` and `schema_retrieval` diagnostics, retrieval
 schema expansion, offline retrieval-eval accounting, resolver expansion,
-hybrid retrieval, retrieval index caching, schema objects, and chunk rendering.
+lexical retrieval, retrieval index caching, schema objects, and chunk rendering.
 
 ## Full Quality Gates
 
@@ -55,8 +55,7 @@ Results:
 Small database smoke:
 
 ```bash
-SOL01_SCHEMA_RERANKER_MODEL='dengcao/Qwen3-Reranker-4B:Q8_0' \
-  uv run sol01 retrieval-eval --db BBC --limit 1
+uv run sol01 retrieval-eval --db BBC --limit 1
 ```
 
 Result:
@@ -70,11 +69,10 @@ Result:
 Large repeated-schema smoke:
 
 ```bash
-SOL01_SCHEMA_RERANKER_MODEL='dengcao/Qwen3-Reranker-4B:Q8_0' \
-  uv run sol01 retrieval-eval --db GA360 --limit 1
+uv run sol01 retrieval-eval --db GA360 --limit 1
 ```
 
 Result: attempted against a 366-table repeated-schema database and stopped
-after several minutes of local Ollama embedding/reranking work with no failure
-output. Large/repeated-schema behavior remains covered by focused unit tests;
-the live smoke should be rerun when longer local model runtime is acceptable.
+after several minutes with no failure output. Large/repeated-schema behavior
+remains covered by focused unit tests; the live smoke should be rerun when
+longer local runtime is acceptable.

@@ -6,9 +6,6 @@ from sol01.infra.config import (
     DEFAULT_BASE_URL,
     DEFAULT_DOTENV_PATH,
     DEFAULT_MODEL,
-    DEFAULT_OLLAMA_BASE_URL,
-    DEFAULT_SCHEMA_EMBEDDING_MODEL,
-    DEFAULT_SCHEMA_RERANKER_MODEL,
     DEFAULT_SCHEMA_RETRIEVAL_VERSION,
     RuntimeConfig,
     SchemaRetrievalConfig,
@@ -16,11 +13,7 @@ from sol01.infra.config import (
 
 SCHEMA_RETRIEVAL_ENV_VARS = [
     "SOL01_SCHEMA_RETRIEVAL_VERSION",
-    "SOL01_OLLAMA_BASE_URL",
-    "SOL01_SCHEMA_EMBEDDING_MODEL",
-    "SOL01_SCHEMA_RERANKER_MODEL",
     "SOL01_SCHEMA_CHUNK_TOP_K",
-    "SOL01_SCHEMA_RERANK_TOP_K",
     "SOL01_SCHEMA_OBJECT_TOP_K",
     "SOL01_SCHEMA_FAMILY_TOP_K",
     "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD",
@@ -219,12 +212,8 @@ def test_schema_retrieval_config_defaults_to_single_local_path(monkeypatch):
     config = SchemaRetrievalConfig.from_env()
 
     assert config.schema_retrieval_version == DEFAULT_SCHEMA_RETRIEVAL_VERSION
-    assert config.ollama_base_url == DEFAULT_OLLAMA_BASE_URL
-    assert config.embedding_model == DEFAULT_SCHEMA_EMBEDDING_MODEL
-    assert config.embedding_model == "qwen3-embedding:4b"
-    assert config.reranker_model == DEFAULT_SCHEMA_RERANKER_MODEL
-    assert "reranker" in config.reranker_model.lower()
-    assert config.chunk_top_k > config.rerank_top_k >= config.object_top_k
+    assert config.schema_retrieval_version == "lexical_v1"
+    assert config.chunk_top_k > config.object_top_k
     assert config.family_top_k > 0
     assert 0.0 <= config.family_similarity_threshold <= 1.0
     assert config.max_linked_doc_chars > 0
@@ -233,11 +222,7 @@ def test_schema_retrieval_config_defaults_to_single_local_path(monkeypatch):
 
 def test_schema_retrieval_config_env_overrides(monkeypatch):
     monkeypatch.setenv("SOL01_SCHEMA_RETRIEVAL_VERSION", "schema-retrieval-v2")
-    monkeypatch.setenv("SOL01_OLLAMA_BASE_URL", "http://localhost:11435")
-    monkeypatch.setenv("SOL01_SCHEMA_EMBEDDING_MODEL", "custom-embed:latest")
-    monkeypatch.setenv("SOL01_SCHEMA_RERANKER_MODEL", "custom-reranker:4b")
     monkeypatch.setenv("SOL01_SCHEMA_CHUNK_TOP_K", "60")
-    monkeypatch.setenv("SOL01_SCHEMA_RERANK_TOP_K", "15")
     monkeypatch.setenv("SOL01_SCHEMA_OBJECT_TOP_K", "9")
     monkeypatch.setenv("SOL01_SCHEMA_FAMILY_TOP_K", "5")
     monkeypatch.setenv("SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD", "0.7")
@@ -247,11 +232,7 @@ def test_schema_retrieval_config_env_overrides(monkeypatch):
     config = SchemaRetrievalConfig.from_env()
 
     assert config.schema_retrieval_version == "schema-retrieval-v2"
-    assert config.ollama_base_url == "http://localhost:11435"
-    assert config.embedding_model == "custom-embed:latest"
-    assert config.reranker_model == "custom-reranker:4b"
     assert config.chunk_top_k == 60
-    assert config.rerank_top_k == 15
     assert config.object_top_k == 9
     assert config.family_top_k == 5
     assert config.family_similarity_threshold == 0.7

@@ -182,13 +182,10 @@ class RetrievalChunk(BaseModel):
     text: str = ""
     chunk_type: RetrievalChunkType = "schema_object"
     parent_object_ids: list[str] = Field(default_factory=list)
-    embedding_text: str = ""
     bm25_text: str = ""
-    rerank_text: str = ""
     prompt_text: str = ""
     source_definition: str = ""
     inferred_usage: str = ""
-    include_dense_embedding: bool = True
     source: Literal["schema", "linked_doc", "sample", "join", "family"] = "schema"
     linked_doc_title: str | None = None
     metadata: dict[str, object] = Field(default_factory=dict)
@@ -207,19 +204,17 @@ class RetrievalChunk(BaseModel):
     def _default_legacy_text(self) -> RetrievalChunk:
         if not self.text:
             self.text = (
-                self.embedding_text or self.prompt_text or self.rerank_text or self.bm25_text
+                self.prompt_text or self.source_definition or self.inferred_usage or self.bm25_text
             )
         return self
 
 
 class RetrievedChunk(BaseModel):
-    """One retrieval hit with embedding and reranker scores preserved."""
+    """One retrieval hit with its local retrieval score preserved."""
 
     chunk: RetrievalChunk
     rank: int = Field(ge=1)
     score: float | None = None
-    embedding_score: float | None = None
-    rerank_score: float | None = None
 
 
 class RetrievedSchemaObject(BaseModel):

@@ -104,9 +104,7 @@ def test_chunks_do_not_render_full_schema_blobs_or_oversized_sample_values():
     rendered_text = "\n".join(
         "\n".join(
             [
-                chunk.embedding_text,
                 chunk.bm25_text,
-                chunk.rerank_text,
                 chunk.prompt_text,
                 chunk.source_definition,
             ]
@@ -126,7 +124,6 @@ def test_chunks_do_not_render_full_schema_blobs_or_oversized_sample_values():
             "value": "x" * 140,
             "sample_size": 3,
             "distinct_count": 2,
-            "dense_embedding_default": False,
         },
     )
     sample_chunk = render_schema_chunks([long_value_object])[0]
@@ -148,7 +145,7 @@ def test_source_definition_and_inferred_usage_stay_separate():
     assert "Inferred join evidence" in join_chunk.inferred_usage
 
 
-def test_sample_value_chunks_are_exact_oriented_and_skip_dense_embedding():
+def test_sample_value_chunks_are_exact_oriented():
     sample_chunk = next(
         chunk
         for chunk in render_schema_chunks(_schema_objects())
@@ -156,10 +153,8 @@ def test_sample_value_chunks_are_exact_oriented_and_skip_dense_embedding():
     )
 
     assert sample_chunk.source == "sample"
-    assert sample_chunk.include_dense_embedding is False
-    assert sample_chunk.embedding_text == ""
     assert "STATUS" in sample_chunk.bm25_text
-    assert "skip dense embedding" in sample_chunk.inferred_usage
+    assert "exact filter evidence" in sample_chunk.inferred_usage
 
 
 def test_family_prompt_text_renders_canonical_structure_compactly():

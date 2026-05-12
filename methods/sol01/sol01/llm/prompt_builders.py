@@ -285,11 +285,7 @@ def _retrieved_object_evidence(
         for retrieved_chunk in item.chunks[:3]:
             chunk = retrieved_chunk.chunk
             text = (
-                chunk.prompt_text
-                or chunk.rerank_text
-                or chunk.source_definition
-                or chunk.inferred_usage
-                or chunk.text
+                chunk.prompt_text or chunk.source_definition or chunk.inferred_usage or chunk.text
             )
             if text:
                 evidence_lines.append(f"  evidence: {_single_line(text, max_length=500)}")

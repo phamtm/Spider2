@@ -19,18 +19,6 @@ Set `SOL01_CONCURRENCY` to control batch worker count. The default is `4`.
 Use `--concurrency` on `sol01 run` to override the environment for one run.
 Concurrency is task-level per question batch, not per database.
 
-Schema retrieval requires a local Ollama server. Pull or provide these model
-tags before running live retrieval:
-
-```bash
-ollama pull qwen3-embedding:4b
-ollama pull qwen3-reranker:4b
-```
-
-`qwen3-reranker:4b` can be replaced by another local Qwen3-Reranker-4B Ollama
-tag via `SOL01_SCHEMA_RERANKER_MODEL`. The reranker tag must expose usable
-yes/no `logprobs` or `top_logprobs` through Ollama `/api/generate`.
-
 Create `methods/sol01/snowflake_credential.json` locally with a programmatic
 access token:
 
@@ -146,7 +134,7 @@ full-schema planner modes no longer exist.
 The runtime path is:
 
 ```text
-question -> hybrid retrieval -> reranking -> planner object selection
+question -> lexical retrieval -> planner object selection
   -> resolver expansion -> compact schema context -> SQL generation
 ```
 
@@ -161,22 +149,17 @@ Cache layout:
 - `methods/sol01/.cache/schema_retrieval_index/<DB>/current.json`: pointer to
   the active retrieval index version
 - `methods/sol01/.cache/schema_retrieval_index/<DB>/versions/<cache_key>/`:
-  `manifest.json`, `objects.jsonl`, `chunks.jsonl`, `sparse.json`, and
-  `embeddings.npy`
+  `manifest.json`, `objects.jsonl`, `chunks.jsonl`, and `sparse.json`
 
 Runtime config can be set in the shell or `methods/sol01/.env`:
 
-- `SOL01_OLLAMA_BASE_URL`, default `http://127.0.0.1:11434`
-- `SOL01_SCHEMA_EMBEDDING_MODEL`, default `qwen3-embedding:4b`
-- `SOL01_SCHEMA_RERANKER_MODEL`, default `qwen3-reranker:4b`
 - `SOL01_SCHEMA_CHUNK_TOP_K`, default `80`
-- `SOL01_SCHEMA_RERANK_TOP_K`, default `20`
 - `SOL01_SCHEMA_OBJECT_TOP_K`, default `12`
 - `SOL01_SCHEMA_FAMILY_TOP_K`, default `8`
 - `SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD`, default `0.82`
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
 - `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
-- `SOL01_SCHEMA_RETRIEVAL_VERSION`, default `hybrid_v1`
+- `SOL01_SCHEMA_RETRIEVAL_VERSION`, default `lexical_v1`
 
 Sample values are indexed only for bounded, low-cardinality categorical
 evidence. High-cardinality, opaque, free-text, numeric, temporal,
@@ -184,7 +167,7 @@ semi-structured, URL, email, UUID, hash, key-like, and raw text values are
 excluded so retrieval does not promote arbitrary literals into SQL prompts.
 
 Each task trace records `schema_retrieval_version`, effective retrieval config,
-retrieved object evidence, sparse/dense/exact/rerank diagnostics, planner
+retrieved object evidence, sparse/exact diagnostics, planner
 sanitization diagnostics, resolver entries, allowed tables, and schema
 expansion diagnostics when repair adds schema context.
 

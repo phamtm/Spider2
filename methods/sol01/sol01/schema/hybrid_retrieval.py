@@ -8,12 +8,8 @@ from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 
-import numpy as np
-
 from sol01.infra.config import SchemaRetrievalConfig
 from sol01.models import RetrievalChunk, RetrievedChunk, RetrievedSchemaObject, SchemaObject
-from sol01.schema.embedding import EmbeddingProvider, RerankerProvider, SchemaProviderError
-from sol01.schema.ollama_provider import OllamaEmbeddingProvider, OllamaRerankerProvider
 from sol01.schema.retrieval_index import SchemaRetrievalIndex
 
 DEFAULT_TYPE_QUOTAS: dict[str, int] = {
@@ -51,21 +47,17 @@ class RetrievalQuery:
 class _Candidate:
     chunk: RetrievalChunk
     sparse_score: float = 0.0
-    dense_score: float = 0.0
     exact_score: float = 0.0
-    rerank_score: float | None = None
     evidence: set[str] = field(default_factory=set)
     ranks: dict[str, int] = field(default_factory=dict)
 
     @property
     def pre_score(self) -> float:
-        return self.sparse_score + self.dense_score + self.exact_score
+        return self.sparse_score + self.exact_score
 
     @property
     def final_score(self) -> float:
-        if self.rerank_score is None:
-            return self.pre_score
-        return self.pre_score + (2.0 * self.rerank_score)
+        return self.pre_score
 
 
 def build_retrieval_query(
@@ -75,7 +67,7 @@ def build_retrieval_query(
     exact_literals: Sequence[str] = (),
     max_doc_chars: int = 6000,
 ) -> RetrievalQuery:
-    """Build the query text used by sparse, dense, exact, and reranker retrieval."""
+    """Build the query text used by sparse and exact schema retrieval."""
 
     clean_question = _clean_text(question)
     literals = _stable_unique(
@@ -168,13 +160,9 @@ def retrieve_schema_objects(
     *,
     linked_docs: Sequence[str] = (),
     exact_literals: Sequence[str] = (),
-    embedding_provider: EmbeddingProvider | None = None,
-    reranker_provider: RerankerProvider | None = None,
     config: SchemaRetrievalConfig | None = None,
     type_quotas: Mapping[str, int] | None = None,
     top_k_objects: int | None = None,
-    top_k_rerank: int | None = None,
-    include_sample_value_dense: bool = False,
 ) -> tuple[list[RetrievedSchemaObject], dict[str, object]]:
     """Return ranked schema objects and compact retrieval diagnostics."""
 
@@ -190,25 +178,12 @@ def retrieve_schema_objects(
     candidates: dict[str, _Candidate] = {}
 
     sparse_hits = _sparse_hits(index, query.text)
-    dense_hits = _dense_hits(
-        index,
-        query.text,
-        embedding_provider=embedding_provider or _default_embedding_provider(config),
-        include_sample_value_dense=include_sample_value_dense,
-    )
     exact_hits = _exact_hits(index.chunks, query)
 
     _merge_hits(candidates, chunk_by_id, _quota_hits(sparse_hits, chunk_by_id, quotas), "sparse")
-    _merge_hits(candidates, chunk_by_id, _quota_hits(dense_hits, chunk_by_id, quotas), "dense")
     _merge_hits(candidates, chunk_by_id, _quota_hits(exact_hits, chunk_by_id, quotas), "exact")
     _prune_candidates_to_type_quotas(candidates, quotas)
 
-    reranked_count = _rerank_candidates(
-        query.text,
-        candidates,
-        reranker_provider=reranker_provider or _default_reranker_provider(config),
-        top_k=top_k_rerank or config.rerank_top_k,
-    )
     retrieved_objects = _aggregate_objects(
         candidates,
         objects=index.objects,
@@ -219,9 +194,7 @@ def retrieve_schema_objects(
         candidates,
         retrieved_objects,
         sparse_hits=sparse_hits,
-        dense_hits=dense_hits,
         exact_hits=exact_hits,
-        reranked_count=reranked_count,
     )
     return retrieved_objects, diagnostics
 
@@ -262,38 +235,6 @@ def _sparse_hits(index: SchemaRetrievalIndex, query_text: str) -> list[tuple[str
         chunk_id = str(document.get("chunk_id") or "")
         if chunk_id and score > 0.0:
             hits.append((chunk_id, score))
-    return sorted(hits, key=lambda item: (-item[1], item[0]))
-
-
-def _dense_hits(
-    index: SchemaRetrievalIndex,
-    query_text: str,
-    *,
-    embedding_provider: EmbeddingProvider,
-    include_sample_value_dense: bool,
-) -> list[tuple[str, float]]:
-    if index.embeddings.size == 0 or index.embeddings.shape[1] == 0:
-        return []
-    query_vectors = embedding_provider.embed_texts([query_text])
-    if len(query_vectors) != 1:
-        raise SchemaProviderError("embedding provider returned a different number of vectors")
-    query_vector = np.asarray(query_vectors[0], dtype=np.float32)
-    if query_vector.shape[0] != index.embeddings.shape[1]:
-        raise SchemaProviderError("query embedding dimensions do not match retrieval index")
-
-    query_norm = float(np.linalg.norm(query_vector))
-    if query_norm == 0.0:
-        raise SchemaProviderError("embedding provider returned a zero-length query vector")
-    query_vector = query_vector / query_norm
-    scores = index.embeddings @ query_vector
-    hits: list[tuple[str, float]] = []
-    for chunk, score in zip(index.chunks, scores.tolist(), strict=True):
-        if not include_sample_value_dense and chunk.chunk_type == "sample_value":
-            continue
-        if not chunk.include_dense_embedding:
-            continue
-        if score > 0.0:
-            hits.append((chunk.chunk_id, float(score)))
     return sorted(hits, key=lambda item: (-item[1], item[0]))
 
 
@@ -350,8 +291,6 @@ def _merge_hits(
         candidate = candidates.setdefault(chunk_id, _Candidate(chunk=chunk))
         if source == "sparse":
             candidate.sparse_score = max(candidate.sparse_score, score)
-        elif source == "dense":
-            candidate.dense_score = max(candidate.dense_score, score)
         else:
             candidate.exact_score = max(candidate.exact_score, score)
         candidate.evidence.add(source)
@@ -376,27 +315,6 @@ def _prune_candidates_to_type_quotas(
             del candidates[chunk_id]
 
 
-def _rerank_candidates(
-    query_text: str,
-    candidates: Mapping[str, _Candidate],
-    *,
-    reranker_provider: RerankerProvider,
-    top_k: int,
-) -> int:
-    if top_k < 1 or not candidates:
-        return 0
-    ordered = sorted(candidates.values(), key=lambda item: (-item.pre_score, item.chunk.chunk_id))
-    selected = ordered[:top_k]
-    texts = [candidate.chunk.rerank_text or candidate.chunk.text for candidate in selected]
-    scores = reranker_provider.score_pairs(query_text, texts)
-    if len(scores) != len(selected):
-        raise SchemaProviderError("reranker provider returned a different number of scores")
-    for candidate, score in zip(selected, scores, strict=True):
-        candidate.rerank_score = float(score)
-        candidate.evidence.add("rerank")
-    return len(selected)
-
-
 def _aggregate_objects(
     candidates: Mapping[str, _Candidate],
     *,
@@ -419,8 +337,6 @@ def _aggregate_objects(
             chunk=chunk,
             rank=candidate_rank,
             score=candidate.pre_score,
-            embedding_score=candidate.dense_score or None,
-            rerank_score=candidate.rerank_score,
         )
         for object_id, weight in contribution_targets.items():
             if object_id not in object_by_id:
@@ -474,9 +390,7 @@ def _diagnostics(
     retrieved_objects: Sequence[RetrievedSchemaObject],
     *,
     sparse_hits: Sequence[tuple[str, float]],
-    dense_hits: Sequence[tuple[str, float]],
     exact_hits: Sequence[tuple[str, float]],
-    reranked_count: int,
 ) -> dict[str, object]:
     candidate_types = Counter(candidate.chunk.chunk_type for candidate in candidates.values())
     return {
@@ -491,12 +405,10 @@ def _diagnostics(
         },
         "hit_counts": {
             "sparse": len(sparse_hits),
-            "dense": len(dense_hits),
             "exact": len(exact_hits),
             "merged": len(candidates),
             "by_type": dict(sorted(candidate_types.items())),
         },
-        "reranked_count": reranked_count,
         "selected_objects": [
             {
                 "object_id": obj.schema_object.object_id,
@@ -520,14 +432,6 @@ def _diagnostics(
             )[:25]
         ],
     }
-
-
-def _default_embedding_provider(config: SchemaRetrievalConfig) -> EmbeddingProvider:
-    return OllamaEmbeddingProvider(model=config.embedding_model, base_url=config.ollama_base_url)
-
-
-def _default_reranker_provider(config: SchemaRetrievalConfig) -> RerankerProvider:
-    return OllamaRerankerProvider(model=config.reranker_model, base_url=config.ollama_base_url)
 
 
 def _quoted_literals(text: str) -> list[str]:
@@ -559,8 +463,6 @@ def _chunk_lookup_text(chunk: RetrievalChunk) -> str:
             chunk.chunk_id,
             chunk.object_id,
             chunk.bm25_text,
-            chunk.embedding_text,
-            chunk.rerank_text,
             chunk.prompt_text,
             chunk.source_definition,
             chunk.inferred_usage,

@@ -68,11 +68,7 @@ def _table_chunk(obj: SchemaObject) -> RetrievalChunk:
         chunk_id=f"{obj.object_id}::table",
         object_id=obj.object_id,
         chunk_type="table",
-        embedding_text=_join_text(
-            ["database table", obj.name, obj.description, " ".join(column_names)]
-        ),
         bm25_text=_join_text(bm25_terms),
-        rerank_text=source_definition,
         prompt_text=prompt_text,
         source_definition=source_definition,
         source="schema",
@@ -82,7 +78,6 @@ def _table_chunk(obj: SchemaObject) -> RetrievalChunk:
 
 def _column_chunk(obj: SchemaObject) -> RetrievalChunk:
     column_type = _metadata_text(obj, "column_type")
-    primitive_type = _metadata_text(obj, "primitive_type")
     source_definition = _join_sentences(
         [
             f"Source column {obj.table_name}.{obj.column_name}.",
@@ -110,18 +105,7 @@ def _column_chunk(obj: SchemaObject) -> RetrievalChunk:
         object_id=obj.object_id,
         chunk_type="column",
         parent_object_ids=_table_parent_ids(obj),
-        embedding_text=_join_text(
-            [
-                "database column",
-                obj.name,
-                column_type,
-                primitive_type,
-                obj.description,
-                inferred_usage,
-            ]
-        ),
         bm25_text=_join_text(_identifier_terms(obj, extra=_sample_values(obj))),
-        rerank_text=_join_sentences([source_definition, inferred_usage]),
         prompt_text=prompt_text,
         source_definition=source_definition,
         inferred_usage=inferred_usage,
@@ -145,13 +129,9 @@ def _column_group_chunk(obj: SchemaObject) -> RetrievalChunk:
         object_id=obj.object_id,
         chunk_type="column_group",
         parent_object_ids=[*_table_parent_ids(obj), *_column_parent_ids(obj.table_name, columns)],
-        embedding_text=_join_text(
-            ["related database columns", obj.name, group_type, " ".join(columns)]
-        ),
         bm25_text=_join_text(
             _identifier_terms(obj, extra=[*columns, *_normalized_tokens(columns)])
         ),
-        rerank_text=_join_sentences([source_definition, inferred_usage]),
         prompt_text=_join_sentences(
             [f"Column group {group_type} on {obj.table_name}.", ", ".join(columns)]
         ),
@@ -189,7 +169,6 @@ def _join_candidate_chunk(obj: SchemaObject) -> RetrievalChunk:
         object_id=obj.object_id,
         chunk_type="join_candidate",
         parent_object_ids=_join_parent_ids(left, right),
-        embedding_text=_join_text(["join candidate", left_ref, right_ref, evidence_type]),
         bm25_text=_join_text(
             _identifier_terms(
                 obj,
@@ -201,7 +180,6 @@ def _join_candidate_chunk(obj: SchemaObject) -> RetrievalChunk:
                 ],
             )
         ),
-        rerank_text=_join_sentences([source_definition, inferred_usage]),
         prompt_text=f"Join candidate: {left_ref} = {right_ref}.",
         source_definition=source_definition,
         inferred_usage=inferred_usage,
@@ -223,7 +201,7 @@ def _sample_value_chunk(obj: SchemaObject) -> RetrievalChunk:
             else "",
         ]
     )
-    inferred_usage = "Use only as exact filter evidence; skip dense embedding by default."
+    inferred_usage = "Use only as exact filter evidence."
     return RetrievalChunk(
         chunk_id=f"{obj.object_id}::sample_value",
         object_id=obj.object_id,
@@ -232,7 +210,6 @@ def _sample_value_chunk(obj: SchemaObject) -> RetrievalChunk:
             *_table_parent_ids(obj),
             *_column_parent_ids(obj.table_name, [obj.column_name]),
         ],
-        embedding_text="",
         bm25_text=_join_text(
             [
                 obj.object_id,
@@ -244,13 +221,11 @@ def _sample_value_chunk(obj: SchemaObject) -> RetrievalChunk:
                 _metadata_text(obj, "inclusion_reason"),
             ]
         ),
-        rerank_text=source_definition,
         prompt_text=f"Sample value {obj.table_name}.{obj.column_name} = {literal}.",
         source_definition=source_definition,
         inferred_usage=inferred_usage,
-        include_dense_embedding=False,
         source="sample",
-        metadata={**_base_metadata(obj), "dense_embedding_default": False},
+        metadata=_base_metadata(obj),
     )
 
 
@@ -281,13 +256,9 @@ def _table_family_chunk(obj: SchemaObject) -> RetrievalChunk:
         object_id=obj.object_id,
         chunk_type="table_family",
         parent_object_ids=_table_parent_ids_from_names(members),
-        embedding_text=_join_text(
-            ["table family", family_kind, obj.name, canonical, " ".join(common_columns)]
-        ),
         bm25_text=_join_text(
             _identifier_terms(obj, extra=[*members, *common_columns, *_normalized_tokens(members)])
         ),
-        rerank_text=_join_sentences([source_definition, inferred_usage]),
         prompt_text=_join_sentences(
             [
                 f"Table family {obj.name}: canonical={canonical}, members={len(members)}.",

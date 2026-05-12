@@ -268,7 +268,7 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
         "candidate_review": "hash-candidate_review",
     }
     assert trace["schema_selection"]["selected_tables"] == [SALES_TABLE]
-    assert trace["schema_retrieval_version"] == "hybrid_v1"
+    assert trace["schema_retrieval_version"] == "lexical_v1"
     assert trace["schema_retrieval"]["index"]["cache_key"] == "test-cache-key"
     assert len(trace["attempts"]) == 1
     assert trace["candidate_review"]["preferred_stage"] == "initial_1"
@@ -334,7 +334,7 @@ def test_run_task_reruns_old_trace_without_schema_retrieval_version(
     assert answer.status == "success"
     assert answer.sql != "SELECT 1"
     trace = json.loads((run_paths.traces_dir / "sf_stale.json").read_text(encoding="utf-8"))
-    assert trace["schema_retrieval_version"] == "hybrid_v1"
+    assert trace["schema_retrieval_version"] == "lexical_v1"
 
 
 def test_close_executable_candidates_use_one_candidate_review(

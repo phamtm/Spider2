@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from typer.testing import CliRunner
 
 from sol01 import cli
@@ -15,20 +13,6 @@ from sol01.infra.config import SchemaRetrievalConfig
 from sol01.models import ColumnSchema, RetrievalChunk, SchemaObject, TableSchema, Task
 from sol01.schema.retrieval_eval import load_gold_tables, run_retrieval_eval
 from sol01.schema.retrieval_index import SchemaRetrievalIndex, _build_sparse_index
-
-
-class StaticEmbeddingProvider:
-    """Return deterministic query vectors for retrieval-eval tests."""
-
-    def embed_texts(self, texts: Sequence[str]) -> list[list[float]]:
-        return [[1.0, 0.0] for _ in texts]
-
-
-class StaticReranker:
-    """Keep reranker order deterministic without calling a live model."""
-
-    def score_pairs(self, query: str, texts: Sequence[str]) -> list[float]:
-        return [1.0 - (index * 0.01) for index, _ in enumerate(texts)]
 
 
 def test_load_gold_tables_reads_offline_jsonl(tmp_path: Path):
@@ -66,7 +50,7 @@ def test_retrieval_eval_reports_gold_coverage_family_success_and_failures():
         Task(
             instance_id="sf_missing",
             db="DB",
-            question="Show customer details.",
+            question="Show customer sales details.",
         ),
     ]
 
@@ -76,11 +60,9 @@ def test_retrieval_eval_reports_gold_coverage_family_success_and_failures():
             "sf_family": ["DB.PUBLIC.SALES_2022", "DB.PUBLIC.SALES_2023"],
             "sf_missing": ["DB.PUBLIC.CUSTOMERS"],
         },
-        config=SchemaRetrievalConfig(object_top_k=3, rerank_top_k=3),
-        embedding_provider=StaticEmbeddingProvider(),
-        reranker_provider=StaticReranker(),
+        config=SchemaRetrievalConfig(object_top_k=3),
         db_index_loader=lambda db: db_index,
-        retrieval_index_loader=lambda db, db_index, config, embedding_provider: index,
+        retrieval_index_loader=lambda db, db_index, config: index,
     )
 
     assert report.task_count == 2
@@ -208,25 +190,22 @@ def _retrieval_index() -> SchemaRetrievalIndex:
                 "table:DB.PUBLIC.SALES_2022",
                 "table:DB.PUBLIC.SALES_2023",
             ],
-            embedding_text="historical sales table family",
             bm25_text="historical sales table family 2022 2023",
-            rerank_text="Sales table family with annual physical members.",
+            prompt_text="Sales table family with annual physical members.",
         ),
         RetrievalChunk(
             chunk_id="table:DB.PUBLIC.SALES_2022::table",
             object_id="table:DB.PUBLIC.SALES_2022",
             chunk_type="table",
-            embedding_text="sales table 2022",
             bm25_text="sales table 2022 amount",
-            rerank_text="Sales table for 2022.",
+            prompt_text="Sales table for 2022.",
         ),
         RetrievalChunk(
             chunk_id="table:DB.PUBLIC.SALES_2023::table",
             object_id="table:DB.PUBLIC.SALES_2023",
             chunk_type="table",
-            embedding_text="sales table 2023",
             bm25_text="sales table 2023 amount",
-            rerank_text="Sales table for 2023.",
+            prompt_text="Sales table for 2023.",
         ),
     ]
     return SchemaRetrievalIndex(
@@ -237,12 +216,4 @@ def _retrieval_index() -> SchemaRetrievalIndex:
         objects=objects,
         chunks=chunks,
         sparse=_build_sparse_index(chunks),
-        embeddings=np.array(
-            [
-                [1.0, 0.0],
-                [0.8, 0.0],
-                [0.7, 0.0],
-            ],
-            dtype=np.float32,
-        ),
     )
