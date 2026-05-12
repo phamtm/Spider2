@@ -15,7 +15,7 @@ SchemaObjectKind = Literal[
     "join_candidate",
     "family",
 ]
-RetrievalChunkType = Literal[
+SchemaContextChunkType = Literal[
     "schema_object",
     "table",
     "column",
@@ -149,7 +149,7 @@ class TableSchema(BaseModel):
 
 
 class SchemaObject(BaseModel):
-    """One canonical database object that can be indexed for retrieval."""
+    """One canonical database object available for planner selection."""
 
     object_id: str
     object_type: SchemaObjectKind
@@ -181,13 +181,13 @@ class SchemaObject(BaseModel):
         return self
 
 
-class RetrievalChunk(BaseModel):
-    """Searchable text derived from one schema object or linked document."""
+class SchemaContextChunk(BaseModel):
+    """Prompt text derived from one schema object or linked document."""
 
     chunk_id: str
     object_id: str
     text: str = ""
-    chunk_type: RetrievalChunkType = "schema_object"
+    chunk_type: SchemaContextChunkType = "schema_object"
     parent_object_ids: list[str] = Field(default_factory=list)
     search_text: str = ""
     prompt_text: str = ""
@@ -208,7 +208,7 @@ class RetrievalChunk(BaseModel):
         return [validate_schema_object_id(object_id) for object_id in object_ids]
 
     @model_validator(mode="after")
-    def _default_legacy_text(self) -> RetrievalChunk:
+    def _default_legacy_text(self) -> SchemaContextChunk:
         if not self.text:
             self.text = (
                 self.prompt_text
@@ -219,25 +219,25 @@ class RetrievalChunk(BaseModel):
         return self
 
 
-class RetrievedChunk(BaseModel):
-    """One retrieval hit with its local retrieval score preserved."""
+class SchemaContextChunkEvidence(BaseModel):
+    """One schema-context chunk attached to a logical schema object."""
 
-    chunk: RetrievalChunk
+    chunk: SchemaContextChunk
     rank: int = Field(ge=1)
     score: float | None = None
 
 
-class RetrievedSchemaObject(BaseModel):
-    """A retrieved schema object plus the chunks that support it."""
+class SchemaContextObject(BaseModel):
+    """A schema object plus the chunks that explain it to the planner."""
 
     schema_object: SchemaObject
-    chunks: list[RetrievedChunk] = Field(default_factory=list)
+    chunks: list[SchemaContextChunkEvidence] = Field(default_factory=list)
     rank: int = Field(ge=1)
     score: float | None = None
 
 
-class HybridPlanningConstraints(BaseModel):
-    """Question constraints inferred while selecting retrieved schema objects."""
+class SchemaPlanningConstraints(BaseModel):
+    """Question constraints inferred while selecting schema objects."""
 
     date_start: str | None = None
     date_end: str | None = None
@@ -249,7 +249,7 @@ class HybridPlanningConstraints(BaseModel):
 
 
 class SelectedSchemaObject(BaseModel):
-    """One retrieved object selected for the compact resolved schema context."""
+    """One schema object selected for the compact resolved context."""
 
     object_id: str
     role: SelectedSchemaRole = "unknown"
@@ -263,11 +263,11 @@ class SelectedSchemaObject(BaseModel):
 
 
 class ResolvedSchemaContext(BaseModel):
-    """Compact context passed forward after retrieval and selection."""
+    """Compact context passed forward after schema selection."""
 
     db: str
     selected_objects: list[SelectedSchemaObject] = Field(default_factory=list)
-    retrieved_objects: list[RetrievedSchemaObject] = Field(default_factory=list)
+    schema_context_objects: list[SchemaContextObject] = Field(default_factory=list)
     resolved_tables: list[str] = Field(default_factory=list)
     allowed_tables: list[str] = Field(default_factory=list)
     table_schemas: dict[str, TableSchema] = Field(default_factory=dict)
@@ -293,12 +293,12 @@ class SchemaSelection(BaseModel):
         return [validate_schema_object_id(object_id) for object_id in object_ids]
 
 
-class HybridPlanningDecision(BaseModel):
+class SchemaPlanningDecision(BaseModel):
     """Future planner output that combines intent with selected schema objects."""
 
     selected_objects: list[SelectedSchemaObject] = Field(default_factory=list)
     selected_tables: list[str] = Field(default_factory=list)
-    constraints: HybridPlanningConstraints = Field(default_factory=HybridPlanningConstraints)
+    constraints: SchemaPlanningConstraints = Field(default_factory=SchemaPlanningConstraints)
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
     intent: Intent

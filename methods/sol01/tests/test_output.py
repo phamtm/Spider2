@@ -71,7 +71,7 @@ def test_successful_task_is_skipped_when_trace_and_csv_exist(tmp_path):
     assert should_skip_task(run_paths, instance_id="local003") is True
 
 
-def test_successful_task_reruns_when_trace_used_removed_retrieval_mode(tmp_path):
+def test_successful_task_reruns_when_trace_used_removed_schema_selection_mode(tmp_path):
     run_paths = ensure_run_paths("resume-run", outputs_root=tmp_path)
     write_trace(
         run_paths,

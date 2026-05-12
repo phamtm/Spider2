@@ -1,4 +1,4 @@
-"""Build canonical schema objects for retrieval from table metadata."""
+"""Build canonical schema objects from table metadata."""
 
 from __future__ import annotations
 
@@ -155,7 +155,7 @@ def build_schema_objects(
     max_join_candidates_per_column: int = DEFAULT_MAX_JOIN_CANDIDATES_PER_COLUMN,
     family_similarity_threshold: float = DEFAULT_FAMILY_SIMILARITY_THRESHOLD,
 ) -> list[SchemaObject]:
-    """Build deterministic retrieval objects from a database table index."""
+    """Build deterministic schema objects from a database table index."""
 
     column_refs = _column_refs(db_index)
     objects: list[SchemaObject] = []
@@ -1068,7 +1068,7 @@ def _is_numeric_measure_candidate(column: ColumnSchema) -> bool:
 
 
 def _primitive_type(raw_type: str | None) -> PrimitiveType:
-    """Map database-specific type text to a coarse retrieval primitive."""
+    """Map database-specific type text to a coarse schema primitive."""
 
     if not raw_type:
         return "unknown"

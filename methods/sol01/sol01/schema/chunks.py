@@ -1,4 +1,4 @@
-"""Render deterministic retrieval chunks from canonical schema objects."""
+"""Render deterministic schema-context chunks from canonical schema objects."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import re
 from collections.abc import Iterable
 from typing import Any
 
-from sol01.models import RetrievalChunk, SchemaObject, is_schema_object_id
+from sol01.models import SchemaContextChunk, SchemaObject, is_schema_object_id
 from sol01.schema.large_schema_summaries import (
     LargeSchemaSummary,
     load_large_schema_summary_registry,
@@ -19,15 +19,15 @@ MAX_SAMPLE_LITERAL_CHARS = 80
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 
-def render_schema_chunks(schema_objects: Iterable[SchemaObject]) -> list[RetrievalChunk]:
-    """Render one compact retrieval chunk per canonical schema object."""
+def render_schema_chunks(schema_objects: Iterable[SchemaObject]) -> list[SchemaContextChunk]:
+    """Render one compact schema-context chunk per canonical schema object."""
 
     return [
         _render_schema_chunk(obj) for obj in sorted(schema_objects, key=lambda item: item.object_id)
     ]
 
 
-def _render_schema_chunk(obj: SchemaObject) -> RetrievalChunk:
+def _render_schema_chunk(obj: SchemaObject) -> SchemaContextChunk:
     if obj.object_type == "table":
         return _table_chunk(obj)
     if obj.object_type == "column":
@@ -41,7 +41,7 @@ def _render_schema_chunk(obj: SchemaObject) -> RetrievalChunk:
     return _table_family_chunk(obj)
 
 
-def _table_chunk(obj: SchemaObject) -> RetrievalChunk:
+def _table_chunk(obj: SchemaObject) -> SchemaContextChunk:
     summaries = _large_schema_summaries_for_obj(obj)
     if summaries:
         return _summary_table_chunk(obj, summaries)
@@ -72,7 +72,7 @@ def _table_chunk(obj: SchemaObject) -> RetrievalChunk:
         obj,
         extra=[*_column_names(columns), *_normalized_tokens(column_names)],
     )
-    return RetrievalChunk(
+    return SchemaContextChunk(
         chunk_id=f"{obj.object_id}::table",
         object_id=obj.object_id,
         chunk_type="table",
@@ -84,7 +84,7 @@ def _table_chunk(obj: SchemaObject) -> RetrievalChunk:
     )
 
 
-def _column_chunk(obj: SchemaObject) -> RetrievalChunk:
+def _column_chunk(obj: SchemaObject) -> SchemaContextChunk:
     column_type = _metadata_text(obj, "column_type")
     source_definition = _join_sentences(
         [
@@ -108,7 +108,7 @@ def _column_chunk(obj: SchemaObject) -> RetrievalChunk:
             obj.description or "",
         ]
     )
-    return RetrievalChunk(
+    return SchemaContextChunk(
         chunk_id=f"{obj.object_id}::column",
         object_id=obj.object_id,
         chunk_type="column",
@@ -122,7 +122,7 @@ def _column_chunk(obj: SchemaObject) -> RetrievalChunk:
     )
 
 
-def _column_group_chunk(obj: SchemaObject) -> RetrievalChunk:
+def _column_group_chunk(obj: SchemaObject) -> SchemaContextChunk:
     columns = _string_list(obj.metadata.get("columns"))
     group_type = _metadata_text(obj, "group_type")
     source_definition = _join_sentences(
@@ -132,7 +132,7 @@ def _column_group_chunk(obj: SchemaObject) -> RetrievalChunk:
         ]
     )
     inferred_usage = f"Inferred structural column group: {group_type}." if group_type else ""
-    return RetrievalChunk(
+    return SchemaContextChunk(
         chunk_id=f"{obj.object_id}::column_group",
         object_id=obj.object_id,
         chunk_type="column_group",
@@ -150,7 +150,7 @@ def _column_group_chunk(obj: SchemaObject) -> RetrievalChunk:
     )
 
 
-def _join_candidate_chunk(obj: SchemaObject) -> RetrievalChunk:
+def _join_candidate_chunk(obj: SchemaObject) -> SchemaContextChunk:
     left = _mapping(obj.metadata.get("left"))
     right = _mapping(obj.metadata.get("right"))
     left_ref = _side_ref(left)
@@ -172,7 +172,7 @@ def _join_candidate_chunk(obj: SchemaObject) -> RetrievalChunk:
             else "",
         ]
     )
-    return RetrievalChunk(
+    return SchemaContextChunk(
         chunk_id=f"{obj.object_id}::join_candidate",
         object_id=obj.object_id,
         chunk_type="join_candidate",
@@ -196,7 +196,7 @@ def _join_candidate_chunk(obj: SchemaObject) -> RetrievalChunk:
     )
 
 
-def _sample_value_chunk(obj: SchemaObject) -> RetrievalChunk:
+def _sample_value_chunk(obj: SchemaObject) -> SchemaContextChunk:
     literal = _safe_literal(obj.metadata.get("value", obj.name))
     source_definition = _join_sentences(
         [
@@ -210,7 +210,7 @@ def _sample_value_chunk(obj: SchemaObject) -> RetrievalChunk:
         ]
     )
     inferred_usage = "Use only as exact filter evidence."
-    return RetrievalChunk(
+    return SchemaContextChunk(
         chunk_id=f"{obj.object_id}::sample_value",
         object_id=obj.object_id,
         chunk_type="sample_value",
@@ -237,7 +237,7 @@ def _sample_value_chunk(obj: SchemaObject) -> RetrievalChunk:
     )
 
 
-def _table_family_chunk(obj: SchemaObject) -> RetrievalChunk:
+def _table_family_chunk(obj: SchemaObject) -> SchemaContextChunk:
     summaries = _large_schema_summaries_for_obj(obj)
     if summaries:
         return _summary_table_family_chunk(obj, summaries)
@@ -263,7 +263,7 @@ def _table_family_chunk(obj: SchemaObject) -> RetrievalChunk:
             "Near-family caveats apply." if _string_list(obj.metadata.get("caveats")) else "",
         ]
     )
-    return RetrievalChunk(
+    return SchemaContextChunk(
         chunk_id=f"{obj.object_id}::table_family",
         object_id=obj.object_id,
         chunk_type="table_family",
@@ -289,11 +289,11 @@ def _table_family_chunk(obj: SchemaObject) -> RetrievalChunk:
 def _summary_table_chunk(
     obj: SchemaObject,
     summaries: list[LargeSchemaSummary],
-) -> RetrievalChunk:
+) -> SchemaContextChunk:
     table_ref = obj.table_name or _metadata_text(obj, "full_name") or obj.name
     summary_text = _summary_text(summaries)
     metadata = {**_base_metadata(obj), **_summary_chunk_metadata(summaries)}
-    return RetrievalChunk(
+    return SchemaContextChunk(
         chunk_id=f"{obj.object_id}::table",
         object_id=obj.object_id,
         chunk_type="table",
@@ -324,13 +324,13 @@ def _summary_table_chunk(
 def _summary_table_family_chunk(
     obj: SchemaObject,
     summaries: list[LargeSchemaSummary],
-) -> RetrievalChunk:
+) -> SchemaContextChunk:
     members = _string_list(obj.metadata.get("member_table_refs"))
     common_columns = _string_list(obj.metadata.get("common_columns"))
     canonical = _metadata_text(obj, "canonical_member")
     summary_text = _summary_text(summaries)
     metadata = {**_base_metadata(obj), **_summary_chunk_metadata(summaries)}
-    return RetrievalChunk(
+    return SchemaContextChunk(
         chunk_id=f"{obj.object_id}::table_family",
         object_id=obj.object_id,
         chunk_type="table_family",

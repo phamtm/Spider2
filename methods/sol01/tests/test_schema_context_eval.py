@@ -1,4 +1,4 @@
-"""Tests for offline schema retrieval coverage evaluation."""
+"""Tests for offline schema context coverage evaluation."""
 
 from __future__ import annotations
 
@@ -9,15 +9,15 @@ from typing import Any
 from typer.testing import CliRunner
 
 from sol01 import cli
-from sol01.infra.config import SchemaRetrievalConfig
-from sol01.models import ColumnSchema, RetrievalChunk, SchemaObject, TableSchema, Task
-from sol01.schema.retrieval_eval import (
+from sol01.infra.config import SchemaContextConfig
+from sol01.models import ColumnSchema, SchemaContextChunk, SchemaObject, TableSchema, Task
+from sol01.schema.schema_context_cache import SchemaContextCache
+from sol01.schema.schema_context_eval import (
     db_schema_summary,
     load_gold_tables,
-    run_retrieval_eval,
-    write_retrieval_eval_report,
+    run_schema_context_eval,
+    write_schema_context_eval_report,
 )
-from sol01.schema.retrieval_index import SchemaRetrievalIndex
 
 
 def test_load_gold_tables_reads_offline_jsonl(tmp_path: Path):
@@ -49,11 +49,11 @@ def test_db_schema_summary_keeps_column_types_docs_and_samples():
     assert "AMOUNT [NUMBER]" in summary
 
 
-def test_retrieval_eval_reports_gold_coverage_family_success_and_failures():
+def test_schema_context_eval_reports_gold_coverage_family_success_and_failures():
     """The evaluator should measure pre/post resolver recall and failure evidence."""
 
     db_index = _db_index()
-    index = _retrieval_index()
+    index = _schema_context_cache()
     tasks = [
         Task(
             instance_id="sf_family",
@@ -67,15 +67,15 @@ def test_retrieval_eval_reports_gold_coverage_family_success_and_failures():
         ),
     ]
 
-    report = run_retrieval_eval(
+    report = run_schema_context_eval(
         tasks,
         gold_tables_by_instance={
             "sf_family": ["DB.PUBLIC.SALES_2022", "DB.PUBLIC.SALES_2023"],
             "sf_missing": ["DB.PUBLIC.CUSTOMERS"],
         },
-        config=SchemaRetrievalConfig(object_top_k=3),
+        config=SchemaContextConfig(object_cutoff=3),
         db_index_loader=lambda db: db_index,
-        retrieval_index_loader=lambda db, db_index, config: index,
+        schema_context_cache_loader=lambda db, db_index, config: index,
     )
 
     assert report.task_count == 2
@@ -98,7 +98,7 @@ def test_retrieval_eval_reports_gold_coverage_family_success_and_failures():
     assert report.failures[0]["top_evidence"][0]["chunk_id"]
 
 
-def test_retrieval_eval_filters_covered_schemas_and_compares_baseline(monkeypatch):
+def test_schema_context_eval_filters_covered_schemas_and_compares_baseline(monkeypatch):
     """Covered-schema runs should call out recall drops against a previous report."""
 
     class Summary:
@@ -109,11 +109,11 @@ def test_retrieval_eval_filters_covered_schemas_and_compares_baseline(monkeypatc
             return [Summary()] if table_ref.startswith("DB.PUBLIC.") else []
 
     monkeypatch.setattr(
-        "sol01.schema.retrieval_eval.load_large_schema_summary_registry",
+        "sol01.schema.schema_context_eval.load_large_schema_summary_registry",
         lambda: FakeRegistry(),
     )
 
-    report = run_retrieval_eval(
+    report = run_schema_context_eval(
         [
             Task(instance_id="sf_family", db="DB", question="Show every historical sales table."),
             Task(instance_id="sf_missing", db="DB", question="Show customer sales details."),
@@ -122,9 +122,9 @@ def test_retrieval_eval_filters_covered_schemas_and_compares_baseline(monkeypatc
             "sf_family": ["DB.PUBLIC.SALES_2022", "DB.PUBLIC.SALES_2023"],
             "sf_missing": ["DB.PUBLIC.CUSTOMERS"],
         },
-        config=SchemaRetrievalConfig(object_top_k=3),
+        config=SchemaContextConfig(object_cutoff=3),
         db_index_loader=lambda db: _db_index(),
-        retrieval_index_loader=lambda db, db_index, config: _retrieval_index(),
+        schema_context_cache_loader=lambda db, db_index, config: _schema_context_cache(),
         covered_only=True,
         baseline_tasks={
             "sf_family": {
@@ -145,8 +145,8 @@ def test_retrieval_eval_filters_covered_schemas_and_compares_baseline(monkeypatc
     assert report.recall_regressions[0]["baseline_post_resolver_gold_recall"] == 1.0
 
 
-def test_retrieval_eval_persists_report_and_hallucinated_column_failures(tmp_path: Path):
-    """Persisted retrieval eval artifacts should include trace-derived column failures."""
+def test_schema_context_eval_persists_report_and_hallucinated_column_failures(tmp_path: Path):
+    """Persisted schema context eval artifacts should include trace-derived column failures."""
 
     trace_dir = tmp_path / "traces"
     trace_dir.mkdir()
@@ -169,17 +169,17 @@ def test_retrieval_eval_persists_report_and_hallucinated_column_failures(tmp_pat
         encoding="utf-8",
     )
 
-    report = run_retrieval_eval(
+    report = run_schema_context_eval(
         [Task(instance_id="sf_family", db="DB", question="Show every historical sales table.")],
         gold_tables_by_instance={
             "sf_family": ["DB.PUBLIC.SALES_2022", "DB.PUBLIC.SALES_2023"],
         },
-        config=SchemaRetrievalConfig(object_top_k=3),
+        config=SchemaContextConfig(object_cutoff=3),
         db_index_loader=lambda db: _db_index(),
-        retrieval_index_loader=lambda db, db_index, config: _retrieval_index(),
+        schema_context_cache_loader=lambda db, db_index, config: _schema_context_cache(),
         trace_dirs=[trace_dir],
     )
-    output_dir = write_retrieval_eval_report(report, tmp_path / "retrieval_eval")
+    output_dir = write_schema_context_eval_report(report, tmp_path / "schema_context_eval")
 
     assert report.hallucinated_column_failures[0]["instance_id"] == "sf_bad"
     assert (output_dir / "summary.json").exists()
@@ -187,8 +187,8 @@ def test_retrieval_eval_persists_report_and_hallucinated_column_failures(tmp_pat
     assert "Hallucinated Column Failures" in (output_dir / "summary.md").read_text(encoding="utf-8")
 
 
-def test_retrieval_eval_cli_command_dispatches(monkeypatch, tmp_path: Path):
-    """The CLI should expose retrieval-eval without using runtime solving paths."""
+def test_schema_context_eval_cli_command_dispatches(monkeypatch, tmp_path: Path):
+    """The CLI should expose schema-context-eval without using runtime solving paths."""
 
     runner = CliRunner()
     called: dict[str, Any] = {}
@@ -217,16 +217,16 @@ def test_retrieval_eval_cli_command_dispatches(monkeypatch, tmp_path: Path):
         def payload(self) -> dict[str, Any]:
             return {"summary": self.summary(), "tasks": [], "failures": []}
 
-    def fake_handle_retrieval_eval(**kwargs: Any) -> DummyReport:
+    def fake_handle_schema_context_eval(**kwargs: Any) -> DummyReport:
         called.update(kwargs)
         return DummyReport()
 
-    monkeypatch.setattr(cli, "handle_retrieval_eval", fake_handle_retrieval_eval)
+    monkeypatch.setattr(cli, "handle_schema_context_eval", fake_handle_schema_context_eval)
 
     result = runner.invoke(
         cli.app,
         [
-            "retrieval-eval",
+            "schema-context-eval",
             "sf001",
             "--gold-path",
             str(gold_path),
@@ -268,7 +268,7 @@ def _table(name: str) -> TableSchema:
     )
 
 
-def _retrieval_index() -> SchemaRetrievalIndex:
+def _schema_context_cache() -> SchemaContextCache:
     objects = [
         SchemaObject(
             object_id="table:DB.PUBLIC.SALES_2022",
@@ -301,7 +301,7 @@ def _retrieval_index() -> SchemaRetrievalIndex:
         ),
     ]
     chunks = [
-        RetrievalChunk(
+        SchemaContextChunk(
             chunk_id="family:DB.PUBLIC:exact_sales:11111111::table_family",
             object_id="family:DB.PUBLIC:exact_sales:11111111",
             chunk_type="table_family",
@@ -312,14 +312,14 @@ def _retrieval_index() -> SchemaRetrievalIndex:
             search_text="historical sales table family 2022 2023",
             prompt_text="Sales table family with annual physical members.",
         ),
-        RetrievalChunk(
+        SchemaContextChunk(
             chunk_id="table:DB.PUBLIC.SALES_2022::table",
             object_id="table:DB.PUBLIC.SALES_2022",
             chunk_type="table",
             search_text="sales table 2022 amount",
             prompt_text="Sales table for 2022.",
         ),
-        RetrievalChunk(
+        SchemaContextChunk(
             chunk_id="table:DB.PUBLIC.SALES_2023::table",
             object_id="table:DB.PUBLIC.SALES_2023",
             chunk_type="table",
@@ -327,10 +327,10 @@ def _retrieval_index() -> SchemaRetrievalIndex:
             prompt_text="Sales table for 2023.",
         ),
     ]
-    return SchemaRetrievalIndex(
+    return SchemaContextCache(
         db="DB",
         cache_key="test",
-        cache_dir=Path("/tmp/test-retrieval-eval"),
+        cache_dir=Path("/tmp/test-schema-context-eval"),
         manifest={},
         objects=objects,
         chunks=chunks,

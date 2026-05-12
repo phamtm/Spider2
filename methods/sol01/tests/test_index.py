@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+from sol01.schema.db_index import load_db_index
 from sol01.schema.index import (
     CACHE_PATH,
     REPO_ROOT,
@@ -8,7 +9,6 @@ from sol01.schema.index import (
     build_db_index,
     build_index_cache,
 )
-from sol01.schema.retrieval import load_db_index
 
 CUSTOMERS = "E_COMMERCE.E_COMMERCE.CUSTOMERS"
 ORDERS = "E_COMMERCE.E_COMMERCE.ORDERS"
@@ -24,7 +24,7 @@ def _write_table_metadata(
     column_types: list[str] | None = None,
     descriptions: list[str] | None = None,
 ) -> None:
-    """Write one synthetic table metadata file for retrieval tests."""
+    """Write one synthetic table metadata file for schema metadata tests."""
 
     payload = {
         "table_name": table_name,

@@ -9,15 +9,15 @@ from pathlib import Path
 import pytest
 
 from sol01.models import ColumnSchema, TableSchema
-from sol01.schema.retrieval_index import (
-    RetrievalIndexError,
-    RetrievalIndexLockTimeout,
+from sol01.schema.schema_context_cache import (
+    SchemaContextCacheError,
+    SchemaContextCacheLockTimeout,
     _publish_version_directory,
     _version_dir,
     _write_current_pointer,
-    build_retrieval_index,
-    load_current_retrieval_index,
-    retrieval_index_cache_key,
+    build_schema_context_cache,
+    load_current_schema_context_cache,
+    schema_context_cache_key,
     schema_source_hash,
 )
 
@@ -57,7 +57,7 @@ def _db_index(*, extra_column: bool = False) -> dict[str, TableSchema]:
 
 
 def _build(tmp_path: Path, **kwargs):
-    return build_retrieval_index(
+    return build_schema_context_cache(
         "DB",
         db_index=_db_index(),
         cache_root=tmp_path,
@@ -67,7 +67,7 @@ def _build(tmp_path: Path, **kwargs):
     )
 
 
-def test_builds_loads_and_validates_retrieval_index_for_one_database(tmp_path):
+def test_builds_loads_and_validates_schema_context_cache_for_one_database(tmp_path):
     index = _build(tmp_path)
 
     assert index.cache_dir.exists()
@@ -79,7 +79,7 @@ def test_builds_loads_and_validates_retrieval_index_for_one_database(tmp_path):
     assert not (index.cache_dir / "embeddings.npy").exists()
     assert index.chunks
 
-    loaded = load_current_retrieval_index("DB", cache_root=tmp_path)
+    loaded = load_current_schema_context_cache("DB", cache_root=tmp_path)
 
     assert loaded.cache_key == index.cache_key
     assert loaded.manifest["source_schema_hash"] == schema_source_hash(_db_index())
@@ -99,18 +99,18 @@ def test_cache_key_changes_for_schema_versions_model_metadata_family_threshold_a
         "curated_summary_registry_version": "summaries-v1",
     }
 
-    baseline = retrieval_index_cache_key(**base)
+    baseline = schema_context_cache_key(**base)
 
-    assert retrieval_index_cache_key(**{**base, "source_schema_hash": "different"}) != baseline
-    assert retrieval_index_cache_key(**{**base, "object_builder_version": "objects-v2"}) != baseline
-    assert retrieval_index_cache_key(**{**base, "chunk_render_version": "chunks-v2"}) != baseline
-    assert retrieval_index_cache_key(**{**base, "family_similarity_threshold": 0.9}) != baseline
+    assert schema_context_cache_key(**{**base, "source_schema_hash": "different"}) != baseline
+    assert schema_context_cache_key(**{**base, "object_builder_version": "objects-v2"}) != baseline
+    assert schema_context_cache_key(**{**base, "chunk_render_version": "chunks-v2"}) != baseline
+    assert schema_context_cache_key(**{**base, "family_similarity_threshold": 0.9}) != baseline
     assert (
-        retrieval_index_cache_key(**{**base, "curated_summary_registry_hash": "summary-hash-v2"})
+        schema_context_cache_key(**{**base, "curated_summary_registry_hash": "summary-hash-v2"})
         != baseline
     )
     assert (
-        retrieval_index_cache_key(**{**base, "curated_summary_registry_version": "summaries-v2"})
+        schema_context_cache_key(**{**base, "curated_summary_registry_version": "summaries-v2"})
         != baseline
     )
 
@@ -203,7 +203,7 @@ def test_build_lock_waits_bounded_time_when_no_current_cache_exists(tmp_path):
     lock_path.parent.mkdir(parents=True)
     lock_path.write_text('{"token": "other"}\n', encoding="utf-8")
 
-    with pytest.raises(RetrievalIndexLockTimeout):
+    with pytest.raises(SchemaContextCacheLockTimeout):
         _build(tmp_path)
 
 
@@ -218,8 +218,10 @@ def test_build_lock_reloads_existing_cache_instead_of_racing(tmp_path):
 
 
 def test_missing_current_pointer_is_reported(tmp_path):
-    with pytest.raises(RetrievalIndexError, match="missing current retrieval index pointer"):
-        load_current_retrieval_index("DB", cache_root=tmp_path)
+    with pytest.raises(
+        SchemaContextCacheError, match="missing current schema context cache pointer"
+    ):
+        load_current_schema_context_cache("DB", cache_root=tmp_path)
 
 
 def test_changed_builder_version_publishes_separate_version_directory(tmp_path):

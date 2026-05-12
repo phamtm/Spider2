@@ -76,9 +76,9 @@ def _prompt_budget(trace: dict[str, Any]) -> dict[str, Any]:
             budget = diagnostics.get("prompt_budget")
             if isinstance(budget, dict):
                 return budget
-    schema_retrieval = trace.get("schema_retrieval")
-    if isinstance(schema_retrieval, dict):
-        budget = schema_retrieval.get("prompt_budget")
+    schema_context = trace.get("schema_context")
+    if isinstance(schema_context, dict):
+        budget = schema_context.get("prompt_budget")
         if isinstance(budget, dict):
             return budget
     return {}

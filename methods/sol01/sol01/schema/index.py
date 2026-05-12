@@ -62,7 +62,7 @@ def build_index_cache(
     metadata_root: Path = SNOW_METADATA_ROOT,
     cache_path: Path = CACHE_PATH,
 ) -> dict[str, dict[str, TableSchema]]:
-    """Build and persist the full Snowflake metadata cache used by later retrieval."""
+    """Build and persist the full Snowflake metadata cache used by schema context."""
 
     logger.info("index cache start", metadata_root=str(metadata_root), cache_path=str(cache_path))
     payload = {
@@ -146,7 +146,7 @@ def _table_identity(
     schema: str | None,
     table_name: str,
 ) -> str:
-    """Return the canonical table identity used by retrieval."""
+    """Return the canonical table identity used by schema context."""
 
     full_name = str(metadata.get("table_fullname") or "").strip()
     if full_name:

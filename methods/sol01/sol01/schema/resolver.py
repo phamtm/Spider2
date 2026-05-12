@@ -8,10 +8,10 @@ from datetime import date
 from typing import Any
 
 from sol01.models import (
-    HybridPlanningConstraints,
     ResolvedSchemaContext,
-    RetrievedSchemaObject,
+    SchemaContextObject,
     SchemaObject,
+    SchemaPlanningConstraints,
     SelectedSchemaObject,
     TableSchema,
 )
@@ -20,7 +20,7 @@ from sol01.schema.reference_context import render_table_reference
 MAX_FAMILY_MEMBERS_IN_PROMPT = 16
 MAX_FAMILY_MEMBERS_TO_EXPAND = 64
 MAX_VARIANT_COLUMNS_IN_PROMPT = 12
-MAX_RETRIEVAL_EVIDENCE_LINES = 8
+MAX_SCHEMA_CONTEXT_EVIDENCE_LINES = 8
 
 _BROAD_RANGE_RE = re.compile(
     r"\b(all|any|each|every|history|historical|daily|monthly|weekly|yearly|annual|"
@@ -39,8 +39,8 @@ def resolve_schema_context(
     canonical_schema_objects: Sequence[SchemaObject],
     db_index: Mapping[str, TableSchema],
     question: str,
-    retrieval_evidence: Sequence[RetrievedSchemaObject] = (),
-    constraints: HybridPlanningConstraints | None = None,
+    schema_context_evidence: Sequence[SchemaContextObject] = (),
+    constraints: SchemaPlanningConstraints | None = None,
 ) -> ResolvedSchemaContext:
     """Resolve planner-selected schema objects into allowed tables and prompt context."""
 
@@ -118,7 +118,7 @@ def resolve_schema_context(
 
     diagnostics: dict[str, object] = {
         "selected_object_count": len(selected_objects),
-        "retrieved_object_count": len(retrieval_evidence),
+        "schema_context_object_count": len(schema_context_evidence),
         "resolution_entries": resolution_entries,
         "warnings": warnings,
     }
@@ -128,13 +128,13 @@ def resolve_schema_context(
         object_by_id=object_by_id,
         allowed_tables=allowed_tables,
         table_schemas=table_schemas,
-        retrieval_evidence=retrieval_evidence,
+        schema_context_evidence=schema_context_evidence,
         diagnostics=diagnostics,
     )
     return ResolvedSchemaContext(
         db=db,
         selected_objects=list(selected_objects),
-        retrieved_objects=list(retrieval_evidence),
+        schema_context_objects=list(schema_context_evidence),
         resolved_tables=allowed_tables,
         allowed_tables=allowed_tables,
         table_schemas=table_schemas,
@@ -144,12 +144,12 @@ def resolve_schema_context(
 
 
 def _merge_question_constraints(
-    constraints: HybridPlanningConstraints | None,
+    constraints: SchemaPlanningConstraints | None,
     question: str,
-) -> HybridPlanningConstraints:
+) -> SchemaPlanningConstraints:
     """Add clear dates, years, and version mentions from the user question."""
 
-    base = constraints or HybridPlanningConstraints()
+    base = constraints or SchemaPlanningConstraints()
     question_years = [int(match.group(0)) for match in _YEAR_RE.finditer(question)]
     years = _stable_unique_int([*base.years, *question_years])
     dates = [_parse_date(match.group(0)) for match in _DATE_RE.finditer(question)]
@@ -175,7 +175,7 @@ def _merge_question_constraints(
 def _resolve_family(
     schema_object: SchemaObject,
     *,
-    constraints: HybridPlanningConstraints,
+    constraints: SchemaPlanningConstraints,
     question: str,
 ) -> tuple[list[str], list[str], str, dict[str, object]]:
     """Resolve one logical family object to physical members."""
@@ -295,7 +295,7 @@ def _family_member_count(schema_object: SchemaObject) -> int:
 
 def _member_matches_constraints(
     member: dict[str, str],
-    constraints: HybridPlanningConstraints,
+    constraints: SchemaPlanningConstraints,
 ) -> bool:
     dimension = member.get("suffix_dimension")
     if not isinstance(dimension, dict):
@@ -380,7 +380,7 @@ def _render_prompt_context(
     object_by_id: Mapping[str, SchemaObject],
     allowed_tables: Sequence[str],
     table_schemas: Mapping[str, TableSchema],
-    retrieval_evidence: Sequence[RetrievedSchemaObject],
+    schema_context_evidence: Sequence[SchemaContextObject],
     diagnostics: Mapping[str, object],
 ) -> str:
     """Render compact schema context without expanding every family member DDL."""
@@ -429,9 +429,9 @@ def _render_prompt_context(
         lines.extend(_render_table(table_schemas[table_name]))
         lines.append("")
 
-    evidence_lines = _retrieval_evidence_lines(retrieval_evidence)
+    evidence_lines = _schema_context_evidence_lines(schema_context_evidence)
     if evidence_lines:
-        lines.extend(["Retrieved filter and join evidence:", *evidence_lines, ""])
+        lines.extend(["Schema context filter and join evidence:", *evidence_lines, ""])
 
     warnings = diagnostics.get("warnings")
     if isinstance(warnings, list) and warnings:
@@ -514,13 +514,15 @@ def _render_table(table: TableSchema, *, header: str | None = None) -> list[str]
     return render_table_reference(table, header=header)
 
 
-def _retrieval_evidence_lines(retrieval_evidence: Sequence[RetrievedSchemaObject]) -> list[str]:
-    """Return capped prompt evidence from selected retrieval hits."""
+def _schema_context_evidence_lines(
+    schema_context_evidence: Sequence[SchemaContextObject],
+) -> list[str]:
+    """Return capped prompt evidence from selected schema context objects."""
 
     lines: list[str] = []
-    for item in retrieval_evidence:
-        for retrieved_chunk in item.chunks:
-            chunk = retrieved_chunk.chunk
+    for item in schema_context_evidence:
+        for context_chunk in item.chunks:
+            chunk = context_chunk.chunk
             if chunk.chunk_type not in {"join_candidate", "sample_value", "column", "column_group"}:
                 continue
             text = (
@@ -529,7 +531,7 @@ def _retrieval_evidence_lines(retrieval_evidence: Sequence[RetrievedSchemaObject
             if not text:
                 continue
             lines.append(f"- {chunk.chunk_type}: {' '.join(text.split())}")
-            if len(lines) >= MAX_RETRIEVAL_EVIDENCE_LINES:
+            if len(lines) >= MAX_SCHEMA_CONTEXT_EVIDENCE_LINES:
                 return lines
     return lines
 
@@ -570,7 +572,7 @@ def _table_lookup(db_index: Mapping[str, TableSchema]) -> dict[str, TableSchema]
     return lookup
 
 
-def _has_explicit_constraints(constraints: HybridPlanningConstraints) -> bool:
+def _has_explicit_constraints(constraints: SchemaPlanningConstraints) -> bool:
     return bool(
         constraints.date_start
         or constraints.date_end

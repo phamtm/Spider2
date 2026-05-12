@@ -18,10 +18,10 @@ from sol01.models import (
     CandidateReviewReport,
     ColumnSchema,
     FinalAnswer,
-    HybridPlanningDecision,
     Intent,
-    RetrievedSchemaObject,
+    SchemaContextObject,
     SchemaObject,
+    SchemaPlanningDecision,
     SelectedSchemaObject,
     SQLCandidate,
     SQLCandidateBatch,
@@ -160,36 +160,36 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
             searchable_text="orders order amount",
         ),
     ]
-    retrieval_index = SimpleNamespace(
+    schema_context_cache = SimpleNamespace(
         db="TEST_DB",
         cache_key="test-cache-key",
         objects=schema_objects,
         chunks=[],
     )
     monkeypatch.setattr(
-        "sol01.coordinator.build_retrieval_index",
-        lambda *args, **kwargs: retrieval_index,
+        "sol01.coordinator.build_schema_context_cache",
+        lambda *args, **kwargs: schema_context_cache,
     )
     monkeypatch.setattr(
-        "sol01.schema.expansion.build_retrieval_index",
-        lambda *args, **kwargs: retrieval_index,
+        "sol01.schema.expansion.build_schema_context_cache",
+        lambda *args, **kwargs: schema_context_cache,
     )
     monkeypatch.setattr(
-        "sol01.coordinator.retrieve_schema_objects",
+        "sol01.coordinator.select_schema_context_objects",
         lambda *args, **kwargs: (
             [
-                RetrievedSchemaObject(schema_object=schema_objects[0], rank=1, score=0.9),
-                RetrievedSchemaObject(schema_object=schema_objects[1], rank=2, score=0.8),
+                SchemaContextObject(schema_object=schema_objects[0], rank=1, score=0.9),
+                SchemaContextObject(schema_object=schema_objects[1], rank=2, score=0.8),
             ],
             {"query": {"text": "test query"}, "candidate_count": 2},
         ),
     )
     monkeypatch.setattr(
-        "sol01.schema.expansion.retrieve_schema_objects",
+        "sol01.schema.expansion.select_schema_context_objects",
         lambda *args, **kwargs: (
             [
-                RetrievedSchemaObject(schema_object=schema_objects[0], rank=1, score=0.9),
-                RetrievedSchemaObject(schema_object=schema_objects[1], rank=2, score=0.8),
+                SchemaContextObject(schema_object=schema_objects[0], rank=1, score=0.9),
+                SchemaContextObject(schema_object=schema_objects[1], rank=2, score=0.8),
             ],
             {"query": {"text": "test query"}, "candidate_count": 2},
         ),
@@ -199,8 +199,8 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
 
 def _planning(
     *, object_ids: list[str] | None = None, summary: str = "Find totals."
-) -> HybridPlanningDecision:
-    return HybridPlanningDecision(
+) -> SchemaPlanningDecision:
+    return SchemaPlanningDecision(
         selected_objects=[
             SelectedSchemaObject(object_id=object_id)
             for object_id in (object_ids or [f"table:{SALES_TABLE}"])
@@ -283,12 +283,12 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
         "candidate_review": "hash-candidate_review",
     }
     assert trace["schema_selection"]["selected_tables"] == [SALES_TABLE]
-    assert trace["schema_retrieval_version"] == "metadata_context_v1"
-    assert trace["schema_retrieval"]["index"]["cache_key"] == "test-cache-key"
+    assert trace["schema_context_version"] == "schema_context_v1"
+    assert trace["schema_context"]["cache"]["cache_key"] == "test-cache-key"
     prompt_budget = trace["schema_selection"]["diagnostics"]["prompt_budget"]
     assert prompt_budget["planning_prompt_chars"] <= prompt_budget["max_schema_prompt_chars"]
     assert prompt_budget["sql_reference_context_chars"] <= prompt_budget["max_schema_prompt_chars"]
-    assert trace["schema_retrieval"]["prompt_budget"] == prompt_budget
+    assert trace["schema_context"]["prompt_budget"] == prompt_budget
     assert len(trace["attempts"]) == 1
     assert trace["candidate_review"]["preferred_stage"] == "initial_1"
     assert trace["candidate_review"]["review_reason"] == (
@@ -299,7 +299,7 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
     assert "Available schema metadata evidence:" in prompts["planning"][0]
 
 
-def test_run_task_reruns_old_trace_without_schema_retrieval_version(
+def test_run_task_reruns_old_trace_without_schema_context_version(
     tmp_path: Path,
     fake_snowflake: None,
     db_index: dict[str, TableSchema],
@@ -353,7 +353,7 @@ def test_run_task_reruns_old_trace_without_schema_retrieval_version(
     assert answer.status == "success"
     assert answer.sql != "SELECT 1"
     trace = json.loads((run_paths.traces_dir / "sf_stale.json").read_text(encoding="utf-8"))
-    assert trace["schema_retrieval_version"] == "metadata_context_v1"
+    assert trace["schema_context_version"] == "schema_context_v1"
 
 
 def test_close_executable_candidates_use_one_candidate_review(
@@ -493,7 +493,7 @@ def test_schema_expansion_uses_exact_table_name_and_reuses_intent(
     assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "schema_expansion"]
 
 
-def test_schema_expansion_retrieves_candidates_for_missing_column(
+def test_schema_expansion_selects_context_for_missing_column(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     fake_snowflake: None,
@@ -501,20 +501,20 @@ def test_schema_expansion_retrieves_candidates_for_missing_column(
 ):
     queries: list[str] = []
 
-    def fake_retrieve_schema_objects(index: Any, question: str, **kwargs: Any):
+    def fake_select_schema_context_objects(index: Any, question: str, **kwargs: Any):
         queries.append(question)
         schema_object = next(obj for obj in index.objects if obj.table_name == ORDERS_TABLE)
         return (
-            [RetrievedSchemaObject(schema_object=schema_object, rank=1, score=0.9)],
+            [SchemaContextObject(schema_object=schema_object, rank=1, score=0.9)],
             {"query": {"text": question}, "candidate_count": 1},
         )
 
     monkeypatch.setattr(
-        "sol01.schema.expansion.retrieve_schema_objects",
-        fake_retrieve_schema_objects,
+        "sol01.schema.expansion.select_schema_context_objects",
+        fake_select_schema_context_objects,
     )
-    task = Task(instance_id="sf_retrieve_expand", db="TEST_DB", question="Show order totals.")
-    run_paths = ensure_run_paths("retrieve-expand-run", outputs_root=tmp_path)
+    task = Task(instance_id="sf_context_expand", db="TEST_DB", question="Show order totals.")
+    run_paths = ensure_run_paths("context-expand-run", outputs_root=tmp_path)
     prompts: dict[str, list[str]] = {}
     llm = FakeLLMClient(
         outputs={
@@ -550,17 +550,17 @@ def test_schema_expansion_retrieves_candidates_for_missing_column(
     assert f"Failed SQL: SELECT MISSING_COLUMN FROM {SALES_TABLE}" in queries[0]
     assert f"Current selected object ids: table:{SALES_TABLE}" in queries[0]
     trace = json.loads(
-        (run_paths.traces_dir / "sf_retrieve_expand.json").read_text(encoding="utf-8")
+        (run_paths.traces_dir / "sf_context_expand.json").read_text(encoding="utf-8")
     )
     expansion = trace["schema_expansion"]
-    assert expansion["decision"]["source"] == "retrieval"
-    assert expansion["retrieved_objects"][0]["object_id"] == f"table:{ORDERS_TABLE}"
+    assert expansion["decision"]["source"] == "schema_context"
+    assert expansion["schema_context_objects"][0]["object_id"] == f"table:{ORDERS_TABLE}"
     assert expansion["selected_additions"][0]["object_id"] == f"table:{ORDERS_TABLE}"
     assert expansion["added_tables"] == [ORDERS_TABLE]
     assert expansion["resolver"]["warnings"] == []
     assert "All available tables" not in prompts["planning"][1]
     assert "Available schema metadata evidence" in prompts["planning"][1]
-    assert trace["schema_retrieval"]["expansions"][0]["outcome"] == "expanded"
+    assert trace["schema_context"]["expansions"][0]["outcome"] == "expanded"
     assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "schema_expansion"]
 
 
@@ -606,7 +606,7 @@ def test_schema_expansion_recovers_unambiguous_table_from_execution_error(
     assert trace["schema_expansion"]["added_tables"] == [ORDERS_TABLE]
 
 
-def test_schema_expansion_rejects_hallucinated_retrieval_selection(
+def test_schema_expansion_rejects_hallucinated_context_selection(
     tmp_path: Path,
     fake_snowflake: None,
     db_index: dict[str, TableSchema],
@@ -640,7 +640,7 @@ def test_schema_expansion_rejects_hallucinated_retrieval_selection(
     assert answer.status == "failed"
     trace = json.loads((run_paths.traces_dir / "sf_reject_expand.json").read_text(encoding="utf-8"))
     expansion = trace["schema_expansion"]
-    assert expansion["decision"]["source"] == "retrieval"
+    assert expansion["decision"]["source"] == "schema_context"
     assert expansion["selected_additions"] == []
     assert expansion["added_tables"] == []
     assert expansion["outcome"] == "no_new_tables"

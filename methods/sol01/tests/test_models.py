@@ -11,9 +11,9 @@ from sol01.models import (
     FinalAnswer,
     Intent,
     ResolvedSchemaContext,
-    RetrievalChunk,
-    RetrievedChunk,
-    RetrievedSchemaObject,
+    SchemaContextChunk,
+    SchemaContextChunkEvidence,
+    SchemaContextObject,
     SchemaObject,
     SchemaSelection,
     SelectedSchemaObject,
@@ -202,7 +202,7 @@ def test_schema_object_id_helpers_validate_stable_formats():
         validate_schema_object_id("column:DB.PUBLIC.ORDERS")
 
 
-def test_retrieval_core_models_construct_and_validate_object_types():
+def test_schema_context_core_models_construct_and_validate_object_types():
     schema_object = SchemaObject(
         object_id="table:DB.PUBLIC.ORDERS",
         object_type="table",
@@ -210,21 +210,21 @@ def test_retrieval_core_models_construct_and_validate_object_types():
         db="DB",
         searchable_text="orders customers amounts",
     )
-    chunk = RetrievalChunk(
+    chunk = SchemaContextChunk(
         chunk_id="chunk-1",
         object_id=schema_object.object_id,
         text="Orders table with amount and customer fields.",
     )
-    retrieved_chunk = RetrievedChunk(chunk=chunk, rank=1, score=0.82)
-    retrieved_object = RetrievedSchemaObject(
+    context_chunk = SchemaContextChunkEvidence(chunk=chunk, rank=1, score=0.82)
+    context_object = SchemaContextObject(
         schema_object=schema_object,
-        chunks=[retrieved_chunk],
+        chunks=[context_chunk],
         rank=1,
         score=0.9,
     )
 
-    assert retrieved_object.schema_object.object_type == "table"
-    assert retrieved_object.chunks[0].chunk.object_id == "table:DB.PUBLIC.ORDERS"
+    assert context_object.schema_object.object_type == "table"
+    assert context_object.chunks[0].chunk.object_id == "table:DB.PUBLIC.ORDERS"
 
     with pytest.raises(ValidationError, match="object_type"):
         SchemaObject(
@@ -252,13 +252,13 @@ def test_resolved_schema_context_keeps_compact_selection_context():
         resolved_tables=["DB.PUBLIC.ORDERS"],
         allowed_tables=["DB.PUBLIC.ORDERS"],
         prompt_context="Table DB.PUBLIC.ORDERS: AMOUNT",
-        diagnostics={"retrieved_object_count": 1},
+        diagnostics={"schema_context_object_count": 1},
     )
 
     assert context.selected_objects[0].role == "metric"
     assert context.allowed_tables == ["DB.PUBLIC.ORDERS"]
     assert context.prompt_context == "Table DB.PUBLIC.ORDERS: AMOUNT"
-    assert context.diagnostics == {"retrieved_object_count": 1}
+    assert context.diagnostics == {"schema_context_object_count": 1}
 
 
 def test_final_answer_status_is_limited_to_expected_values():

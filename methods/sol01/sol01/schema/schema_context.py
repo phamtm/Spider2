@@ -7,9 +7,14 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from sol01.infra.config import SchemaRetrievalConfig
-from sol01.models import RetrievalChunk, RetrievedChunk, RetrievedSchemaObject, SchemaObject
-from sol01.schema.retrieval_index import SchemaRetrievalIndex
+from sol01.infra.config import SchemaContextConfig
+from sol01.models import (
+    SchemaContextChunk,
+    SchemaContextChunkEvidence,
+    SchemaContextObject,
+    SchemaObject,
+)
+from sol01.schema.schema_context_cache import SchemaContextCache
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 _DOTTED_OR_UNDERSCORE_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:[._][A-Za-z0-9]+)+\b")
@@ -29,7 +34,7 @@ _OBJECT_TYPE_ORDER = {
 
 
 @dataclass(frozen=True)
-class RetrievalQuery:
+class SchemaContextQuestion:
     """Question-derived context kept for diagnostics and linked-document clipping."""
 
     text: str
@@ -43,13 +48,13 @@ class RetrievalQuery:
     normalized_tokens: tuple[str, ...]
 
 
-def build_retrieval_query(
+def build_schema_context_query(
     question: str,
     *,
     linked_docs: Sequence[str] = (),
     exact_literals: Sequence[str] = (),
     max_doc_chars: int = 6000,
-) -> RetrievalQuery:
+) -> SchemaContextQuestion:
     """Build normalized question context without ranking schema objects."""
 
     clean_question = _clean_text(question)
@@ -80,7 +85,7 @@ def build_retrieval_query(
         " ".join(uppercase_codes),
         " ".join(normalized_tokens),
     ]
-    return RetrievalQuery(
+    return SchemaContextQuestion(
         text=_join_text(parts),
         question=clean_question,
         linked_doc_context=linked_doc_context,
@@ -139,50 +144,48 @@ def clip_linked_docs(
     return "\n\n".join(selected)[:max_doc_chars].rstrip()
 
 
-def retrieve_schema_objects(
-    index: SchemaRetrievalIndex,
+def select_schema_context_objects(
+    cache: SchemaContextCache,
     question: str,
     *,
     linked_docs: Sequence[str] = (),
     exact_literals: Sequence[str] = (),
-    config: SchemaRetrievalConfig | None = None,
-    type_quotas: object | None = None,
+    config: SchemaContextConfig | None = None,
     top_k_objects: int | None = None,
-) -> tuple[list[RetrievedSchemaObject], dict[str, object]]:
+) -> tuple[list[SchemaContextObject], dict[str, object]]:
     """Return available schema objects without BM25, embeddings, or exact-match ranking.
 
     Curated large-schema summaries replace raw metadata for the tables they
     cover. Uncovered tables still flow through as normal database metadata.
     """
 
-    del type_quotas
-    config = config or SchemaRetrievalConfig()
-    query = build_retrieval_query(
+    config = config or SchemaContextConfig()
+    query = build_schema_context_query(
         question,
         linked_docs=linked_docs,
         exact_literals=exact_literals,
         max_doc_chars=config.max_linked_doc_chars,
     )
-    context_mode, context_objects = _context_objects(index.objects, index.chunks)
-    retrieved_objects = _retrieved_objects(
+    context_mode, context_objects = _context_objects(cache.objects, cache.chunks)
+    schema_context_objects = _schema_context_objects(
         context_objects,
-        chunks=index.chunks,
+        chunks=cache.chunks,
         top_k=top_k_objects,
     )
     diagnostics = _diagnostics(
         query,
         context_mode=context_mode,
-        retrieved_objects=retrieved_objects,
-        object_count=len(index.objects),
-        chunk_count=len(index.chunks),
+        schema_context_objects=schema_context_objects,
+        object_count=len(cache.objects),
+        chunk_count=len(cache.chunks),
         context_object_count=len(context_objects),
     )
-    return retrieved_objects, diagnostics
+    return schema_context_objects, diagnostics
 
 
 def _context_objects(
     objects: Sequence[SchemaObject],
-    chunks: Sequence[RetrievalChunk],
+    chunks: Sequence[SchemaContextChunk],
 ) -> tuple[str, list[SchemaObject]]:
     summary_object_ids = {
         chunk.object_id
@@ -204,7 +207,7 @@ def _context_objects(
 
 
 def _covered_table_ids(
-    chunks: Sequence[RetrievalChunk],
+    chunks: Sequence[SchemaContextChunk],
     summary_object_ids: set[str],
 ) -> set[str]:
     table_ids: set[str] = set()
@@ -237,22 +240,22 @@ def _is_covered_by_summary(schema_object: SchemaObject, covered_table_ids: set[s
     return False
 
 
-def _retrieved_objects(
+def _schema_context_objects(
     objects: Sequence[SchemaObject],
     *,
-    chunks: Sequence[RetrievalChunk],
+    chunks: Sequence[SchemaContextChunk],
     top_k: int | None,
-) -> list[RetrievedSchemaObject]:
-    chunks_by_object: dict[str, list[RetrievalChunk]] = defaultdict(list)
+) -> list[SchemaContextObject]:
+    chunks_by_object: dict[str, list[SchemaContextChunk]] = defaultdict(list)
     for chunk in chunks:
         chunks_by_object[chunk.object_id].append(chunk)
 
     selected_objects = list(objects[:top_k] if top_k is not None else objects)
     return [
-        RetrievedSchemaObject(
+        SchemaContextObject(
             schema_object=schema_object,
             chunks=[
-                RetrievedChunk(chunk=chunk, rank=chunk_rank)
+                SchemaContextChunkEvidence(chunk=chunk, rank=chunk_rank)
                 for chunk_rank, chunk in enumerate(
                     sorted(
                         chunks_by_object.get(schema_object.object_id, []),
@@ -268,10 +271,10 @@ def _retrieved_objects(
 
 
 def _diagnostics(
-    query: RetrievalQuery,
+    query: SchemaContextQuestion,
     *,
     context_mode: str,
-    retrieved_objects: Sequence[RetrievedSchemaObject],
+    schema_context_objects: Sequence[SchemaContextObject],
     object_count: int,
     chunk_count: int,
     context_object_count: int,
@@ -288,12 +291,12 @@ def _diagnostics(
             "normalized_tokens": list(query.normalized_tokens[:50]),
             "linked_doc_chars": len(query.linked_doc_context),
         },
-        "candidate_counts": {
+        "context_counts": {
             "objects_total": object_count,
             "chunks_total": chunk_count,
             "available_objects": context_object_count,
         },
-        "selected_objects": [
+        "schema_context_objects": [
             {
                 "object_id": obj.schema_object.object_id,
                 "object_type": obj.schema_object.object_type,
@@ -301,7 +304,7 @@ def _diagnostics(
                 "score": obj.score,
                 "evidence_chunk_ids": [chunk.chunk.chunk_id for chunk in obj.chunks],
             }
-            for obj in retrieved_objects
+            for obj in schema_context_objects
         ],
     }
 

@@ -1,4 +1,4 @@
-# Retrieval Schema Selection Verification
+# Schema Context Selection Verification
 
 Last verified: 2026-05-13.
 
@@ -9,17 +9,17 @@ This note records verification for the schema-context selection work tracked by
 
 - Runtime planning enters `_run_planning()` in `sol01/coordinator.py`, builds a
   versioned schema-context cache, selects available schema objects, calls
-  `_retrieval_planning_user_prompt()`, sanitizes selected object IDs, and
+  `_schema_context_planning_user_prompt()`, sanitizes selected object IDs, and
   resolves selected logical objects to physical tables.
 - Schema context selection does not use embeddings, BM25, lexical ranking, or a
-  separate model-backed retrieval service.
+  separate model-backed search service.
 - The legacy full-schema planning and schema-expansion prompt builders were
   removed from `sol01/llm/prompt_builders.py`.
-- Remaining `db_schema_summary` usage is limited to offline retrieval-eval
+- Remaining `db_schema_summary` usage is limited to offline schema-context-eval
   prompt-reduction measurement and its tests, not runtime planning or schema
   expansion.
 - Runtime code imports offline gold-table labels only through the
-  `retrieval-eval` CLI path. The coordinator, planner, SQL generation, repair,
+  `schema-context-eval` CLI path. The coordinator, planner, SQL generation, repair,
   and candidate review paths do not import or load gold-table data.
 - Curated large-schema summaries live in
   `methods/sol01/metadata/large_schema_summaries.json`. Edits are validated by
@@ -29,17 +29,17 @@ This note records verification for the schema-context selection work tracked by
 ## Focused Tests
 
 ```bash
-uv run pytest tests/test_retrieval_planning.py tests/test_coordinator.py \
-  tests/test_retrieval_eval.py tests/test_schema_resolver.py \
-  tests/test_hybrid_retrieval.py tests/test_retrieval_index.py \
+uv run pytest tests/test_schema_context_planning.py tests/test_coordinator.py \
+  tests/test_schema_context_eval.py tests/test_schema_resolver.py \
+  tests/test_schema_context.py tests/test_schema_context_cache.py \
   tests/test_schema_objects.py tests/test_schema_chunks.py -q
 ```
 
 Result: `48 passed`.
 
 These tests cover schema-context planning prompts, planner sanitization, trace
-`schema_retrieval_version` and `schema_retrieval` diagnostics, schema expansion,
-offline retrieval-eval accounting, resolver expansion, large-schema summaries,
+`schema_context_version` and `schema_context` diagnostics, schema expansion,
+offline schema-context-eval accounting, resolver expansion, large-schema summaries,
 schema-context caching, schema objects, and chunk rendering.
 
 ## Full Quality Gates
@@ -60,22 +60,22 @@ Results:
 ## Prompt Budget And Hallucinated Columns
 
 Prompt budget diagnostics are recorded in each task trace under
-`schema_retrieval.prompt_budget`. The diagnostics include planning and resolved
+`schema_context.prompt_budget`. The diagnostics include planning and resolved
 context character counts and whether each value stayed within
 `SOL01_SCHEMA_MAX_PROMPT_CHARS`.
 
-`uv run sol01 retrieval-eval --output-id <id>` persists prompt-reduction and
-prompt-size-win reporting under `outputs/<id>/retrieval_eval/`. Add
+`uv run sol01 schema-context-eval --output-id <id>` persists prompt-reduction and
+prompt-size-win reporting under `outputs/<id>/schema_context_eval/`. Add
 `--trace-run-id <run_id>` to scan saved solver traces for hallucinated-column
 validation failures. Runtime validation blocks unknown columns before
 Snowflake execution when selected schema context is specific enough.
 
-## Retrieval-Eval Smoke
+## Schema-Context-Eval Smoke
 
 Small database smoke:
 
 ```bash
-uv run sol01 retrieval-eval --db BBC --limit 1
+uv run sol01 schema-context-eval --db BBC --limit 1
 ```
 
 Result:
@@ -89,7 +89,7 @@ Result:
 Large repeated-schema smoke:
 
 ```bash
-uv run sol01 retrieval-eval --db GA360 --limit 1
+uv run sol01 schema-context-eval --db GA360 --limit 1
 ```
 
 Result: attempted against a 366-table repeated-schema database and stopped

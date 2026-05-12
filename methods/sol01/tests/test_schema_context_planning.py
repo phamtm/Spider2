@@ -1,25 +1,25 @@
-"""Tests for retrieval-scoped planning prompts and selection cleanup."""
+"""Tests for schema-context planning prompts and selection cleanup."""
 
 import pytest
 
 from sol01.infra.config import DEFAULT_MAX_SCHEMA_PROMPT_CHARS
 from sol01.llm.prompt_builders import (
     PromptBudgetExceededError,
-    _retrieval_planning_user_prompt,
+    _schema_context_planning_user_prompt,
     _sql_reference_context,
     _sql_repair_prompt,
     enforce_prompt_budget,
-    sanitize_hybrid_planning_decision,
+    sanitize_schema_planning_decision,
 )
 from sol01.models import (
     ColumnSchema,
-    HybridPlanningConstraints,
-    HybridPlanningDecision,
     Intent,
-    RetrievalChunk,
-    RetrievedChunk,
-    RetrievedSchemaObject,
+    SchemaContextChunk,
+    SchemaContextChunkEvidence,
+    SchemaContextObject,
     SchemaObject,
+    SchemaPlanningConstraints,
+    SchemaPlanningDecision,
     SchemaSelection,
     SelectedSchemaObject,
     TableSchema,
@@ -29,12 +29,12 @@ from sol01.schema.chunks import render_schema_chunks
 from sol01.schema.objects import build_schema_objects
 
 
-def test_retrieval_planning_prompt_uses_retrieved_objects_without_full_schema_summary():
-    prompt = _retrieval_planning_user_prompt(
+def test_schema_context_planning_prompt_uses_schema_context_objects_without_full_schema_summary():
+    prompt = _schema_context_planning_user_prompt(
         Task(instance_id="local001", db="DB", question="Revenue for closed orders in 2024"),
         "DB",
         "Closed means STATUS = 'closed'. " * 200,
-        _retrieved_objects(),
+        _schema_context_objects(),
         max_docs_chars=120,
     )
 
@@ -45,28 +45,28 @@ def test_retrieval_planning_prompt_uses_retrieved_objects_without_full_schema_su
     assert "table:DB.PUBLIC.ORDERS" in prompt
     assert "column:DB.PUBLIC.ORDERS#AMOUNT" in prompt
     assert "Do not invent object ids" in prompt
-    assert "Return a HybridPlanningDecision" in prompt
+    assert "Return a SchemaPlanningDecision" in prompt
     assert "Schema summary:" not in prompt
     assert "CREATE TABLE" not in prompt
     assert len(prompt.split("Document context:\n", 1)[1].split("\n\n", 1)[0]) <= 123
 
 
-def test_retrieval_planning_prompt_fits_total_budget_without_dropping_object_ids():
-    minimal_prompt = _retrieval_planning_user_prompt(
+def test_schema_context_planning_prompt_fits_total_budget_without_dropping_object_ids():
+    minimal_prompt = _schema_context_planning_user_prompt(
         Task(instance_id="local001", db="DB", question="Revenue for closed orders in 2024"),
         "DB",
         "Closed means STATUS = 'closed'. " * 200,
-        _retrieved_objects(),
+        _schema_context_objects(),
         max_docs_chars=0,
         max_evidence_chars=0,
     )
     budget = len(minimal_prompt) + 40
 
-    prompt = _retrieval_planning_user_prompt(
+    prompt = _schema_context_planning_user_prompt(
         Task(instance_id="local001", db="DB", question="Revenue for closed orders in 2024"),
         "DB",
         "Closed means STATUS = 'closed'. " * 200,
-        _retrieved_objects(),
+        _schema_context_objects(),
         max_total_chars=budget,
     )
 
@@ -76,20 +76,20 @@ def test_retrieval_planning_prompt_fits_total_budget_without_dropping_object_ids
     assert "column:DB.PUBLIC.ORDERS#AMOUNT" in prompt
 
 
-def test_retrieval_planning_prompt_raises_when_required_shell_exceeds_budget():
+def test_schema_context_planning_prompt_raises_when_required_shell_exceeds_budget():
     with pytest.raises(PromptBudgetExceededError, match="planning prompt"):
-        _retrieval_planning_user_prompt(
+        _schema_context_planning_user_prompt(
             Task(instance_id="local001", db="DB", question="Revenue for closed orders in 2024"),
             "DB",
             "",
-            _retrieved_objects(),
+            _schema_context_objects(),
             max_docs_chars=0,
             max_evidence_chars=0,
             max_total_chars=10,
         )
 
 
-def test_retrieval_planning_prompt_uses_curated_summary_evidence_for_covered_tables():
+def test_schema_context_planning_prompt_uses_curated_summary_evidence_for_covered_tables():
     table = TableSchema(
         name="_20240103",
         database_name="GITHUB_REPOS_DATE",
@@ -118,7 +118,7 @@ def test_retrieval_planning_prompt_uses_curated_summary_evidence_for_covered_tab
     chunk = next(
         chunk for chunk in render_schema_chunks([schema_object]) if chunk.chunk_type == "table"
     )
-    prompt = _retrieval_planning_user_prompt(
+    prompt = _schema_context_planning_user_prompt(
         Task(
             instance_id="sf_bq_test",
             db="GITHUB_REPOS_DATE",
@@ -127,9 +127,9 @@ def test_retrieval_planning_prompt_uses_curated_summary_evidence_for_covered_tab
         "GITHUB_REPOS_DATE",
         "",
         [
-            RetrievedSchemaObject(
+            SchemaContextObject(
                 schema_object=schema_object,
-                chunks=[RetrievedChunk(chunk=chunk, rank=1, score=1.0)],
+                chunks=[SchemaContextChunkEvidence(chunk=chunk, rank=1, score=1.0)],
                 rank=1,
                 score=1.0,
             )
@@ -146,16 +146,16 @@ def test_retrieval_planning_prompt_uses_curated_summary_evidence_for_covered_tab
     assert len(prompt) <= DEFAULT_MAX_SCHEMA_PROMPT_CHARS
 
 
-def test_hybrid_planning_decision_constraints_have_defaults_and_parse_values():
-    default_decision = HybridPlanningDecision(
+def test_schema_planning_decision_constraints_have_defaults_and_parse_values():
+    default_decision = SchemaPlanningDecision(
         selected_objects=[],
         rationale="No relevant object was found.",
         confidence=0.0,
         intent=_intent(),
     )
-    constrained = HybridPlanningDecision(
+    constrained = SchemaPlanningDecision(
         selected_objects=[SelectedSchemaObject(object_id="table:DB.PUBLIC.ORDERS")],
-        constraints=HybridPlanningConstraints(
+        constraints=SchemaPlanningConstraints(
             date_start="2024-01-01",
             date_end="2024-12-31",
             years=[2024],
@@ -176,8 +176,8 @@ def test_hybrid_planning_decision_constraints_have_defaults_and_parse_values():
     assert constrained.constraints.include_all is True
 
 
-def test_sanitize_hybrid_planning_rejects_hallucinated_ids_and_normalizes_exact_tables():
-    decision = HybridPlanningDecision(
+def test_sanitize_schema_planning_rejects_hallucinated_ids_and_normalizes_exact_tables():
+    decision = SchemaPlanningDecision(
         selected_objects=[
             SelectedSchemaObject(object_id="column:DB.PUBLIC.ORDERS#AMOUNT", role="metric"),
             SelectedSchemaObject(object_id="table:DB.PUBLIC.MISSING", role="primary"),
@@ -189,7 +189,7 @@ def test_sanitize_hybrid_planning_rejects_hallucinated_ids_and_normalizes_exact_
         intent=_intent(),
     )
 
-    sanitized, diagnostics = sanitize_hybrid_planning_decision(decision, _retrieved_objects())
+    sanitized, diagnostics = sanitize_schema_planning_decision(decision, _schema_context_objects())
 
     assert [item.object_id for item in sanitized.selected_objects] == [
         "column:DB.PUBLIC.ORDERS#AMOUNT",
@@ -203,8 +203,8 @@ def test_sanitize_hybrid_planning_rejects_hallucinated_ids_and_normalizes_exact_
     assert "outside available schema metadata" in sanitized.rationale
 
 
-def test_sanitize_hybrid_planning_sets_zero_confidence_when_nothing_valid_remains():
-    decision = HybridPlanningDecision(
+def test_sanitize_schema_planning_sets_zero_confidence_when_nothing_valid_remains():
+    decision = SchemaPlanningDecision(
         selected_objects=[SelectedSchemaObject(object_id="table:DB.PUBLIC.MISSING")],
         selected_tables=["DB.PUBLIC.MISSING"],
         rationale="Use missing table.",
@@ -212,7 +212,7 @@ def test_sanitize_hybrid_planning_sets_zero_confidence_when_nothing_valid_remain
         intent=_intent(),
     )
 
-    sanitized, diagnostics = sanitize_hybrid_planning_decision(decision, _retrieved_objects())
+    sanitized, diagnostics = sanitize_schema_planning_decision(decision, _schema_context_objects())
 
     assert sanitized.selected_objects == []
     assert sanitized.confidence == 0.0
@@ -323,7 +323,7 @@ def _intent() -> Intent:
     )
 
 
-def _retrieved_objects() -> list[RetrievedSchemaObject]:
+def _schema_context_objects() -> list[SchemaContextObject]:
     orders = SchemaObject(
         object_id="table:DB.PUBLIC.ORDERS",
         object_type="table",
@@ -342,11 +342,11 @@ def _retrieved_objects() -> list[RetrievedSchemaObject]:
         searchable_text="order amount revenue",
     )
     return [
-        RetrievedSchemaObject(
+        SchemaContextObject(
             schema_object=orders,
             chunks=[
-                RetrievedChunk(
-                    chunk=RetrievalChunk(
+                SchemaContextChunkEvidence(
+                    chunk=SchemaContextChunk(
                         chunk_id="table:DB.PUBLIC.ORDERS::table",
                         object_id="table:DB.PUBLIC.ORDERS",
                         chunk_type="table",
@@ -358,11 +358,11 @@ def _retrieved_objects() -> list[RetrievedSchemaObject]:
             rank=1,
             score=0.9,
         ),
-        RetrievedSchemaObject(
+        SchemaContextObject(
             schema_object=amount,
             chunks=[
-                RetrievedChunk(
-                    chunk=RetrievalChunk(
+                SchemaContextChunkEvidence(
+                    chunk=SchemaContextChunk(
                         chunk_id="column:DB.PUBLIC.ORDERS#AMOUNT::column",
                         object_id="column:DB.PUBLIC.ORDERS#AMOUNT",
                         chunk_type="column",

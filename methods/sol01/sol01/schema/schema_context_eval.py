@@ -1,4 +1,4 @@
-"""Offline gold-table coverage evaluation for schema retrieval."""
+"""Offline gold-table coverage evaluation for schema context selection."""
 
 from __future__ import annotations
 
@@ -8,21 +8,21 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from sol01.infra.config import SchemaRetrievalConfig
+from sol01.infra.config import SchemaContextConfig
 from sol01.infra.paths import REPO_ROOT
 from sol01.loading.docs import load_document_text
 from sol01.models import (
-    RetrievedSchemaObject,
+    SchemaContextObject,
     SchemaObject,
     SelectedSchemaObject,
     TableSchema,
     Task,
 )
-from sol01.schema.hybrid_retrieval import retrieve_schema_objects
+from sol01.schema.db_index import load_db_index
 from sol01.schema.large_schema_summaries import load_large_schema_summary_registry
 from sol01.schema.resolver import resolve_schema_context
-from sol01.schema.retrieval import load_db_index
-from sol01.schema.retrieval_index import SchemaRetrievalIndex, build_retrieval_index
+from sol01.schema.schema_context import select_schema_context_objects
+from sol01.schema.schema_context_cache import SchemaContextCache, build_schema_context_cache
 
 DEFAULT_GOLD_TABLE_PATH = REPO_ROOT / "methods" / "gold-tables" / "spider2-snow-gold-tables.jsonl"
 DEFAULT_FAILURE_EVIDENCE_LIMIT = 5
@@ -32,7 +32,7 @@ DEFAULT_PROMPT_WIN_THRESHOLD = 0.25
 
 
 def db_schema_summary(db_index: Mapping[str, TableSchema]) -> str:
-    """Render the full-schema baseline used by offline retrieval evaluation."""
+    """Render the full-schema baseline used by offline schema context evaluation."""
 
     parts: list[str] = []
     for table_name in sorted(db_index):
@@ -55,8 +55,8 @@ def _column_summary(column: Any) -> str:
 
 
 @dataclass(frozen=True)
-class RetrievalEvalReport:
-    """Aggregate and per-task retrieval-eval results."""
+class SchemaContextEvalReport:
+    """Aggregate and per-task schema-context-eval results."""
 
     task_count: int
     object_cutoff: int
@@ -122,15 +122,15 @@ def load_gold_tables(path: Path = DEFAULT_GOLD_TABLE_PATH) -> dict[str, list[str
     return gold_tables
 
 
-def run_retrieval_eval(
+def run_schema_context_eval(
     tasks: Sequence[Task],
     *,
     gold_tables_by_instance: Mapping[str, Sequence[str]],
-    config: SchemaRetrievalConfig | None = None,
+    config: SchemaContextConfig | None = None,
     db_index_loader: Callable[[str], Mapping[str, TableSchema]] = load_db_index,
-    retrieval_index_loader: Callable[
-        [str, Mapping[str, TableSchema], SchemaRetrievalConfig],
-        SchemaRetrievalIndex,
+    schema_context_cache_loader: Callable[
+        [str, Mapping[str, TableSchema], SchemaContextConfig],
+        SchemaContextCache,
     ]
     | None = None,
     document_loader: Callable[[str], str] = load_document_text,
@@ -139,11 +139,11 @@ def run_retrieval_eval(
     covered_only: bool = False,
     baseline_tasks: Mapping[str, Mapping[str, Any]] | None = None,
     trace_dirs: Sequence[Path] = (),
-) -> RetrievalEvalReport:
-    """Evaluate retrieval and resolver coverage against offline gold tables."""
+) -> SchemaContextEvalReport:
+    """Evaluate schema context and resolver coverage against offline gold tables."""
 
-    config = config or SchemaRetrievalConfig()
-    retrieval_index_loader = retrieval_index_loader or _build_index_for_eval
+    config = config or SchemaContextConfig()
+    schema_context_cache_loader = schema_context_cache_loader or _build_index_for_eval
     rows: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
 
@@ -156,44 +156,44 @@ def run_retrieval_eval(
             continue
 
         db_index = dict(db_index_loader(task.db))
-        retrieval_index = retrieval_index_loader(task.db, db_index, config)
+        schema_context_cache = schema_context_cache_loader(task.db, db_index, config)
         linked_docs = _task_linked_docs(task, document_loader)
-        retrieved_objects, retrieval_diagnostics = retrieve_schema_objects(
-            retrieval_index,
+        schema_context_objects, context_diagnostics = select_schema_context_objects(
+            schema_context_cache,
             task.question,
             linked_docs=linked_docs,
             config=config,
         )
-        cutoff_objects = list(retrieved_objects[: config.object_top_k])
+        cutoff_objects = list(schema_context_objects[: config.object_cutoff])
         selected_objects = [
             SelectedSchemaObject(
                 object_id=item.schema_object.object_id,
                 role=_role_for_schema_object(item.schema_object),
-                reason="offline retrieval evaluation",
+                reason="offline schema context evaluation",
             )
             for item in cutoff_objects
         ]
         resolved = resolve_schema_context(
             db=task.db,
             selected_objects=selected_objects,
-            canonical_schema_objects=retrieval_index.objects,
+            canonical_schema_objects=schema_context_cache.objects,
             db_index=db_index,
             question=task.question,
-            retrieval_evidence=cutoff_objects,
+            schema_context_evidence=cutoff_objects,
         )
 
-        retrieved_tables = _tables_from_retrieved_objects(cutoff_objects)
+        context_tables = _tables_from_schema_context_objects(cutoff_objects)
         resolved_tables = _stable_tables(resolved.allowed_tables)
-        retrieved_gold_tables = _gold_overlap(gold_tables, retrieved_tables)
+        context_gold_tables = _gold_overlap(gold_tables, context_tables)
         resolved_gold_tables = _gold_overlap(gold_tables, resolved_tables)
         missing_tables = [
             table
             for table in gold_tables
             if _normalize_table(table) not in _normalized(resolved_tables)
         ]
-        pre_recall = _gold_recall(gold_tables, retrieved_tables)
+        pre_recall = _gold_recall(gold_tables, context_tables)
         post_recall = _gold_recall(gold_tables, resolved_tables)
-        pre_any_gold = bool(retrieved_gold_tables)
+        pre_any_gold = bool(context_gold_tables)
         post_all_gold = not missing_tables
         family_case, family_success = _family_expansion_result(
             gold_tables,
@@ -210,9 +210,9 @@ def run_retrieval_eval(
             "gold_tables": gold_tables,
             "covered_gold_tables": _covered_tables(gold_tables),
             "covered_summary_ids": covered_summary_ids,
-            "retrieved_object_ids": [item.schema_object.object_id for item in cutoff_objects],
-            "retrieved_tables": retrieved_tables,
-            "retrieved_gold_tables": retrieved_gold_tables,
+            "schema_context_object_ids": [item.schema_object.object_id for item in cutoff_objects],
+            "context_tables": context_tables,
+            "context_gold_tables": context_gold_tables,
             "resolved_tables": resolved_tables,
             "resolved_gold_tables": resolved_gold_tables,
             "pre_resolver_gold_recall": pre_recall,
@@ -226,7 +226,7 @@ def run_retrieval_eval(
             "resolved_prompt_chars": resolved_prompt_chars,
             "prompt_chars_saved": prompt_chars_saved,
             "prompt_reduction": prompt_reduction,
-            "retrieval_diagnostics": retrieval_diagnostics,
+            "context_diagnostics": context_diagnostics,
         }
         rows.append(row)
         if missing_tables and len(failures) < failure_limit:
@@ -241,15 +241,15 @@ def run_retrieval_eval(
 
     return _build_report(
         rows,
-        object_cutoff=config.object_top_k,
+        object_cutoff=config.object_cutoff,
         failures=failures,
         baseline_tasks=baseline_tasks or {},
         hallucinated_column_failures=_hallucinated_column_failures(trace_dirs),
     )
 
 
-def load_retrieval_eval_task_rows(path: Path) -> dict[str, dict[str, Any]]:
-    """Load task rows from a previous persisted retrieval-eval report."""
+def load_schema_context_eval_task_rows(path: Path) -> dict[str, dict[str, Any]]:
+    """Load task rows from a previous persisted schema-context-eval report."""
 
     task_rows_path = path / "tasks.jsonl" if path.is_dir() else path
     rows: list[dict[str, Any]] = []
@@ -266,8 +266,8 @@ def load_retrieval_eval_task_rows(path: Path) -> dict[str, dict[str, Any]]:
     }
 
 
-def write_retrieval_eval_report(report: RetrievalEvalReport, output_dir: Path) -> Path:
-    """Persist retrieval-eval artifacts under the repo-local outputs tree."""
+def write_schema_context_eval_report(report: SchemaContextEvalReport, output_dir: Path) -> Path:
+    """Persist schema-context-eval artifacts under the repo-local outputs tree."""
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "report.json").write_text(
@@ -302,11 +302,11 @@ def write_retrieval_eval_report(report: RetrievalEvalReport, output_dir: Path) -
 def _build_index_for_eval(
     db: str,
     db_index: Mapping[str, TableSchema],
-    config: SchemaRetrievalConfig,
-) -> SchemaRetrievalIndex:
-    """Build retrieval artifacts without touching runtime coordinator paths."""
+    config: SchemaContextConfig,
+) -> SchemaContextCache:
+    """Build schema context artifacts without touching runtime coordinator paths."""
 
-    return build_retrieval_index(
+    return build_schema_context_cache(
         db,
         db_index=db_index,
         config=config,
@@ -320,10 +320,10 @@ def _build_report(
     failures: list[dict[str, Any]],
     baseline_tasks: Mapping[str, Mapping[str, Any]],
     hallucinated_column_failures: list[dict[str, Any]],
-) -> RetrievalEvalReport:
+) -> SchemaContextEvalReport:
     task_count = len(rows)
     family_rows = [row for row in rows if row["family_expansion_case"]]
-    return RetrievalEvalReport(
+    return SchemaContextEvalReport(
         task_count=task_count,
         object_cutoff=object_cutoff,
         covered_task_count=sum(1 for row in rows if row["covered_summary_ids"]),
@@ -363,7 +363,7 @@ def _role_for_schema_object(schema_object: SchemaObject) -> str:
     return "unknown"
 
 
-def _tables_from_retrieved_objects(objects: Sequence[RetrievedSchemaObject]) -> list[str]:
+def _tables_from_schema_context_objects(objects: Sequence[SchemaContextObject]) -> list[str]:
     tables: list[str] = []
     for item in objects:
         tables.extend(_schema_object_tables(item.schema_object))
@@ -429,7 +429,7 @@ def _gold_recall(gold_tables: Sequence[str], candidate_tables: Sequence[str]) ->
 
 def _family_expansion_result(
     gold_tables: Sequence[str],
-    retrieved_objects: Sequence[RetrievedSchemaObject],
+    schema_context_objects: Sequence[SchemaContextObject],
     resolved_tables: Sequence[str],
 ) -> tuple[bool, bool | None]:
     """Report success for gold-table sets that should exercise family expansion."""
@@ -439,7 +439,7 @@ def _family_expansion_result(
         return False, None
 
     resolved = _normalized(resolved_tables)
-    for item in retrieved_objects:
+    for item in schema_context_objects:
         schema_object = item.schema_object
         if schema_object.object_type != "family":
             continue
@@ -452,14 +452,14 @@ def _family_expansion_result(
 
 
 def _top_evidence(
-    retrieved_objects: Sequence[RetrievedSchemaObject],
+    schema_context_objects: Sequence[SchemaContextObject],
     *,
     limit: int,
 ) -> list[dict[str, Any]]:
     evidence: list[dict[str, Any]] = []
-    for item in retrieved_objects:
-        for retrieved_chunk in item.chunks:
-            chunk = retrieved_chunk.chunk
+    for item in schema_context_objects:
+        for context_chunk in item.chunks:
+            chunk = context_chunk.chunk
             text = chunk.prompt_text or chunk.source_definition or chunk.search_text or chunk.text
             evidence.append(
                 {
@@ -658,10 +658,10 @@ def _is_hallucinated_column_error(error: str) -> bool:
     )
 
 
-def _render_report_markdown(report: RetrievalEvalReport) -> str:
+def _render_report_markdown(report: SchemaContextEvalReport) -> str:
     summary = report.summary()
     lines = [
-        "# Retrieval Evaluation",
+        "# Schema Context Evaluation",
         "",
         f"- tasks: {summary['task_count']}",
         f"- covered schema tasks: {summary['covered_task_count']}",

@@ -16,7 +16,7 @@ import typer
 from sol01.analysis.analysis import analyze_run
 from sol01.analysis.eval_runner import run_official_eval, run_persisted_eval
 from sol01.coordinator import run_task, run_tasks
-from sol01.infra.config import DEFAULT_DOTENV_PATH, RuntimeConfig, SchemaRetrievalConfig
+from sol01.infra.config import DEFAULT_DOTENV_PATH, RuntimeConfig, SchemaContextConfig
 from sol01.infra.logging import configure_logging, get_logger
 from sol01.infra.observability import configure_logfire
 from sol01.infra.time_utils import format_duration
@@ -37,16 +37,16 @@ from sol01.output.output import (
 )
 from sol01.output.registry import resolve_llm_call_log_path
 from sol01.schema.index import CACHE_PATH, build_index_cache
-from sol01.schema.retrieval_eval import (
+from sol01.schema.schema_context_cache import (
+    DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT,
+    prewarm_schema_context_caches,
+)
+from sol01.schema.schema_context_eval import (
     DEFAULT_GOLD_TABLE_PATH,
     load_gold_tables,
-    load_retrieval_eval_task_rows,
-    run_retrieval_eval,
-    write_retrieval_eval_report,
-)
-from sol01.schema.retrieval_index import (
-    DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT,
-    prewarm_retrieval_indexes,
+    load_schema_context_eval_task_rows,
+    run_schema_context_eval,
+    write_schema_context_eval_report,
 )
 
 app = typer.Typer(
@@ -334,8 +334,8 @@ def _echo_llm_call_detail(record: Any) -> None:
     typer.echo("")
 
 
-@app.command("prewarm-schema-index")
-def prewarm_schema_index_command(
+@app.command("prewarm-schema-context")
+def prewarm_schema_context_command(
     dbs: Annotated[
         list[str],
         typer.Argument(help="Database names to prewarm, for example E_COMMERCE."),
@@ -343,15 +343,14 @@ def prewarm_schema_index_command(
 ) -> None:
     """Build schema metadata cache artifacts before running batch workers."""
 
-    indexes = _prewarm_schema_retrieval_indexes(dbs)
+    caches = _prewarm_schema_context_caches(dbs)
     typer.echo(
-        f"Prewarmed {len(indexes)} schema metadata cache(s) into "
-        f"{DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT}"
+        f"Prewarmed {len(caches)} schema metadata cache(s) into {DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT}"
     )
 
 
-@app.command("retrieval-eval")
-def retrieval_eval_command(
+@app.command("schema-context-eval")
+def schema_context_eval_command(
     gold_path: Annotated[
         Path,
         typer.Option(
@@ -390,7 +389,10 @@ def retrieval_eval_command(
         Path | None,
         typer.Option(
             "--baseline-path",
-            help="Previous retrieval-eval report.json or tasks.jsonl for recall regression checks.",
+            help=(
+                "Previous schema-context-eval report.json or tasks.jsonl "
+                "for recall regression checks."
+            ),
         ),
     ] = None,
     trace_run_ids: Annotated[
@@ -402,7 +404,9 @@ def retrieval_eval_command(
     ] = None,
     output_id: Annotated[
         str | None,
-        typer.Option(help="Persist report artifacts under outputs/<output_id>/retrieval_eval."),
+        typer.Option(
+            help="Persist report artifacts under outputs/<output_id>/schema_context_eval."
+        ),
     ] = None,
     json_output: Annotated[
         bool,
@@ -417,9 +421,9 @@ def retrieval_eval_command(
         ),
     ] = None,
 ) -> None:
-    """Evaluate schema retrieval coverage against offline gold-table labels."""
+    """Evaluate schema context coverage against offline gold-table labels."""
 
-    report = handle_retrieval_eval(
+    report = handle_schema_context_eval(
         gold_path=gold_path,
         selectors=selectors or [],
         instance_id=instance_id,
@@ -433,9 +437,9 @@ def retrieval_eval_command(
     )
     output_dir = None
     if output_id:
-        output_dir = write_retrieval_eval_report(
+        output_dir = write_schema_context_eval_report(
             report,
-            OUTPUTS_ROOT / output_id / "retrieval_eval",
+            OUTPUTS_ROOT / output_id / "schema_context_eval",
         )
     if json_output:
         payload = report.payload()
@@ -626,7 +630,7 @@ def handle_analyze(*, run_id: str) -> dict[str, Any]:
     return analyze_run(run_id)
 
 
-def handle_retrieval_eval(
+def handle_schema_context_eval(
     *,
     gold_path: Path,
     selectors: list[str] | None,
@@ -639,7 +643,7 @@ def handle_retrieval_eval(
     baseline_path: Path | None = None,
     trace_run_ids: list[str] | None = None,
 ) -> Any:
-    """Run offline retrieval evaluation for selected tasks."""
+    """Run offline schema context evaluation for selected tasks."""
 
     tasks = _load_run_tasks(
         selectors=selectors,
@@ -653,12 +657,12 @@ def handle_retrieval_eval(
     if not tasks:
         raise typer.Exit(code=1)
 
-    config = SchemaRetrievalConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
+    config = SchemaContextConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
     if object_cutoff is not None:
-        config = config.model_copy(update={"object_top_k": object_cutoff})
-    baseline_tasks = load_retrieval_eval_task_rows(baseline_path) if baseline_path else {}
+        config = config.model_copy(update={"object_cutoff": object_cutoff})
+    baseline_tasks = load_schema_context_eval_task_rows(baseline_path) if baseline_path else {}
     trace_dirs = [ensure_run_paths(run_id).traces_dir for run_id in trace_run_ids or []]
-    return run_retrieval_eval(
+    return run_schema_context_eval(
         tasks,
         gold_tables_by_instance=gold_tables,
         config=config,
@@ -708,11 +712,11 @@ def handle_ask(*, db: str, question: str) -> FinalAnswer:
         logger.info("ask cleanup complete", ask_root=str(ask_paths.root))
 
 
-def _prewarm_schema_retrieval_indexes(dbs: Iterable[str]) -> list[Any]:
+def _prewarm_schema_context_caches(dbs: Iterable[str]) -> list[Any]:
     """Build schema metadata caches once before concurrent solver work begins."""
 
-    config = SchemaRetrievalConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
-    return prewarm_retrieval_indexes(dbs, config=config)
+    config = SchemaContextConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
+    return prewarm_schema_context_caches(dbs, config=config)
 
 
 def _load_filtered_tasks(

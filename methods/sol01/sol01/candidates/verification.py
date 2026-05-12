@@ -28,8 +28,8 @@ from sol01.models import (
     Task,
     ValidationReport,
 )
+from sol01.schema.db_index import load_db_index
 from sol01.schema.index import CACHE_PATH
-from sol01.schema.retrieval import load_db_index
 
 logger = get_logger(__name__)
 

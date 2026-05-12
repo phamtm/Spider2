@@ -54,10 +54,10 @@ just check
 
 ```bash
 uv run sol01 index
-uv run sol01 prewarm-schema-index E_COMMERCE
+uv run sol01 prewarm-schema-context E_COMMERCE
 uv run sol01 run --concurrency 4
 uv run sol01 eval --run-id <run_id>
-uv run sol01 retrieval-eval
+uv run sol01 schema-context-eval
 uv run sol01 analyze --run-id <run_id>
 uv run sol01 ask --db E_COMMERCE "Which customers have the highest AOV?"
 uv run sol01 run --instance-id sf_bq320
@@ -72,10 +72,10 @@ just gold sf_bq320
 `sol01 run <selector>...` accepts exact IDs, globs, `tier:<n>`,
 `tag:<name>`, or `all`.
 `sol01 run` builds schema metadata caches for selected databases before task
-workers start. `uv run sol01 prewarm-schema-index <DB>...` builds the same cache
+workers start. `uv run sol01 prewarm-schema-context <DB>...` builds the same cache
 artifacts without running solver tasks.
 
-`sol01 retrieval-eval` measures deterministic schema-context coverage against
+`sol01 schema-context-eval` measures deterministic schema-context coverage against
 the offline gold-table JSONL file at
 `methods/gold-tables/spider2-snow-gold-tables.jsonl` by default. Use
 `--gold-path <path>` only when evaluating another local label file. Gold tables
@@ -86,7 +86,7 @@ large-schema summaries. `--baseline-path <report.json|tasks.jsonl>` compares
 recall to a previous report, `--trace-run-id <run_id>` scans saved traces for
 hallucinated-column validation failures, and `--output-id <id>` writes
 `summary.json`, `tasks.jsonl`, `failures.json`, `report.json`, and `summary.md`
-under `outputs/<id>/retrieval_eval/`.
+under `outputs/<id>/schema_context_eval/`.
 
 `just run` runs the default solver CLI.
 `just run-selected` runs one or more selected solver tasks.
@@ -132,10 +132,10 @@ The local registry lives in `methods/sol01/outputs/registry/` with:
 - `task_results.jsonl`
 - `latest.json`
 
-## Schema Retrieval
+## Schema Context
 
 `sol01` uses deterministic schema-context selection. It does not use embeddings,
-BM25, lexical ranking, or a model-backed retrieval service. If a database has
+BM25, lexical ranking, or a model-backed search service. If a database has
 curated large-schema summary coverage, planning sees the summary-backed logical
 objects. Otherwise, planning sees the database metadata objects directly.
 
@@ -147,15 +147,15 @@ question -> schema metadata context -> planner object selection
 ```
 
 Large-schema summaries keep very wide or repeated schemas compact. For ordinary
-schemas, the planner is not forced through a retrieval guess first.
+schemas, the planner is not forced through a ranking guess first.
 
 Cache layout:
 
 - `methods/sol01/.cache/snow_index.json`: base metadata cache from
   `uv run sol01 index`
-- `methods/sol01/.cache/schema_retrieval_index/<DB>/current.json`: pointer to
+- `methods/sol01/.cache/schema_context_cache/<DB>/current.json`: pointer to
   the active schema-context version
-- `methods/sol01/.cache/schema_retrieval_index/<DB>/versions/<cache_key>/`:
+- `methods/sol01/.cache/schema_context_cache/<DB>/versions/<cache_key>/`:
   `manifest.json`, `objects.jsonl`, and `chunks.jsonl`
 
 Large-schema summaries live in
@@ -177,9 +177,7 @@ cache version.
 
 Runtime config can be set in the shell or `methods/sol01/.env`:
 
-- `SOL01_SCHEMA_CHUNK_TOP_K`, default `80`
-- `SOL01_SCHEMA_OBJECT_TOP_K`, default `12`
-- `SOL01_SCHEMA_FAMILY_TOP_K`, default `8`
+- `SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF`, default `12`
 - `SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD`, default `0.82`
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
 - `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
@@ -189,19 +187,19 @@ evidence. High-cardinality, opaque, free-text, numeric, temporal,
 semi-structured, URL, email, UUID, hash, key-like, and raw text values are
 excluded so arbitrary literals are not promoted into SQL prompts.
 
-Each task trace records `schema_retrieval_version`, effective retrieval config,
+Each task trace records `schema_context_version`, effective schema-context config,
 available schema-object evidence, context diagnostics, planner sanitization
 diagnostics, resolver entries, allowed tables, and schema expansion diagnostics
 when repair adds schema context.
 
-To verify prompt size, inspect `schema_retrieval.prompt_budget` in
+To verify prompt size, inspect `schema_context.prompt_budget` in
 `traces/<instance_id>.json`, or run:
 
 ```bash
-uv run sol01 retrieval-eval --db <DB> --limit <n> --output-id <id>
+uv run sol01 schema-context-eval --db <DB> --limit <n> --output-id <id>
 ```
 
-The persisted report under `outputs/<id>/retrieval_eval/` includes prompt
+The persisted report under `outputs/<id>/schema_context_eval/` includes prompt
 reduction and prompt-size wins. Add `--trace-run-id <run_id>` to scan existing
 solver traces for hallucinated-column validation failures. Runtime validation
 also blocks SQL that references unknown columns when selected schema context is
@@ -227,7 +225,7 @@ Pass/fail comes from the official evaluator:
    `workspace/temp/`, and `workspace/spider2-snow/evaluation_suite/log.txt`.
 5. Open `eval/summary.json` and `eval/per_instance.jsonl`.
 6. Check `methods/sol01/outputs/registry/latest.json`.
-7. Inspect `schema_retrieval` in `traces/<instance_id>.json` for retrieval,
+7. Inspect `schema_context` in `traces/<instance_id>.json` for selection,
    planner, resolver, and expansion diagnostics.
 8. Use the Streamlit `LLM calls` view in `progress_ui.py` to pick a question
    and inspect the call timeline.

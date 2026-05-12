@@ -7,11 +7,11 @@ from datetime import date, timedelta
 from sol01.execution.validation import validate_sql
 from sol01.models import (
     ColumnSchema,
-    HybridPlanningConstraints,
-    RetrievalChunk,
-    RetrievedChunk,
-    RetrievedSchemaObject,
+    SchemaContextChunk,
+    SchemaContextChunkEvidence,
+    SchemaContextObject,
     SchemaObject,
+    SchemaPlanningConstraints,
     SelectedSchemaObject,
     TableSchema,
 )
@@ -48,7 +48,7 @@ def test_resolver_applies_explicit_year_date_suffix_and_version_constraints():
     sales_context = _resolve_family(
         sales_index,
         question="Show sales in 2024.",
-        constraints=HybridPlanningConstraints(years=[2024]),
+        constraints=SchemaPlanningConstraints(years=[2024]),
     )
 
     daily_index = {
@@ -59,7 +59,7 @@ def test_resolver_applies_explicit_year_date_suffix_and_version_constraints():
     daily_context = _resolve_family(
         daily_index,
         question="Show daily sales from 2024-01-01 to 2024-01-02.",
-        constraints=HybridPlanningConstraints(
+        constraints=SchemaPlanningConstraints(
             date_start="2024-01-01",
             date_end="2024-01-02",
         ),
@@ -72,7 +72,7 @@ def test_resolver_applies_explicit_year_date_suffix_and_version_constraints():
     model_context = _resolve_family(
         model_index,
         question="Use model v2.",
-        constraints=HybridPlanningConstraints(version="v2", suffixes=["_v2"]),
+        constraints=SchemaPlanningConstraints(version="v2", suffixes=["_v2"]),
     )
 
     assert sales_context.allowed_tables == ["DB.PUBLIC.SALES_2024"]
@@ -89,7 +89,7 @@ def test_resolver_include_all_and_broad_questions_select_all_family_members():
     include_all = _resolve_family(
         index,
         question="Show sales.",
-        constraints=HybridPlanningConstraints(include_all=True),
+        constraints=SchemaPlanningConstraints(include_all=True),
     )
     broad_question = _resolve_family(index, question="Show every historical sales table.")
     year_span = _resolve_family(index, question="Show sales from 2022 to 2024.")
@@ -121,7 +121,7 @@ def test_resolver_uses_canonical_member_when_constraints_match_no_family_member(
     context = _resolve_family(
         index,
         question="Show sales in 2030.",
-        constraints=HybridPlanningConstraints(years=[2030]),
+        constraints=SchemaPlanningConstraints(years=[2030]),
     )
 
     assert context.allowed_tables == ["DB.PUBLIC.SALES_2022"]
@@ -148,7 +148,7 @@ def test_resolver_has_deterministic_table_order_and_compact_family_prompt():
     context = _resolve_family(
         index,
         question="Show all sales history.",
-        retrieval_evidence=[_retrieved_join_evidence()],
+        schema_context_evidence=[_schema_context_join_evidence()],
     )
 
     assert context.allowed_tables == [
@@ -179,7 +179,7 @@ def test_resolver_expands_large_date_family_only_to_matching_member():
         canonical_schema_objects=[family],
         db_index=index,
         question="Show GitHub repo events for 2024-01-03.",
-        constraints=HybridPlanningConstraints(
+        constraints=SchemaPlanningConstraints(
             date_start="2024-01-03",
             date_end="2024-01-03",
         ),
@@ -208,7 +208,7 @@ def test_resolver_keeps_large_broad_github_family_symbolic_and_budgeted():
         canonical_schema_objects=[family],
         db_index=index,
         question="Show GitHub repository event tables.",
-        constraints=HybridPlanningConstraints(include_all=True),
+        constraints=SchemaPlanningConstraints(include_all=True),
     )
 
     entry = broad_context.diagnostics["resolution_entries"][0]
@@ -235,7 +235,7 @@ def test_validation_accepts_non_canonical_family_member_from_resolved_allowed_ta
     context = _resolve_family(
         index,
         question="Show all sales history.",
-        constraints=HybridPlanningConstraints(include_all=True),
+        constraints=SchemaPlanningConstraints(include_all=True),
     )
 
     report = validate_sql(
@@ -307,8 +307,8 @@ def _resolve_family(
     index: dict[str, TableSchema],
     *,
     question: str,
-    constraints: HybridPlanningConstraints | None = None,
-    retrieval_evidence: list[RetrievedSchemaObject] | None = None,
+    constraints: SchemaPlanningConstraints | None = None,
+    schema_context_evidence: list[SchemaContextObject] | None = None,
 ):
     objects = build_schema_objects(index)
     family = _object(index, "family")
@@ -319,7 +319,7 @@ def _resolve_family(
         db_index=index,
         question=question,
         constraints=constraints,
-        retrieval_evidence=retrieval_evidence or [],
+        schema_context_evidence=schema_context_evidence or [],
     )
 
 
@@ -426,7 +426,7 @@ def _github_table(name: str) -> TableSchema:
     )
 
 
-def _retrieved_join_evidence() -> RetrievedSchemaObject:
+def _schema_context_join_evidence() -> SchemaContextObject:
     join_object = SchemaObject(
         object_id="join_candidate:DB.PUBLIC.SALES_2022#ORDER_ID->DB.PUBLIC.ORDERS#ORDER_ID:12345678",
         object_type="join_candidate",
@@ -438,14 +438,14 @@ def _retrieved_join_evidence() -> RetrievedSchemaObject:
             "right": {"table_full_name": "DB.PUBLIC.ORDERS", "column_name": "ORDER_ID"},
         },
     )
-    chunk = RetrievalChunk(
+    chunk = SchemaContextChunk(
         chunk_id=f"{join_object.object_id}::join_candidate",
         object_id=join_object.object_id,
         chunk_type="join_candidate",
         prompt_text="Join candidate: DB.PUBLIC.SALES_2022.ORDER_ID = DB.PUBLIC.ORDERS.ORDER_ID.",
     )
-    return RetrievedSchemaObject(
+    return SchemaContextObject(
         schema_object=join_object,
-        chunks=[RetrievedChunk(chunk=chunk, rank=1)],
+        chunks=[SchemaContextChunkEvidence(chunk=chunk, rank=1)],
         rank=1,
     )

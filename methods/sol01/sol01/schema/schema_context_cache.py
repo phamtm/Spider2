@@ -15,23 +15,23 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from sol01.infra.config import SchemaRetrievalConfig
+from sol01.infra.config import SchemaContextConfig
 from sol01.infra.logging import get_logger
 from sol01.infra.paths import REPO_ROOT
-from sol01.models import RetrievalChunk, SchemaObject, TableSchema
+from sol01.models import SchemaContextChunk, SchemaObject, TableSchema
 from sol01.schema.chunks import render_schema_chunks
+from sol01.schema.db_index import load_db_index
 from sol01.schema.large_schema_summaries import (
     DEFAULT_LARGE_SCHEMA_SUMMARY_PATH,
     LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
     large_schema_summary_registry_hash,
 )
 from sol01.schema.objects import build_schema_objects
-from sol01.schema.retrieval import load_db_index
 
 OBJECT_BUILDER_VERSION = "schema-objects-v1"
 CHUNK_RENDER_VERSION = "schema-chunks-v1"
 MANIFEST_VERSION = 2
-REQUIRED_INDEX_ARTIFACTS = frozenset({"objects.jsonl", "chunks.jsonl", "manifest.json"})
+REQUIRED_CACHE_ARTIFACTS = frozenset({"objects.jsonl", "chunks.jsonl", "manifest.json"})
 REQUIRED_MANIFEST_FIELDS = frozenset(
     {
         "manifest_version",
@@ -47,24 +47,24 @@ REQUIRED_MANIFEST_FIELDS = frozenset(
         "chunk_count",
     }
 )
-DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT = (
-    REPO_ROOT / "methods" / "sol01" / ".cache" / "schema_retrieval_index"
+DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT = (
+    REPO_ROOT / "methods" / "sol01" / ".cache" / "schema_context_cache"
 ).resolve()
 DEFAULT_LOCK_TIMEOUT_SECONDS = 60.0
 DEFAULT_LOCK_POLL_SECONDS = 0.1
 logger = get_logger(__name__)
 
 
-class RetrievalIndexError(RuntimeError):
-    """Raised when a retrieval index cannot be built or loaded."""
+class SchemaContextCacheError(RuntimeError):
+    """Raised when a schema context cache cannot be built or loaded."""
 
 
-class RetrievalIndexLockTimeout(RetrievalIndexError):
+class SchemaContextCacheLockTimeout(SchemaContextCacheError):
     """Raised when another worker holds the build lock for too long."""
 
 
 @dataclass(frozen=True)
-class SchemaRetrievalIndex:
+class SchemaContextCache:
     """A loaded schema metadata context and its on-disk artifacts."""
 
     db: str
@@ -72,32 +72,32 @@ class SchemaRetrievalIndex:
     cache_dir: Path
     manifest: dict[str, Any]
     objects: list[SchemaObject]
-    chunks: list[RetrievalChunk]
+    chunks: list[SchemaContextChunk]
 
 
-def build_retrieval_index(
+def build_schema_context_cache(
     db: str,
     *,
     db_index: Mapping[str, TableSchema] | None = None,
-    config: SchemaRetrievalConfig | None = None,
-    cache_root: Path = DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT,
+    config: SchemaContextConfig | None = None,
+    cache_root: Path = DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT,
     object_builder_version: str = OBJECT_BUILDER_VERSION,
     chunk_render_version: str = CHUNK_RENDER_VERSION,
     curated_summary_registry_path: Path = DEFAULT_LARGE_SCHEMA_SUMMARY_PATH,
     curated_summary_registry_version: str = LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
     lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
     lock_poll_seconds: float = DEFAULT_LOCK_POLL_SECONDS,
-) -> SchemaRetrievalIndex:
+) -> SchemaContextCache:
     """Build or load the versioned schema metadata context for one database."""
 
     started_at = time.perf_counter()
-    config = config or SchemaRetrievalConfig()
+    config = config or SchemaContextConfig()
     db_index = dict(db_index) if db_index is not None else _load_db_index(db)
     source_hash = schema_source_hash(db_index)
     curated_summary_registry_hash = large_schema_summary_registry_hash(
         curated_summary_registry_path
     )
-    cache_key = retrieval_index_cache_key(
+    cache_key = schema_context_cache_key(
         db=db,
         source_schema_hash=source_hash,
         object_builder_version=object_builder_version,
@@ -110,13 +110,13 @@ def build_retrieval_index(
     current_path = _current_pointer_path(cache_root, db)
     lock_path = _build_lock_path(cache_root, db)
     logger.info(
-        "schema retrieval index start",
+        "schema context cache start",
         db=db,
         table_count=len(db_index),
         cache_key=cache_key,
     )
 
-    existing = _load_valid_index(
+    existing = _load_valid_cache(
         db=db,
         cache_key=cache_key,
         cache_dir=version_dir,
@@ -125,7 +125,7 @@ def build_retrieval_index(
     if existing is not None:
         _write_current_pointer(current_path, db=db, cache_key=cache_key, cache_dir=version_dir)
         logger.info(
-            "schema retrieval index cache hit",
+            "schema context cache hit",
             db=db,
             cache_key=cache_key,
             cache_dir=str(version_dir),
@@ -133,7 +133,7 @@ def build_retrieval_index(
         )
         return existing
 
-    logger.info("schema retrieval index lock wait", db=db, cache_key=cache_key)
+    logger.info("schema context cache lock wait", db=db, cache_key=cache_key)
     lock_token = _acquire_build_lock_or_wait(
         lock_path,
         db=db,
@@ -145,7 +145,7 @@ def build_retrieval_index(
         poll_seconds=lock_poll_seconds,
     )
     if lock_token is None:
-        loaded = _load_valid_index(
+        loaded = _load_valid_cache(
             db=db,
             cache_key=cache_key,
             cache_dir=version_dir,
@@ -153,7 +153,7 @@ def build_retrieval_index(
         )
         if loaded is not None:
             logger.info(
-                "schema retrieval index loaded after wait",
+                "schema context cache loaded after wait",
                 db=db,
                 cache_key=cache_key,
                 cache_dir=str(version_dir),
@@ -168,20 +168,20 @@ def build_retrieval_index(
         )
         if loaded is not None:
             logger.info(
-                "schema retrieval index current loaded after wait",
+                "schema context cache current loaded after wait",
                 db=db,
                 cache_key=cache_key,
                 cache_dir=str(loaded.cache_dir),
                 elapsed_seconds=round(time.perf_counter() - started_at, 3),
             )
             return loaded
-        raise RetrievalIndexLockTimeout(
-            f"timed out waiting for retrieval index build lock for {db}"
+        raise SchemaContextCacheLockTimeout(
+            f"timed out waiting for schema context cache build lock for {db}"
         )
 
     try:
-        logger.info("schema retrieval index build start", db=db, cache_key=cache_key)
-        existing = _load_valid_index(
+        logger.info("schema context cache build start", db=db, cache_key=cache_key)
+        existing = _load_valid_cache(
             db=db,
             cache_key=cache_key,
             cache_dir=version_dir,
@@ -190,7 +190,7 @@ def build_retrieval_index(
         if existing is not None:
             _write_current_pointer(current_path, db=db, cache_key=cache_key, cache_dir=version_dir)
             logger.info(
-                "schema retrieval index cache hit after lock",
+                "schema context cache hit after lock",
                 db=db,
                 cache_key=cache_key,
                 cache_dir=str(version_dir),
@@ -207,7 +207,7 @@ def build_retrieval_index(
         )
         chunks = render_schema_chunks(objects)
         logger.info(
-            "schema retrieval index objects rendered",
+            "schema context cache objects rendered",
             db=db,
             cache_key=cache_key,
             object_count=len(objects),
@@ -216,7 +216,7 @@ def build_retrieval_index(
 
         temp_dir = _new_temp_version_dir(cache_root, db, cache_key)
         try:
-            _write_index_artifacts(
+            _write_cache_artifacts(
                 temp_dir,
                 db=db,
                 cache_key=cache_key,
@@ -229,25 +229,27 @@ def build_retrieval_index(
                 objects=objects,
                 chunks=chunks,
             )
-            loaded_temp = _load_valid_index(
+            loaded_temp = _load_valid_cache(
                 db=db,
                 cache_key=cache_key,
                 cache_dir=temp_dir,
                 expected_source_hash=source_hash,
             )
             if loaded_temp is None:
-                raise RetrievalIndexError("new retrieval index failed validation before publish")
+                raise SchemaContextCacheError(
+                    "new schema context cache failed validation before publish"
+                )
             published = _publish_version_directory(temp_dir, version_dir)
             if not published:
-                loaded = _load_valid_index(
+                loaded = _load_valid_cache(
                     db=db,
                     cache_key=cache_key,
                     cache_dir=version_dir,
                     expected_source_hash=source_hash,
                 )
                 if loaded is None:
-                    raise RetrievalIndexError(
-                        f"existing retrieval index directory is invalid: {version_dir}"
+                    raise SchemaContextCacheError(
+                        f"existing schema context cache directory is invalid: {version_dir}"
                     )
                 _write_current_pointer(
                     current_path,
@@ -256,7 +258,7 @@ def build_retrieval_index(
                     cache_dir=version_dir,
                 )
                 logger.info(
-                    "schema retrieval index loaded existing published version",
+                    "schema context cache loaded existing published version",
                     db=db,
                     cache_key=cache_key,
                     cache_dir=str(version_dir),
@@ -268,16 +270,16 @@ def build_retrieval_index(
             raise
 
         _write_current_pointer(current_path, db=db, cache_key=cache_key, cache_dir=version_dir)
-        loaded = _load_valid_index(
+        loaded = _load_valid_cache(
             db=db,
             cache_key=cache_key,
             cache_dir=version_dir,
             expected_source_hash=source_hash,
         )
         if loaded is None:
-            raise RetrievalIndexError("published retrieval index failed validation")
+            raise SchemaContextCacheError("published schema context cache failed validation")
         logger.info(
-            "schema retrieval index published",
+            "schema context cache published",
             db=db,
             cache_key=cache_key,
             cache_dir=str(version_dir),
@@ -290,37 +292,41 @@ def build_retrieval_index(
         _release_build_lock(lock_path, lock_token)
 
 
-def load_current_retrieval_index(
+def load_current_schema_context_cache(
     db: str,
     *,
-    cache_root: Path = DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT,
-) -> SchemaRetrievalIndex:
-    """Load the current retrieval index pointer for one database."""
+    cache_root: Path = DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT,
+) -> SchemaContextCache:
+    """Load the current schema context cache pointer for one database."""
 
     pointer = _read_current_pointer(_current_pointer_path(cache_root, db))
     cache_key = str(pointer.get("cache_key") or "")
     cache_dir = Path(str(pointer.get("cache_dir") or _version_dir(cache_root, db, cache_key)))
     if not cache_key:
-        raise RetrievalIndexError(f"current retrieval index pointer for {db} has no cache_key")
-    index = _load_valid_index(db=db, cache_key=cache_key, cache_dir=cache_dir)
-    if index is None:
-        raise RetrievalIndexError(f"current retrieval index for {db} is missing or invalid")
-    return index
+        raise SchemaContextCacheError(
+            f"current schema context cache pointer for {db} has no cache_key"
+        )
+    cache = _load_valid_cache(db=db, cache_key=cache_key, cache_dir=cache_dir)
+    if cache is None:
+        raise SchemaContextCacheError(
+            f"current schema context cache for {db} is missing or invalid"
+        )
+    return cache
 
 
-def prewarm_retrieval_indexes(
+def prewarm_schema_context_caches(
     dbs: Iterable[str],
     *,
-    config: SchemaRetrievalConfig | None = None,
-    cache_root: Path = DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT,
-) -> list[SchemaRetrievalIndex]:
+    config: SchemaContextConfig | None = None,
+    cache_root: Path = DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT,
+) -> list[SchemaContextCache]:
     """Build schema metadata contexts for unique databases before worker threads start."""
 
     unique_dbs = sorted({db.strip() for db in dbs if db.strip()})
-    logger.info("schema retrieval prewarm start", database_count=len(unique_dbs), dbs=unique_dbs)
+    logger.info("schema context prewarm start", database_count=len(unique_dbs), dbs=unique_dbs)
     started_at = time.perf_counter()
-    indexes = [
-        build_retrieval_index(
+    caches = [
+        build_schema_context_cache(
             db,
             config=config,
             cache_root=cache_root,
@@ -328,15 +334,15 @@ def prewarm_retrieval_indexes(
         for db in unique_dbs
     ]
     logger.info(
-        "schema retrieval prewarm complete",
-        database_count=len(indexes),
+        "schema context prewarm complete",
+        database_count=len(caches),
         elapsed_seconds=round(time.perf_counter() - started_at, 3),
     )
-    return indexes
+    return caches
 
 
 def schema_source_hash(db_index: Mapping[str, TableSchema]) -> str:
-    """Hash the canonical table schema payload used to build retrieval objects."""
+    """Hash the canonical table schema payload used to build schema objects."""
 
     payload = {
         table_name: db_index[table_name].model_dump(mode="json") for table_name in sorted(db_index)
@@ -344,7 +350,7 @@ def schema_source_hash(db_index: Mapping[str, TableSchema]) -> str:
     return _stable_hash(payload)
 
 
-def retrieval_index_cache_key(
+def schema_context_cache_key(
     *,
     db: str,
     source_schema_hash: str,
@@ -354,7 +360,7 @@ def retrieval_index_cache_key(
     curated_summary_registry_hash: str,
     curated_summary_registry_version: str,
 ) -> str:
-    """Return a deterministic cache key for all inputs that affect retrieval artifacts."""
+    """Return a deterministic cache key for all inputs that affect schema context artifacts."""
 
     return _stable_hash(
         {
@@ -370,7 +376,7 @@ def retrieval_index_cache_key(
     )
 
 
-def _write_index_artifacts(
+def _write_cache_artifacts(
     cache_dir: Path,
     *,
     db: str,
@@ -382,7 +388,7 @@ def _write_index_artifacts(
     curated_summary_registry_hash: str,
     curated_summary_registry_version: str,
     objects: Sequence[SchemaObject],
-    chunks: Sequence[RetrievalChunk],
+    chunks: Sequence[SchemaContextChunk],
 ) -> None:
     """Write one complete version directory before it is published."""
 
@@ -405,7 +411,7 @@ def _write_index_artifacts(
     _write_jsonl(cache_dir / "chunks.jsonl", [chunk.model_dump(mode="json") for chunk in chunks])
     _write_json(cache_dir / "manifest.json", manifest)
     logger.info(
-        "schema retrieval artifacts written",
+        "schema context artifacts written",
         db=db,
         cache_key=cache_key,
         cache_dir=str(cache_dir),
@@ -414,17 +420,17 @@ def _write_index_artifacts(
     )
 
 
-def _load_valid_index(
+def _load_valid_cache(
     *,
     db: str,
     cache_key: str,
     cache_dir: Path,
     expected_source_hash: str | None = None,
-) -> SchemaRetrievalIndex | None:
+) -> SchemaContextCache | None:
     """Load one version directory, returning None when validation fails."""
 
     try:
-        if _artifact_names(cache_dir) != REQUIRED_INDEX_ARTIFACTS:
+        if _artifact_names(cache_dir) != REQUIRED_CACHE_ARTIFACTS:
             return None
         manifest = _read_json(cache_dir / "manifest.json")
         if not REQUIRED_MANIFEST_FIELDS.issubset(manifest):
@@ -442,7 +448,8 @@ def _load_valid_index(
             SchemaObject.model_validate(row) for row in _read_jsonl(cache_dir / "objects.jsonl")
         ]
         chunks = [
-            RetrievalChunk.model_validate(row) for row in _read_jsonl(cache_dir / "chunks.jsonl")
+            SchemaContextChunk.model_validate(row)
+            for row in _read_jsonl(cache_dir / "chunks.jsonl")
         ]
     except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError):
         return None
@@ -453,7 +460,7 @@ def _load_valid_index(
     if any(chunk.object_id not in object_ids for chunk in chunks):
         return None
 
-    return SchemaRetrievalIndex(
+    return SchemaContextCache(
         db=db,
         cache_key=cache_key,
         cache_dir=cache_dir,
@@ -493,7 +500,7 @@ def _acquire_build_lock_or_wait(
         try:
             fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
         except FileExistsError:
-            loaded = _load_valid_index(
+            loaded = _load_valid_cache(
                 db=db,
                 cache_key=cache_key,
                 cache_dir=version_dir,
@@ -526,17 +533,17 @@ def _load_current_if_matching(
     current_path: Path,
     cache_key: str,
     expected_source_hash: str,
-) -> SchemaRetrievalIndex | None:
+) -> SchemaContextCache | None:
     try:
         pointer = _read_current_pointer(current_path)
-    except RetrievalIndexError:
+    except SchemaContextCacheError:
         return None
     if pointer.get("cache_key") != cache_key:
         return None
     cache_dir = Path(str(pointer.get("cache_dir") or ""))
     if not cache_dir:
         return None
-    return _load_valid_index(
+    return _load_valid_cache(
         db=db,
         cache_key=cache_key,
         cache_dir=cache_dir,
@@ -600,11 +607,13 @@ def _read_current_pointer(current_path: Path) -> dict[str, Any]:
     try:
         pointer = _read_json(current_path)
     except FileNotFoundError as exc:
-        raise RetrievalIndexError(
-            f"missing current retrieval index pointer: {current_path}"
+        raise SchemaContextCacheError(
+            f"missing current schema context cache pointer: {current_path}"
         ) from exc
     if not isinstance(pointer, dict):
-        raise RetrievalIndexError(f"invalid current retrieval index pointer: {current_path}")
+        raise SchemaContextCacheError(
+            f"invalid current schema context cache pointer: {current_path}"
+        )
     return pointer
 
 

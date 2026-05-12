@@ -272,7 +272,7 @@ def should_skip_task(
     status = trace.get("status")
     csv_path = csv_path_for(run_paths, instance_id=instance_id)
 
-    if _trace_uses_removed_retrieval_path(trace):
+    if _trace_uses_removed_schema_selection_path(trace):
         return False
 
     if status == "success":
@@ -284,8 +284,8 @@ def should_skip_task(
     return False
 
 
-def _trace_uses_removed_retrieval_path(trace: dict[str, Any]) -> bool:
-    """Return True for traces produced by removed fixed retrieval experiments."""
+def _trace_uses_removed_schema_selection_path(trace: dict[str, Any]) -> bool:
+    """Return True for traces produced by removed fixed schema-selection experiments."""
 
     mode = trace.get("retrieval_mode")
     if mode == "legacy_fixed":

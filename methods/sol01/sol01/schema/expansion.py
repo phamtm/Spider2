@@ -8,22 +8,22 @@ from typing import Any, Protocol
 
 from sol01.candidates.evaluator import evaluate_candidate
 from sol01.candidates.scoring import _best_attempt
-from sol01.infra.config import SchemaRetrievalConfig
+from sol01.infra.config import SchemaContextConfig
 from sol01.llm.prompt_builders import (
     _sql_generation_batch_prompt,
-    sanitize_hybrid_planning_decision,
+    sanitize_schema_planning_decision,
     schema_expansion_trigger,
 )
 from sol01.models import (
-    HybridPlanningDecision,
+    SchemaPlanningDecision,
     SchemaSelection,
     SelectedSchemaObject,
     SQLCandidateBatch,
 )
-from sol01.schema.hybrid_retrieval import retrieve_schema_objects
+from sol01.schema.db_index import load_db_index
 from sol01.schema.resolver import resolve_schema_context
-from sol01.schema.retrieval import load_db_index
-from sol01.schema.retrieval_index import build_retrieval_index
+from sol01.schema.schema_context import select_schema_context_objects
+from sol01.schema.schema_context_cache import build_schema_context_cache
 
 
 class ExpansionContext(Protocol):
@@ -37,8 +37,8 @@ class ExpansionContext(Protocol):
     sql_reference_context: str
     docs_context: str
     prompt_hashes: dict[str, str]
-    schema_retrieval_config: SchemaRetrievalConfig
-    schema_retrieval: dict[str, Any]
+    schema_context_config: SchemaContextConfig
+    schema_context: dict[str, Any]
 
 
 RunPrompt = Callable[..., Any]
@@ -80,10 +80,10 @@ def attempt_schema_expansion(
         "added_tables": [],
         "outcome": "no_new_tables",
     }
-    retrieval_index = build_retrieval_index(
+    schema_context_cache = build_schema_context_cache(
         ctx.task.db,
         db_index=db_index,
-        config=ctx.schema_retrieval_config,
+        config=ctx.schema_context_config,
     )
 
     deterministic_tables = _deterministic_expansion_tables(best_attempt, ctx.schema, db_index)
@@ -100,35 +100,35 @@ def attempt_schema_expansion(
             )
             for table_name in deterministic_tables
         ]
-        retrieved_objects: list[Any] = []
+        schema_context_objects: list[Any] = []
         planner_diagnostics: dict[str, object] = {}
     else:
-        selected_additions, retrieved_objects, planner_diagnostics = _retrieve_expansion_objects(
+        selected_additions, schema_context_objects, planner_diagnostics = _select_expansion_objects(
             ctx,
             best_attempt,
             trigger,
-            retrieval_index=retrieval_index,
+            schema_context_cache=schema_context_cache,
             expansion_query=expansion_payload["expansion_query"],
             run_prompt=run_prompt,
             build_planning_prompt=build_planning_prompt,
             prompt_budget_diagnostics=prompt_budget_diagnostics,
         )
         expansion_payload["decision"] = {
-            "source": "retrieval",
+            "source": "schema_context",
             "selected_object_ids": [selected.object_id for selected in selected_additions],
         }
 
     expanded_schema, resolved, added_tables = _resolve_expanded_schema(
         ctx,
         selected_additions,
-        retrieval_index=retrieval_index,
+        schema_context_cache=schema_context_cache,
         db_index=db_index,
-        retrieval_evidence=retrieved_objects,
+        schema_context_evidence=schema_context_objects,
         expansion_query=expansion_payload["expansion_query"],
     )
     expansion_payload.update(
         {
-            "retrieved_objects": _retrieved_object_trace(retrieved_objects),
+            "schema_context_objects": _schema_context_object_trace(schema_context_objects),
             "selected_additions": [
                 selected.model_dump(mode="json") for selected in selected_additions
             ],
@@ -137,7 +137,7 @@ def attempt_schema_expansion(
             "resolver": resolved.diagnostics,
             "prompt_budget": prompt_budget_diagnostics(
                 sql_reference_context=resolved.prompt_context,
-                schema_retrieval_config=ctx.schema_retrieval_config,
+                schema_context_config=ctx.schema_context_config,
             ),
         }
     )
@@ -169,8 +169,8 @@ def attempt_schema_expansion(
     )
     if not batch.candidates:
         expansion_payload["outcome"] = "expanded_no_candidate"
-        expanded_ctx.schema_retrieval = _schema_retrieval_with_expansion(
-            ctx.schema_retrieval,
+        expanded_ctx.schema_context = _schema_context_with_expansion(
+            ctx.schema_context,
             expansion_payload,
         )
         return _best_attempt(attempts), expansion_payload, expanded_ctx
@@ -189,34 +189,34 @@ def attempt_schema_expansion(
     expansion_payload["outcome"] = (
         "expanded" if expansion_attempt["execution_result"]["ok"] else "expanded_failed"
     )
-    expanded_ctx.schema_retrieval = _schema_retrieval_with_expansion(
-        ctx.schema_retrieval,
+    expanded_ctx.schema_context = _schema_context_with_expansion(
+        ctx.schema_context,
         expansion_payload,
     )
     return _best_attempt(attempts), expansion_payload, expanded_ctx
 
 
-def _retrieve_expansion_objects(
+def _select_expansion_objects(
     ctx: ExpansionContext,
     attempt: dict[str, Any],
     trigger: str,
     *,
-    retrieval_index: Any,
+    schema_context_cache: Any,
     expansion_query: str,
     run_prompt: RunPrompt,
     build_planning_prompt: BuildPlanningPrompt,
     prompt_budget_diagnostics: PromptBudgetDiagnostics,
 ) -> tuple[list[SelectedSchemaObject], list[Any], dict[str, object]]:
-    """Retrieve and sanitize schema objects for one expansion attempt."""
+    """Select and sanitize schema objects for one expansion attempt."""
 
     linked_docs = (
         [] if ctx.docs_context == "No task-linked document context." else [ctx.docs_context]
     )
-    retrieved_objects, retrieval_diagnostics = retrieve_schema_objects(
-        retrieval_index,
+    schema_context_objects, context_diagnostics = select_schema_context_objects(
+        schema_context_cache,
         expansion_query,
         linked_docs=linked_docs,
-        config=ctx.schema_retrieval_config,
+        config=ctx.schema_context_config,
     )
     expansion_task = ctx.task.model_copy(
         update={
@@ -230,19 +230,19 @@ def _retrieve_expansion_objects(
     planning_prompt = build_planning_prompt(
         expansion_task,
         ctx.docs_context,
-        retrieved_objects,
-        schema_retrieval_config=ctx.schema_retrieval_config,
+        schema_context_objects,
+        schema_context_config=ctx.schema_context_config,
     )
     decision = run_prompt(
         ctx.client,
         prompt_hashes=ctx.prompt_hashes,
         prompt_name="planning",
-        output_type=HybridPlanningDecision,
+        output_type=SchemaPlanningDecision,
         user_prompt=planning_prompt,
     )
-    sanitized_decision, planner_diagnostics = sanitize_hybrid_planning_decision(
+    sanitized_decision, planner_diagnostics = sanitize_schema_planning_decision(
         decision,
-        retrieved_objects,
+        schema_context_objects,
     )
     current_object_ids = set(ctx.schema.selected_object_ids)
     selected_additions = [
@@ -251,30 +251,30 @@ def _retrieve_expansion_objects(
         if selected.object_id not in current_object_ids
     ]
     diagnostics = {
-        "retrieval": retrieval_diagnostics,
+        "selection": context_diagnostics,
         "planner": planner_diagnostics,
         "prompt_budget": prompt_budget_diagnostics(
             planning_prompt=planning_prompt,
-            schema_retrieval_config=ctx.schema_retrieval_config,
+            schema_context_config=ctx.schema_context_config,
         ),
         "rationale": sanitized_decision.rationale,
         "confidence": sanitized_decision.confidence,
     }
-    return selected_additions, retrieved_objects, diagnostics
+    return selected_additions, schema_context_objects, diagnostics
 
 
 def _resolve_expanded_schema(
     ctx: ExpansionContext,
     selected_additions: list[SelectedSchemaObject],
     *,
-    retrieval_index: Any,
+    schema_context_cache: Any,
     db_index: dict[str, Any],
-    retrieval_evidence: list[Any],
+    schema_context_evidence: list[Any],
     expansion_query: str,
 ) -> tuple[SchemaSelection, Any, list[str]]:
     """Resolve current and newly selected objects into one compact schema context."""
 
-    object_ids = {schema_object.object_id for schema_object in retrieval_index.objects}
+    object_ids = {schema_object.object_id for schema_object in schema_context_cache.objects}
     selected_objects: list[SelectedSchemaObject] = []
     seen: set[str] = set()
     for object_id in ctx.schema.selected_object_ids:
@@ -289,10 +289,10 @@ def _resolve_expanded_schema(
     resolved = resolve_schema_context(
         db=ctx.task.db,
         selected_objects=selected_objects,
-        canonical_schema_objects=retrieval_index.objects,
+        canonical_schema_objects=schema_context_cache.objects,
         db_index=db_index,
         question=ctx.task.question,
-        retrieval_evidence=retrieval_evidence,
+        schema_context_evidence=schema_context_evidence,
     )
     current_tables = set(ctx.schema.expanded_tables)
     added_tables = [table for table in resolved.allowed_tables if table not in current_tables]
@@ -404,8 +404,8 @@ def _table_name_aliases(table_name: str) -> list[str]:
     return sorted(aliases, key=len, reverse=True)
 
 
-def _retrieved_object_trace(retrieved_objects: list[Any]) -> list[dict[str, object]]:
-    """Render expansion retrieval hits in the task trace."""
+def _schema_context_object_trace(schema_context_objects: list[Any]) -> list[dict[str, object]]:
+    """Render expansion schema-context objects in the task trace."""
 
     return [
         {
@@ -416,22 +416,22 @@ def _retrieved_object_trace(retrieved_objects: list[Any]) -> list[dict[str, obje
             "rank": item.rank,
             "score": item.score,
         }
-        for item in retrieved_objects
+        for item in schema_context_objects
     ]
 
 
-def _schema_retrieval_with_expansion(
-    schema_retrieval: dict[str, Any],
+def _schema_context_with_expansion(
+    schema_context: dict[str, Any],
     expansion_payload: dict[str, Any],
 ) -> dict[str, Any]:
-    """Attach expansion diagnostics to the schema retrieval trace block."""
+    """Attach expansion diagnostics to the schema context trace block."""
 
-    updated = dict(schema_retrieval)
+    updated = dict(schema_context)
     expansions = list(updated.get("expansions", []))
     expansions.append(
         {
             "expansion_query": expansion_payload.get("expansion_query"),
-            "retrieved_objects": expansion_payload.get("retrieved_objects", []),
+            "schema_context_objects": expansion_payload.get("schema_context_objects", []),
             "selected_additions": expansion_payload.get("selected_additions", []),
             "added_tables": expansion_payload.get("added_tables", []),
             "planner": expansion_payload.get("planner", {}),

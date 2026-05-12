@@ -25,7 +25,7 @@ FAILURE_CATEGORIES = (
     "empty_result",
     "critic",
     "missing_csv",
-    "retrieval_miss",
+    "schema_context_miss",
 )
 FAILURE_HINTS = ("possible_aggregation_issue", "possible_date_filter_issue")
 logger = get_logger(__name__)
@@ -185,9 +185,11 @@ def _trace_classification(trace: dict[str, Any]) -> dict[str, list[str]]:
         categories["empty_result"] = ["Final execution succeeded with zero rows."]
     if is_failed and _has_critic_signal(trace):
         categories["critic"] = _critic_evidence(trace)
-    retrieval_evidence = _retrieval_miss_evidence(trace, final_attempt) if is_failed else []
-    if retrieval_evidence:
-        categories["retrieval_miss"] = retrieval_evidence
+    schema_context_evidence = (
+        _schema_context_miss_evidence(trace, final_attempt) if is_failed else []
+    )
+    if schema_context_evidence:
+        categories["schema_context_miss"] = schema_context_evidence
 
     if status == "success" and final_trace_execution and not final_trace_execution.get("ok", True):
         categories["execution"] = _execution_evidence(final_trace_execution)
@@ -240,11 +242,11 @@ def _has_critic_signal(trace: dict[str, Any]) -> bool:
     return False
 
 
-def _retrieval_miss_evidence(
+def _schema_context_miss_evidence(
     trace: dict[str, Any],
     final_attempt: dict[str, Any],
 ) -> list[str]:
-    """Report retrieval misses only when table evidence points there."""
+    """Report schema context misses only when table evidence points there."""
 
     schema = trace.get("schema_selection") or {}
     validation = final_attempt.get("validation") or {}

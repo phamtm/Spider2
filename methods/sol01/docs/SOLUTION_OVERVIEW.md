@@ -32,8 +32,8 @@ Each Spider2-Snow task gives the solver:
 ```text
 Spider2-Snow task
   -> load database metadata
-  -> retrieve relevant logical schema objects
-  -> ask the LLM to select from retrieved objects and describe question intent
+  -> prepare schema context objects
+  -> ask the LLM to select from available objects and describe question intent
   -> resolve selected logical objects to physical Snowflake tables
   -> render compact schema context for SQL generation
   -> generate several SQL candidates in one batch
@@ -112,7 +112,7 @@ contains canonical schema objects, rendered schema chunks, and a version
 manifest:
 
 ```text
-methods/sol01/.cache/schema_retrieval_index/<DB>/
+methods/sol01/.cache/schema_context_cache/<DB>/
   current.json
   versions/<cache_key>/
     manifest.json
@@ -123,7 +123,7 @@ methods/sol01/.cache/schema_retrieval_index/<DB>/
 Build schema-context caches before a batch run with either command:
 
 ```bash
-uv run sol01 prewarm-schema-index E_COMMERCE
+uv run sol01 prewarm-schema-context E_COMMERCE
 uv run sol01 run --db E_COMMERCE
 ```
 
@@ -132,12 +132,12 @@ builder version, chunk renderer version, curated summary registry hash/version,
 and family similarity threshold. If one of those inputs changes, a new version
 directory is created and `current.json` is updated.
 
-## Retrieval-First Planning
+## Schema Context Planning
 
 The old BM25/lexical retrieval path has been removed. Runtime schema context is
 deterministic: use curated large-schema summary objects when they cover the
 database; otherwise pass the built database metadata objects directly. There is
-no embedding, BM25, exact-match ranking, or separate model-backed retrieval
+no embedding, BM25, exact-match ranking, or separate model-backed search
 service.
 
 That path was removed because large Spider2-Snow databases can have hundreds of
@@ -203,11 +203,11 @@ generation.
 
 ## Sample-Value Policy
 
-Sample values are indexed only when they are bounded, low-cardinality
-categorical evidence. The retrieval index excludes high-cardinality,
-opaque, free-text, and sensitive-looking values because they can create noisy
-retrieval hits, leak irrelevant literals into prompts, and encourage the model
-to treat arbitrary examples as business rules.
+Sample values are included only when they are bounded, low-cardinality
+categorical evidence. Schema context excludes high-cardinality, opaque,
+free-text, and sensitive-looking values because they can leak irrelevant
+literals into prompts and encourage the model to treat arbitrary examples as
+business rules.
 
 Sample-value objects are excluded for:
 
@@ -228,11 +228,11 @@ instead of converting it into an invented rule.
 
 Curated summaries live in
 `methods/sol01/metadata/large_schema_summaries.json`. They compact repeated
-table families and wide repeated column groups before retrieval chunks are
+table families and wide repeated column groups before schema-context chunks are
 rendered.
 
 Add or edit a summary when a schema family has a stable shape that should be
-retrieved as one logical object. Each entry defines:
+represented as one logical object. Each entry defines:
 
 - `summary_id`: lower_snake_case stable ID
 - `schema_copies`: database/schema locations covered by the same shape
@@ -244,34 +244,32 @@ retrieved as one logical object. Each entry defines:
 
 Summaries must describe schema shape only. Do not include benchmark answers,
 gold SQL, instance IDs, or question-specific hints. The registry validator
-rejects those tokens, and the retrieval cache key includes the summary registry
+rejects those tokens, and the schema-context cache key includes the summary registry
 hash, so a summary edit creates a fresh cache version.
 
 Relevant runtime settings:
 
-- `SOL01_SCHEMA_CHUNK_TOP_K`, default `80`
-- `SOL01_SCHEMA_OBJECT_TOP_K`, default `12`
-- `SOL01_SCHEMA_FAMILY_TOP_K`, default `8`
+- `SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF`, default `12`
 - `SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD`, default `0.82`
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
 - `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
 
 These can be set in the shell or in `methods/sol01/.env`.
 
-## Retrieval Evaluation
+## Schema Context Evaluation
 
-Offline retrieval coverage can be checked with:
+Offline schema-context coverage can be checked with:
 
 ```bash
-uv run sol01 retrieval-eval
-uv run sol01 retrieval-eval --db E_COMMERCE --json
+uv run sol01 schema-context-eval
+uv run sol01 schema-context-eval --db E_COMMERCE --json
 ```
 
 The command reports pre-resolver any-gold recall, post-resolver all-gold
 recall, family expansion success, and prompt reduction. By default it reads
 offline labels from `methods/gold-tables/spider2-snow-gold-tables.jsonl`;
 `--gold-path <path>` is only for alternate local label files. Gold tables are
-offline-only labels for measuring retrieval coverage. They are not available to
+offline-only labels for measuring schema-context coverage. They are not available to
 runtime planning, SQL generation, repair, or candidate review.
 
 Use `--covered-only` to focus on tasks whose gold tables touch curated
@@ -279,7 +277,7 @@ large-schema summaries. Use `--baseline-path <report.json|tasks.jsonl>` to
 check for recall regressions, `--trace-run-id <run_id>` to scan saved solver
 traces for hallucinated-column validation failures, and `--output-id <id>` to
 persist `summary.json`, `tasks.jsonl`, `failures.json`, `report.json`, and
-`summary.md` under `outputs/<id>/retrieval_eval/`.
+`summary.md` under `outputs/<id>/schema_context_eval/`.
 
 ## SQL Generation
 
@@ -316,7 +314,7 @@ Validation checks that the SQL:
 Invalid SQL is not executed. It can still be used as repair feedback.
 
 Unknown-column validation is the runtime guard for hallucinated columns. The
-offline retrieval-eval command can also scan saved traces with
+offline schema-context-eval command can also scan saved traces with
 `--trace-run-id <run_id>` and report those validation failures.
 
 ## Execution
@@ -421,19 +419,19 @@ execution summary.
 
 Schema-context traces also include:
 
-- `schema_retrieval_version`
-- effective `schema_retrieval_config`
+- `schema_context_version`
+- effective `schema_context_config`
 - context mode and object counts
 - available object IDs, evidence, and chunk snippets
 - planner sanitization diagnostics
 - resolver entries, allowed tables, and resolver warnings
-- schema expansion retrieval diagnostics when repair expands schema context
+- schema expansion diagnostics when repair expands schema context
 
-Prompt budget diagnostics live in `schema_retrieval.prompt_budget` inside each
+Prompt budget diagnostics live in `schema_context.prompt_budget` inside each
 task trace. They record planning and resolved-context character counts against
-`SOL01_SCHEMA_MAX_PROMPT_CHARS`. `uv run sol01 retrieval-eval --output-id <id>`
+`SOL01_SCHEMA_MAX_PROMPT_CHARS`. `uv run sol01 schema-context-eval --output-id <id>`
 also writes prompt reduction and prompt-size wins to
-`outputs/<id>/retrieval_eval/`.
+`outputs/<id>/schema_context_eval/`.
 
 ## Official Evaluation
 
@@ -510,7 +508,7 @@ Useful commands:
 uv run sol01 analyze --run-id <run_id>
 uv run sol01 llm-calls --run-id <run_id> --instance-id <instance_id>
 uv run sol01 llm-calls --run-id <run_id> --instance-id <instance_id> --call-id <call_id>
-uv run sol01 retrieval-eval --limit 20
+uv run sol01 schema-context-eval --limit 20
 just progress
 ```
 
@@ -533,10 +531,10 @@ trace races.
 - `sol01/schema/index.py`: builds the Snowflake metadata cache.
 - `sol01/schema/objects.py`: builds canonical logical schema objects.
 - `sol01/schema/chunks.py`: renders schema-context chunks from schema objects.
-- `sol01/schema/retrieval_index.py`: builds versioned schema-context caches.
-- `sol01/schema/hybrid_retrieval.py`: selects deterministic schema context.
+- `sol01/schema/schema_context_cache.py`: builds versioned schema-context caches.
+- `sol01/schema/schema_context.py`: selects deterministic schema context.
 - `sol01/schema/resolver.py`: resolves selected logical objects to physical table context.
-- `sol01/schema/retrieval_eval.py`: evaluates offline retrieval coverage.
+- `sol01/schema/schema_context_eval.py`: evaluates offline schema-context coverage.
 - `sol01/docs.py`: loads linked markdown documents.
 - `sol01/llm/client.py`: runs structured LLM calls and logs raw call data.
 - `sol01/prompt_builders.py`: builds the prompts for each pipeline stage.

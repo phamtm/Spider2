@@ -9,9 +9,9 @@ from typing import Any
 
 from sol01.models import (
     ConfidenceReport,
-    HybridPlanningDecision,
     Intent,
-    RetrievedSchemaObject,
+    SchemaContextObject,
+    SchemaPlanningDecision,
     SchemaSelection,
     SelectedSchemaObject,
     TableSchema,
@@ -29,8 +29,8 @@ _EXEC_TABLE_MISSING_SUBSTRINGS = (
     "002003",
     "000904",
 )
-_RETRIEVAL_PLANNING_DOCS_CHAR_LIMIT = 6000
-_RETRIEVAL_PLANNING_EVIDENCE_CHAR_LIMIT = 16000
+_SCHEMA_CONTEXT_PLANNING_DOCS_CHAR_LIMIT = 6000
+_SCHEMA_CONTEXT_PLANNING_EVIDENCE_CHAR_LIMIT = 16000
 
 
 class PromptBudgetExceededError(ValueError):
@@ -150,25 +150,25 @@ def _question_preview(question: str, *, max_length: int = 120) -> str:
     return normalized[: max_length - 1].rstrip() + "…"
 
 
-def _retrieval_planning_user_prompt(
+def _schema_context_planning_user_prompt(
     task: Task,
     db: str,
     docs_context: str,
-    retrieved_objects: Sequence[RetrievedSchemaObject],
+    schema_context_objects: Sequence[SchemaContextObject],
     *,
-    max_docs_chars: int = _RETRIEVAL_PLANNING_DOCS_CHAR_LIMIT,
-    max_evidence_chars: int = _RETRIEVAL_PLANNING_EVIDENCE_CHAR_LIMIT,
+    max_docs_chars: int = _SCHEMA_CONTEXT_PLANNING_DOCS_CHAR_LIMIT,
+    max_evidence_chars: int = _SCHEMA_CONTEXT_PLANNING_EVIDENCE_CHAR_LIMIT,
     max_total_chars: int | None = None,
 ) -> str:
     """Build a planner prompt from deterministic schema metadata objects."""
 
     docs_limit = max(0, max_docs_chars)
     evidence_limit = max(0, max_evidence_chars)
-    prompt = _format_retrieval_planning_user_prompt(
+    prompt = _format_schema_context_planning_user_prompt(
         task,
         db,
         docs_context,
-        retrieved_objects,
+        schema_context_objects,
         max_docs_chars=docs_limit,
         max_evidence_chars=evidence_limit,
     )
@@ -184,11 +184,11 @@ def _retrieval_planning_user_prompt(
             docs_limit = max(0, docs_limit - overflow - 256)
         else:
             break
-        prompt = _format_retrieval_planning_user_prompt(
+        prompt = _format_schema_context_planning_user_prompt(
             task,
             db,
             docs_context,
-            retrieved_objects,
+            schema_context_objects,
             max_docs_chars=docs_limit,
             max_evidence_chars=evidence_limit,
         )
@@ -198,24 +198,28 @@ def _retrieval_planning_user_prompt(
     return enforce_prompt_budget("planning", prompt, max_total_chars)
 
 
-def _format_retrieval_planning_user_prompt(
+def _format_schema_context_planning_user_prompt(
     task: Task,
     db: str,
     docs_context: str,
-    retrieved_objects: Sequence[RetrievedSchemaObject],
+    schema_context_objects: Sequence[SchemaContextObject],
     *,
     max_docs_chars: int,
     max_evidence_chars: int,
 ) -> str:
     """Render the planner prompt once with fixed context limits."""
 
-    available_ids = [item.schema_object.object_id for item in retrieved_objects]
+    available_ids = [item.schema_object.object_id for item in schema_context_objects]
+    evidence = _schema_context_object_evidence(
+        schema_context_objects,
+        max_chars=max_evidence_chars,
+    )
     return (
         f"Question: {task.question}\n\n"
         f"Database: {db}\n\n"
         f"Document context:\n{_clip_context(docs_context, max_docs_chars)}\n\n"
         "Available schema metadata evidence:\n"
-        f"{_retrieved_object_evidence(retrieved_objects, max_chars=max_evidence_chars)}\n\n"
+        f"{evidence}\n\n"
         "Available object ids:\n"
         f"{json.dumps(available_ids, indent=2)}\n\n"
         "Select only logical schema objects from the available schema metadata above. "
@@ -223,7 +227,7 @@ def _format_retrieval_planning_user_prompt(
         "versions, or date constraints that are not grounded in the question, documents, "
         "or available schema metadata. For large schemas, rely on curated summaries instead "
         "of raw wide-schema DDL.\n\n"
-        "Return a HybridPlanningDecision. Populate selected_objects with object ids from "
+        "Return a SchemaPlanningDecision. Populate selected_objects with object ids from "
         "Available object ids and roles such as primary, supporting, join, filter, metric, "
         "dimension, or unknown. Populate constraints with any grounded date_start, date_end, "
         "years, suffixes, version, include_all, and notes. Include rationale, confidence, "
@@ -231,17 +235,17 @@ def _format_retrieval_planning_user_prompt(
     )
 
 
-def sanitize_hybrid_planning_decision(
-    decision: HybridPlanningDecision,
-    retrieved_objects: Sequence[RetrievedSchemaObject],
-) -> tuple[HybridPlanningDecision, dict[str, object]]:
-    """Drop hallucinated object ids and normalize exact retrieved table names."""
+def sanitize_schema_planning_decision(
+    decision: SchemaPlanningDecision,
+    schema_context_objects: Sequence[SchemaContextObject],
+) -> tuple[SchemaPlanningDecision, dict[str, object]]:
+    """Drop hallucinated object ids and normalize exact available table names."""
 
-    available_ids = [item.schema_object.object_id for item in retrieved_objects]
+    available_ids = [item.schema_object.object_id for item in schema_context_objects]
     available_id_set = set(available_ids)
     exact_table_ids = {
         item.schema_object.table_name: item.schema_object.object_id
-        for item in retrieved_objects
+        for item in schema_context_objects
         if item.schema_object.object_type == "table" and item.schema_object.table_name
     }
 
@@ -319,8 +323,8 @@ def _clip_context(text: str, max_chars: int) -> str:
     return f"{clipped}..."
 
 
-def _retrieved_object_evidence(
-    retrieved_objects: Sequence[RetrievedSchemaObject],
+def _schema_context_object_evidence(
+    schema_context_objects: Sequence[SchemaContextObject],
     *,
     max_chars: int,
 ) -> str:
@@ -328,7 +332,7 @@ def _retrieved_object_evidence(
 
     lines: list[str] = []
     remaining = max_chars
-    for item in retrieved_objects:
+    for item in schema_context_objects:
         schema_object = item.schema_object
         header = (
             f"- id: {schema_object.object_id}\n"
@@ -345,8 +349,8 @@ def _retrieved_object_evidence(
             header += f"\n  score: {item.score:.4f}"
 
         evidence_lines = [header]
-        for retrieved_chunk in item.chunks[:3]:
-            chunk = retrieved_chunk.chunk
+        for context_chunk in item.chunks[:3]:
+            chunk = context_chunk.chunk
             text = (
                 chunk.prompt_text or chunk.source_definition or chunk.inferred_usage or chunk.text
             )
@@ -358,7 +362,7 @@ def _retrieved_object_evidence(
         lines.append(rendered)
         remaining -= len(rendered) + 2
 
-    return "\n\n".join(lines) if lines else "(no retrieved objects)"
+    return "\n\n".join(lines) if lines else "(no schema context objects)"
 
 
 def _single_line(text: str, *, max_length: int = 500) -> str:

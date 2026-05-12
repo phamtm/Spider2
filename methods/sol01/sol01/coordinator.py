@@ -17,30 +17,30 @@ from sol01.candidates.verification import (
 )
 from sol01.infra.config import (
     DEFAULT_DOTENV_PATH,
-    DEFAULT_SCHEMA_RETRIEVAL_VERSION,
+    DEFAULT_SCHEMA_CONTEXT_VERSION,
     RuntimeConfig,
-    SchemaRetrievalConfig,
+    SchemaContextConfig,
 )
 from sol01.infra.logging import get_logger
 from sol01.llm.llm_logging import LLMCallLogger
 from sol01.llm.prompt_builders import (
     _candidate_review_prompt,
     _question_preview,
-    _retrieval_planning_user_prompt,
+    _schema_context_planning_user_prompt,
     _semantic_repair_prompt,
     _sql_generation_batch_prompt,
     _sql_reference_context,
     _sql_repair_prompt,
     enforce_prompt_budget,
-    sanitize_hybrid_planning_decision,
+    sanitize_schema_planning_decision,
 )
 from sol01.models import (
     CandidateReviewReport,
     ConfidenceReport,
     ExecutionResult,
     FinalAnswer,
-    HybridPlanningDecision,
     Intent,
+    SchemaPlanningDecision,
     SchemaSelection,
     SQLCandidate,
     SQLCandidateBatch,
@@ -58,12 +58,12 @@ from sol01.output.output import (
     write_sql,
     write_trace,
 )
+from sol01.schema.db_index import load_db_index
 from sol01.schema.expansion import attempt_schema_expansion
-from sol01.schema.hybrid_retrieval import retrieve_schema_objects
 from sol01.schema.index import CACHE_PATH
 from sol01.schema.resolver import resolve_schema_context
-from sol01.schema.retrieval import load_db_index
-from sol01.schema.retrieval_index import build_retrieval_index
+from sol01.schema.schema_context import select_schema_context_objects
+from sol01.schema.schema_context_cache import build_schema_context_cache
 
 logger = get_logger(__name__)
 LLMClient: Any | None = None
@@ -149,8 +149,8 @@ def run_tasks(
         skip_failed=skip_failed,
     )
 
-    schema_retrieval_config = SchemaRetrievalConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
-    _prewarm_schema_indexes(tasks, schema_retrieval_config=schema_retrieval_config)
+    schema_context_config = SchemaContextConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
+    _prewarm_schema_context_caches(tasks, schema_context_config=schema_context_config)
     results = _run_task_batch(
         tasks,
         run_paths=run_paths,
@@ -169,11 +169,11 @@ def run_tasks(
     return results
 
 
-def _prewarm_schema_indexes(
+def _prewarm_schema_context_caches(
     tasks: list[Task],
     *,
     cache_path: Path = CACHE_PATH,
-    schema_retrieval_config: SchemaRetrievalConfig,
+    schema_context_config: SchemaContextConfig,
 ) -> None:
     """Build each selected database schema-context cache before workers start."""
 
@@ -183,10 +183,10 @@ def _prewarm_schema_indexes(
             continue
         seen.add(task.db)
         db_index = load_db_index(task.db, cache_path=cache_path)
-        build_retrieval_index(
+        build_schema_context_cache(
             task.db,
             db_index=db_index,
-            config=schema_retrieval_config,
+            config=schema_context_config,
         )
 
 
@@ -325,9 +325,9 @@ class _TaskCtx:
     sql_reference_context: str
     docs_context: str
     prompt_hashes: dict[str, str]
-    schema_retrieval_version: str
-    schema_retrieval_config: SchemaRetrievalConfig
-    schema_retrieval: dict[str, Any]
+    schema_context_version: str
+    schema_context_config: SchemaContextConfig
+    schema_context: dict[str, Any]
 
 
 def _check_skip(
@@ -337,7 +337,7 @@ def _check_skip(
     *,
     force: bool,
     skip_failed: bool,
-    expected_schema_retrieval_version: str,
+    expected_schema_context_version: str,
 ) -> FinalAnswer | None:
     """Return an existing FinalAnswer if the task should be skipped, else None."""
 
@@ -346,13 +346,13 @@ def _check_skip(
     ):
         return None
     existing_trace = json.loads(task_trace_path.read_text(encoding="utf-8"))
-    if existing_trace.get("schema_retrieval_version") != expected_schema_retrieval_version:
+    if existing_trace.get("schema_context_version") != expected_schema_context_version:
         logger.info(
-            "task rerun: schema retrieval version changed",
+            "task rerun: schema context version changed",
             instance_id=task.instance_id,
             db=task.db,
-            expected_schema_retrieval_version=expected_schema_retrieval_version,
-            existing_schema_retrieval_version=existing_trace.get("schema_retrieval_version"),
+            expected_schema_context_version=expected_schema_context_version,
+            existing_schema_context_version=existing_trace.get("schema_context_version"),
         )
         return None
     logger.info(
@@ -377,9 +377,9 @@ def _build_context(
     client: StructuredLLM,
     prompt_hashes: dict[str, str],
     run_paths: RunPaths,
-    schema_retrieval_config: SchemaRetrievalConfig,
+    schema_context_config: SchemaContextConfig,
 ) -> _TaskCtx:
-    """Retrieve schema, extract intent, and assemble the shared pipeline context."""
+    """Build schema context, extract intent, and assemble the shared pipeline context."""
 
     logger.info(
         "task start",
@@ -394,12 +394,12 @@ def _build_context(
         if task.external_knowledge
         else "No task-linked document context."
     )
-    schema, intent, table_schemas, sql_reference_context, schema_retrieval = _run_planning(
+    schema, intent, table_schemas, sql_reference_context, schema_context = _run_planning(
         task,
         client,
         prompt_hashes,
         docs_context,
-        schema_retrieval_config=schema_retrieval_config,
+        schema_context_config=schema_context_config,
     )
     intent = _augment_intent_with_value_groundings(
         intent, task=task, schema=schema, table_schemas=table_schemas
@@ -429,9 +429,9 @@ def _build_context(
         sql_reference_context=sql_reference_context,
         docs_context=docs_context,
         prompt_hashes=prompt_hashes,
-        schema_retrieval_version=DEFAULT_SCHEMA_RETRIEVAL_VERSION,
-        schema_retrieval_config=schema_retrieval_config,
-        schema_retrieval=schema_retrieval,
+        schema_context_version=DEFAULT_SCHEMA_CONTEXT_VERSION,
+        schema_context_config=schema_context_config,
+        schema_context=schema_context,
     )
 
 
@@ -441,58 +441,58 @@ def _run_planning(
     prompt_hashes: dict[str, str],
     docs_context: str,
     *,
-    schema_retrieval_config: SchemaRetrievalConfig,
+    schema_context_config: SchemaContextConfig,
 ) -> tuple[SchemaSelection, Intent, dict[str, Any], str, dict[str, Any]]:
     """Select schema metadata objects and run the schema-scoped planning call."""
 
     db_index = load_db_index(task.db)
-    retrieval_index = build_retrieval_index(
+    schema_context_cache = build_schema_context_cache(
         task.db,
         db_index=db_index,
-        config=schema_retrieval_config,
+        config=schema_context_config,
     )
     linked_docs = [] if docs_context == "No task-linked document context." else [docs_context]
-    retrieved_objects, retrieval_diagnostics = retrieve_schema_objects(
-        retrieval_index,
+    schema_context_objects, context_diagnostics = select_schema_context_objects(
+        schema_context_cache,
         task.question,
         linked_docs=linked_docs,
-        config=schema_retrieval_config,
+        config=schema_context_config,
     )
     planning_prompt = _build_planning_prompt(
         task,
         docs_context,
-        retrieved_objects,
-        schema_retrieval_config=schema_retrieval_config,
+        schema_context_objects,
+        schema_context_config=schema_context_config,
     )
     decision = _run_prompt(
         client,
         prompt_hashes=prompt_hashes,
         prompt_name="planning",
-        output_type=HybridPlanningDecision,
+        output_type=SchemaPlanningDecision,
         user_prompt=planning_prompt,
     )
-    sanitized_decision, planner_diagnostics = sanitize_hybrid_planning_decision(
+    sanitized_decision, planner_diagnostics = sanitize_schema_planning_decision(
         decision,
-        retrieved_objects,
+        schema_context_objects,
     )
     resolved = resolve_schema_context(
         db=task.db,
         selected_objects=sanitized_decision.selected_objects,
-        canonical_schema_objects=retrieval_index.objects,
+        canonical_schema_objects=schema_context_cache.objects,
         db_index=db_index,
         question=task.question,
-        retrieval_evidence=retrieved_objects,
+        schema_context_evidence=schema_context_objects,
         constraints=sanitized_decision.constraints,
     )
     sql_reference_context = _checked_schema_prompt(
         "sql_reference_context",
         resolved.prompt_context,
-        schema_retrieval_config,
+        schema_context_config,
     )
     prompt_budget = _prompt_budget_diagnostics(
         planning_prompt=planning_prompt,
         sql_reference_context=sql_reference_context,
-        schema_retrieval_config=schema_retrieval_config,
+        schema_context_config=schema_context_config,
     )
 
     schema = SchemaSelection(
@@ -509,9 +509,9 @@ def _run_planning(
             "selection_prompt_chars": len(planning_prompt),
             "planning_prompt_chars": len(planning_prompt),
             "sql_reference_context_chars": len(sql_reference_context),
-            "max_schema_prompt_chars": schema_retrieval_config.max_schema_prompt_chars,
+            "max_schema_prompt_chars": schema_context_config.max_schema_prompt_chars,
             "prompt_budget": prompt_budget,
-            "retrieved_object_count": len(retrieved_objects),
+            "schema_context_object_count": len(schema_context_objects),
             "selected_objects": [
                 selected.model_dump(mode="json") for selected in sanitized_decision.selected_objects
             ],
@@ -521,15 +521,15 @@ def _run_planning(
             "resolver": resolved.diagnostics,
         },
     )
-    schema_retrieval = {
-        "index": {
-            "db": retrieval_index.db,
-            "cache_key": retrieval_index.cache_key,
-            "object_count": len(retrieval_index.objects),
-            "chunk_count": len(retrieval_index.chunks),
+    schema_context = {
+        "cache": {
+            "db": schema_context_cache.db,
+            "cache_key": schema_context_cache.cache_key,
+            "object_count": len(schema_context_cache.objects),
+            "chunk_count": len(schema_context_cache.chunks),
         },
-        "retrieval": retrieval_diagnostics,
-        "retrieved_objects": [
+        "selection": context_diagnostics,
+        "schema_context_objects": [
             {
                 "object_id": item.schema_object.object_id,
                 "object_type": item.schema_object.object_type,
@@ -538,7 +538,7 @@ def _run_planning(
                 "rank": item.rank,
                 "score": item.score,
             }
-            for item in retrieved_objects
+            for item in schema_context_objects
         ],
         "planner": planner_diagnostics,
         "resolver": resolved.diagnostics,
@@ -549,40 +549,40 @@ def _run_planning(
         sanitized_decision.intent,
         resolved.table_schemas,
         sql_reference_context,
-        schema_retrieval,
+        schema_context,
     )
 
 
 def _build_planning_prompt(
     task: Task,
     docs_context: str,
-    retrieved_objects: list[Any],
+    schema_context_objects: list[Any],
     *,
-    schema_retrieval_config: SchemaRetrievalConfig,
+    schema_context_config: SchemaContextConfig,
 ) -> str:
     """Build a planning prompt that fits the configured schema prompt budget."""
 
-    return _retrieval_planning_user_prompt(
+    return _schema_context_planning_user_prompt(
         task,
         task.db,
         docs_context,
-        retrieved_objects,
-        max_docs_chars=schema_retrieval_config.max_linked_doc_chars,
-        max_total_chars=schema_retrieval_config.max_schema_prompt_chars,
+        schema_context_objects,
+        max_docs_chars=schema_context_config.max_linked_doc_chars,
+        max_total_chars=schema_context_config.max_schema_prompt_chars,
     )
 
 
 def _checked_schema_prompt(
     prompt_name: str,
     prompt: str,
-    schema_retrieval_config: SchemaRetrievalConfig,
+    schema_context_config: SchemaContextConfig,
 ) -> str:
     """Enforce the shared schema prompt budget for generated schema contexts."""
 
     return enforce_prompt_budget(
         prompt_name,
         prompt,
-        schema_retrieval_config.max_schema_prompt_chars,
+        schema_context_config.max_schema_prompt_chars,
     )
 
 
@@ -590,12 +590,12 @@ def _prompt_budget_diagnostics(
     *,
     planning_prompt: str | None = None,
     sql_reference_context: str | None = None,
-    schema_retrieval_config: SchemaRetrievalConfig,
+    schema_context_config: SchemaContextConfig,
 ) -> dict[str, object]:
     """Return trace fields for prompt budget enforcement."""
 
     diagnostics: dict[str, object] = {
-        "max_schema_prompt_chars": schema_retrieval_config.max_schema_prompt_chars,
+        "max_schema_prompt_chars": schema_context_config.max_schema_prompt_chars,
     }
     if planning_prompt is not None:
         planning_chars = len(planning_prompt)
@@ -603,7 +603,7 @@ def _prompt_budget_diagnostics(
             {
                 "planning_prompt_chars": planning_chars,
                 "planning_prompt_within_budget": (
-                    planning_chars <= schema_retrieval_config.max_schema_prompt_chars
+                    planning_chars <= schema_context_config.max_schema_prompt_chars
                 ),
             }
         )
@@ -613,7 +613,7 @@ def _prompt_budget_diagnostics(
             {
                 "sql_reference_context_chars": context_chars,
                 "sql_reference_context_within_budget": (
-                    context_chars <= schema_retrieval_config.max_schema_prompt_chars
+                    context_chars <= schema_context_config.max_schema_prompt_chars
                 ),
             }
         )
@@ -867,7 +867,7 @@ def _rebuild_context_for_expansion(
     *,
     table_schemas: dict[str, Any] | None = None,
     sql_reference_context: str | None = None,
-    schema_retrieval: dict[str, Any] | None = None,
+    schema_context: dict[str, Any] | None = None,
 ) -> _TaskCtx:
     """Rebuild selected-schema context while preserving the original answer contract."""
 
@@ -879,7 +879,7 @@ def _rebuild_context_for_expansion(
     reference_context = _checked_schema_prompt(
         "schema_expansion_sql_reference_context",
         reference_context,
-        ctx.schema_retrieval_config,
+        ctx.schema_context_config,
     )
     intent = _augment_intent_with_value_groundings(
         ctx.intent, task=ctx.task, schema=expanded_schema, table_schemas=new_table_schemas
@@ -893,9 +893,9 @@ def _rebuild_context_for_expansion(
         sql_reference_context=reference_context,
         docs_context=ctx.docs_context,
         prompt_hashes=ctx.prompt_hashes,
-        schema_retrieval_version=ctx.schema_retrieval_version,
-        schema_retrieval_config=ctx.schema_retrieval_config,
-        schema_retrieval=schema_retrieval or ctx.schema_retrieval,
+        schema_context_version=ctx.schema_context_version,
+        schema_context_config=ctx.schema_context_config,
+        schema_context=schema_context or ctx.schema_context,
     )
 
 
@@ -922,8 +922,8 @@ def _write_task_output(
         "db": task.db,
         "question": task.question,
         "schema_selection": final_ctx.schema.model_dump(mode="json"),
-        "schema_retrieval_version": final_ctx.schema_retrieval_version,
-        "schema_retrieval": final_ctx.schema_retrieval,
+        "schema_context_version": final_ctx.schema_context_version,
+        "schema_context": final_ctx.schema_context,
         "intent": final_ctx.intent.model_dump(mode="json"),
         "prompt_hashes": ctx.prompt_hashes,
         "attempts": attempts,
@@ -1025,7 +1025,7 @@ def run_task(
     max_attempts: int = 4,
     semantic_repairs: int = 1,
 ) -> FinalAnswer:
-    """Run one task from retrieval through final trace writing."""
+    """Run one task from schema context through final trace writing."""
 
     started_at = perf_counter()
     live_logging_enabled = llm_client is None
@@ -1035,7 +1035,7 @@ def run_task(
         call_logger=LLMCallLogger(task_llm_log_path),
     )
     task_trace_path = trace_path_for(run_paths, instance_id=task.instance_id)
-    schema_retrieval_config = SchemaRetrievalConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
+    schema_context_config = SchemaContextConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
 
     skipped = _check_skip(
         task,
@@ -1043,7 +1043,7 @@ def run_task(
         task_trace_path,
         force=force,
         skip_failed=skip_failed,
-        expected_schema_retrieval_version=DEFAULT_SCHEMA_RETRIEVAL_VERSION,
+        expected_schema_context_version=DEFAULT_SCHEMA_CONTEXT_VERSION,
     )
     if skipped is not None:
         return skipped
@@ -1056,7 +1056,7 @@ def run_task(
         client,
         prompt_hashes,
         run_paths,
-        schema_retrieval_config,
+        schema_context_config,
     )
 
     best_attempt = _generate_initial_candidates(

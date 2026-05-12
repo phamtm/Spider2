@@ -7,21 +7,19 @@ from sol01.infra.config import (
     DEFAULT_DOTENV_PATH,
     DEFAULT_MODEL,
     RuntimeConfig,
-    SchemaRetrievalConfig,
+    SchemaContextConfig,
 )
 
-SCHEMA_RETRIEVAL_ENV_VARS = [
-    "SOL01_SCHEMA_CHUNK_TOP_K",
-    "SOL01_SCHEMA_OBJECT_TOP_K",
-    "SOL01_SCHEMA_FAMILY_TOP_K",
+SCHEMA_CONTEXT_ENV_VARS = [
+    "SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF",
     "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD",
     "SOL01_SCHEMA_MAX_LINKED_DOC_CHARS",
     "SOL01_SCHEMA_MAX_PROMPT_CHARS",
 ]
 
 
-def _clear_schema_retrieval_env(monkeypatch):
-    for name in SCHEMA_RETRIEVAL_ENV_VARS:
+def _clear_schema_context_env(monkeypatch):
+    for name in SCHEMA_CONTEXT_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
 
 
@@ -204,45 +202,40 @@ def test_default_from_env_does_not_read_dotenv_implicitly(monkeypatch, tmp_path:
         RuntimeConfig.from_env(require_api_key=True, dotenv_path=None)
 
 
-def test_schema_retrieval_config_defaults_to_single_local_path(monkeypatch):
-    _clear_schema_retrieval_env(monkeypatch)
+def test_schema_context_config_defaults_to_single_local_path(monkeypatch):
+    _clear_schema_context_env(monkeypatch)
 
-    config = SchemaRetrievalConfig.from_env()
+    config = SchemaContextConfig.from_env()
 
-    assert config.chunk_top_k > config.object_top_k
-    assert config.family_top_k > 0
+    assert config.object_cutoff > 0
     assert 0.0 <= config.family_similarity_threshold <= 1.0
     assert config.max_linked_doc_chars > 0
     assert config.max_schema_prompt_chars > config.max_linked_doc_chars
 
 
-def test_schema_retrieval_config_env_overrides(monkeypatch):
-    monkeypatch.setenv("SOL01_SCHEMA_CHUNK_TOP_K", "60")
-    monkeypatch.setenv("SOL01_SCHEMA_OBJECT_TOP_K", "9")
-    monkeypatch.setenv("SOL01_SCHEMA_FAMILY_TOP_K", "5")
+def test_schema_context_config_env_overrides(monkeypatch):
+    monkeypatch.setenv("SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF", "9")
     monkeypatch.setenv("SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD", "0.7")
     monkeypatch.setenv("SOL01_SCHEMA_MAX_LINKED_DOC_CHARS", "4000")
     monkeypatch.setenv("SOL01_SCHEMA_MAX_PROMPT_CHARS", "18000")
 
-    config = SchemaRetrievalConfig.from_env()
+    config = SchemaContextConfig.from_env()
 
-    assert config.chunk_top_k == 60
-    assert config.object_top_k == 9
-    assert config.family_top_k == 5
+    assert config.object_cutoff == 9
     assert config.family_similarity_threshold == 0.7
     assert config.max_linked_doc_chars == 4000
     assert config.max_schema_prompt_chars == 18000
 
 
-def test_schema_retrieval_numeric_env_values_are_validated(monkeypatch):
-    _clear_schema_retrieval_env(monkeypatch)
-    monkeypatch.setenv("SOL01_SCHEMA_OBJECT_TOP_K", "0")
+def test_schema_context_numeric_env_values_are_validated(monkeypatch):
+    _clear_schema_context_env(monkeypatch)
+    monkeypatch.setenv("SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF", "0")
 
     with pytest.raises(ValueError, match="positive integer"):
-        SchemaRetrievalConfig.from_env()
+        SchemaContextConfig.from_env()
 
-    monkeypatch.setenv("SOL01_SCHEMA_OBJECT_TOP_K", "3")
+    monkeypatch.setenv("SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF", "3")
     monkeypatch.setenv("SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD", "1.1")
 
     with pytest.raises(ValueError, match="between 0 and 1"):
-        SchemaRetrievalConfig.from_env()
+        SchemaContextConfig.from_env()

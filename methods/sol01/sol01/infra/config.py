@@ -11,10 +11,8 @@ DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 DEFAULT_MODEL = "deepseek/deepseek-v4-pro"
 DEFAULT_PROVIDER_ONLY = "deepseek"
 DEFAULT_CONCURRENCY = 4
-DEFAULT_SCHEMA_RETRIEVAL_VERSION = "metadata_context_v1"
-DEFAULT_RETRIEVAL_CHUNK_TOP_K = 80
-DEFAULT_RETRIEVAL_OBJECT_TOP_K = 12
-DEFAULT_RETRIEVAL_FAMILY_TOP_K = 8
+DEFAULT_SCHEMA_CONTEXT_VERSION = "schema_context_v1"
+DEFAULT_SCHEMA_CONTEXT_OBJECT_CUTOFF = 12
 DEFAULT_FAMILY_SIMILARITY_THRESHOLD = 0.82
 DEFAULT_MAX_LINKED_DOC_CHARS = 6000
 DEFAULT_MAX_SCHEMA_PROMPT_CHARS = 24000
@@ -82,12 +80,10 @@ class RuntimeConfig(BaseModel):
         return self
 
 
-class SchemaRetrievalConfig(BaseModel):
-    """Local schema-retrieval settings used before LLM planning."""
+class SchemaContextConfig(BaseModel):
+    """Schema-context settings used before LLM planning."""
 
-    chunk_top_k: int = Field(default=DEFAULT_RETRIEVAL_CHUNK_TOP_K, ge=1)
-    object_top_k: int = Field(default=DEFAULT_RETRIEVAL_OBJECT_TOP_K, ge=1)
-    family_top_k: int = Field(default=DEFAULT_RETRIEVAL_FAMILY_TOP_K, ge=1)
+    object_cutoff: int = Field(default=DEFAULT_SCHEMA_CONTEXT_OBJECT_CUTOFF, ge=1)
     family_similarity_threshold: float = Field(
         default=DEFAULT_FAMILY_SIMILARITY_THRESHOLD,
         ge=0.0,
@@ -97,23 +93,15 @@ class SchemaRetrievalConfig(BaseModel):
     max_schema_prompt_chars: int = Field(default=DEFAULT_MAX_SCHEMA_PROMPT_CHARS, ge=1)
 
     @classmethod
-    def from_env(cls, *, dotenv_path: Path | None = None) -> "SchemaRetrievalConfig":
-        """Load schema retrieval settings from the shell or one local .env file."""
+    def from_env(cls, *, dotenv_path: Path | None = None) -> "SchemaContextConfig":
+        """Load schema-context settings from the shell or one local .env file."""
 
         _load_local_dotenv(dotenv_path)
 
         return cls(
-            chunk_top_k=_env_positive_int(
-                "SOL01_SCHEMA_CHUNK_TOP_K",
-                default=DEFAULT_RETRIEVAL_CHUNK_TOP_K,
-            ),
-            object_top_k=_env_positive_int(
-                "SOL01_SCHEMA_OBJECT_TOP_K",
-                default=DEFAULT_RETRIEVAL_OBJECT_TOP_K,
-            ),
-            family_top_k=_env_positive_int(
-                "SOL01_SCHEMA_FAMILY_TOP_K",
-                default=DEFAULT_RETRIEVAL_FAMILY_TOP_K,
+            object_cutoff=_env_positive_int(
+                "SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF",
+                default=DEFAULT_SCHEMA_CONTEXT_OBJECT_CUTOFF,
             ),
             family_similarity_threshold=_env_unit_float(
                 "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD",

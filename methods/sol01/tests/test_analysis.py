@@ -187,11 +187,13 @@ def test_analyze_run_groups_failures_and_writes_reports(tmp_path: Path):
     assert [item["instance_id"] for item in report["by_category"]["empty_result"]] == ["local004"]
     assert [item["instance_id"] for item in report["by_category"]["critic"]] == ["local006"]
     assert [item["instance_id"] for item in report["by_category"]["missing_csv"]] == ["local005"]
-    assert [item["instance_id"] for item in report["by_category"]["retrieval_miss"]] == ["local002"]
+    assert [item["instance_id"] for item in report["by_category"]["schema_context_miss"]] == [
+        "local002"
+    ]
     assert report["by_category"]["validation"][0]["evidence"] == [
         "Table missing_table is not allowed."
     ]
-    assert report["by_category"]["retrieval_miss"][0]["evidence"] == [
+    assert report["by_category"]["schema_context_miss"][0]["evidence"] == [
         "Validation reported a table outside the selected schema."
     ]
     assert report["by_category"]["execution"][1]["hints"] == []
@@ -244,7 +246,7 @@ def test_analyze_run_does_not_label_success_keywords_as_failures(tmp_path: Path)
     assert report["by_category"]["critic"] == []
     assert "aggregation_issue" not in report["by_category"]
     assert "date_filter_issue" not in report["by_category"]
-    assert report["by_category"]["retrieval_miss"] == []
+    assert report["by_category"]["schema_context_miss"] == []
 
 
 def test_analyze_run_keeps_speculative_signals_as_hints(tmp_path: Path):
@@ -284,8 +286,8 @@ def test_analyze_run_keeps_speculative_signals_as_hints(tmp_path: Path):
     assert "date_filter_issue" not in report["by_category"]
 
 
-def test_analyze_run_requires_schema_evidence_for_retrieval_miss(tmp_path: Path):
-    """Table validation errors alone should not be called retrieval misses."""
+def test_analyze_run_requires_schema_evidence_for_schema_context_miss(tmp_path: Path):
+    """Table validation errors alone should not be called schema context misses."""
 
     run_paths = ensure_run_paths("schema-evidence", outputs_root=tmp_path)
     write_trace(
@@ -310,7 +312,7 @@ def test_analyze_run_requires_schema_evidence_for_retrieval_miss(tmp_path: Path)
     report = analyze_run("schema-evidence", outputs_root=tmp_path)
 
     assert [item["instance_id"] for item in report["by_category"]["validation"]] == ["local175"]
-    assert report["by_category"]["retrieval_miss"] == []
+    assert report["by_category"]["schema_context_miss"] == []
 
 
 def test_analyze_run_uses_manifest_for_missing_csv_without_eval_summary(tmp_path: Path):
