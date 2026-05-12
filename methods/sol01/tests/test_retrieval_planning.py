@@ -1,9 +1,14 @@
 """Tests for retrieval-scoped planning prompts and selection cleanup."""
 
+import pytest
+
+from sol01.infra.config import DEFAULT_MAX_SCHEMA_PROMPT_CHARS
 from sol01.llm.prompt_builders import (
+    PromptBudgetExceededError,
     _retrieval_planning_user_prompt,
     _sql_reference_context,
     _sql_repair_prompt,
+    enforce_prompt_budget,
     sanitize_hybrid_planning_decision,
 )
 from sol01.models import (
@@ -44,6 +49,44 @@ def test_retrieval_planning_prompt_uses_retrieved_objects_without_full_schema_su
     assert "Schema summary:" not in prompt
     assert "CREATE TABLE" not in prompt
     assert len(prompt.split("Document context:\n", 1)[1].split("\n\n", 1)[0]) <= 123
+
+
+def test_retrieval_planning_prompt_fits_total_budget_without_dropping_object_ids():
+    minimal_prompt = _retrieval_planning_user_prompt(
+        Task(instance_id="local001", db="DB", question="Revenue for closed orders in 2024"),
+        "DB",
+        "Closed means STATUS = 'closed'. " * 200,
+        _retrieved_objects(),
+        max_docs_chars=0,
+        max_evidence_chars=0,
+    )
+    budget = len(minimal_prompt) + 40
+
+    prompt = _retrieval_planning_user_prompt(
+        Task(instance_id="local001", db="DB", question="Revenue for closed orders in 2024"),
+        "DB",
+        "Closed means STATUS = 'closed'. " * 200,
+        _retrieved_objects(),
+        max_total_chars=budget,
+    )
+
+    assert len(prompt) <= budget
+    assert "Available object ids:" in prompt
+    assert "table:DB.PUBLIC.ORDERS" in prompt
+    assert "column:DB.PUBLIC.ORDERS#AMOUNT" in prompt
+
+
+def test_retrieval_planning_prompt_raises_when_required_shell_exceeds_budget():
+    with pytest.raises(PromptBudgetExceededError, match="planning prompt"):
+        _retrieval_planning_user_prompt(
+            Task(instance_id="local001", db="DB", question="Revenue for closed orders in 2024"),
+            "DB",
+            "",
+            _retrieved_objects(),
+            max_docs_chars=0,
+            max_evidence_chars=0,
+            max_total_chars=10,
+        )
 
 
 def test_retrieval_planning_prompt_uses_curated_summary_evidence_for_covered_tables():
@@ -100,6 +143,7 @@ def test_retrieval_planning_prompt_uses_curated_summary_evidence_for_covered_tab
     assert "CREATE TABLE" not in prompt
     assert "SECRET_DDL_MARKER" not in prompt
     assert "SECRET_SAMPLE_MARKER" not in prompt
+    assert len(prompt) <= DEFAULT_MAX_SCHEMA_PROMPT_CHARS
 
 
 def test_hybrid_planning_decision_constraints_have_defaults_and_parse_values():
@@ -214,6 +258,7 @@ def test_sql_reference_and_repair_prompts_use_large_schema_summary_context():
     )
 
     assert "Large-schema summary: covid19_usafacts_wide_daily_counts" in reference_context
+    assert len(reference_context) <= DEFAULT_MAX_SCHEMA_PROMPT_CHARS
     assert "CONFIRMED_CASES" in reference_context
     assert "CREATE TABLE" not in reference_context
     assert "SECRET_DDL_MARKER" not in reference_context
@@ -222,6 +267,49 @@ def test_sql_reference_and_repair_prompts_use_large_schema_summary_context():
     assert "Large-schema summary: covid19_usafacts_wide_daily_counts" in repair_prompt
     assert "CREATE TABLE" not in repair_prompt
     assert "SECRET_DDL_MARKER" not in repair_prompt
+
+
+def test_sql_reference_budget_enforcement_preserves_large_schema_rules():
+    table_name = "COVID19_USA.COVID19_USAFACTS.CONFIRMED_CASES"
+    table_schemas = {
+        table_name: TableSchema(
+            name="CONFIRMED_CASES",
+            database_name="COVID19_USA",
+            schema_name="COVID19_USAFACTS",
+            full_name=table_name,
+            ddl="CREATE TABLE CONFIRMED_CASES (SECRET_DDL_MARKER TEXT);",
+            columns=[ColumnSchema(name="state", type="TEXT")],
+            sample_rows=[],
+            searchable_text="covid confirmed cases",
+        )
+    }
+    schema = SchemaSelection(
+        db="COVID19_USA",
+        selected_object_ids=[f"table:{table_name}"],
+        selected_tables=[table_name],
+        expanded_tables=[table_name],
+        allowed_tables=[table_name],
+        rationale="selected covered table",
+        confidence=0.9,
+    )
+
+    reference_context = _sql_reference_context(schema, table_schemas)
+    enforced = enforce_prompt_budget(
+        "sql_reference_context",
+        reference_context,
+        len(reference_context),
+    )
+
+    assert enforced == reference_context
+    assert table_name in enforced
+    assert "CONFIRMED_CASES and DEATHS repeat daily count columns named _YYYY_MM_DD" in enforced
+    assert "Wide date columns begin with an underscore and must be quoted" in enforced
+    with pytest.raises(PromptBudgetExceededError, match="sql_reference_context prompt"):
+        enforce_prompt_budget(
+            "sql_reference_context",
+            reference_context,
+            len(reference_context) - 1,
+        )
 
 
 def _intent() -> Intent:

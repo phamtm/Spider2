@@ -33,6 +33,20 @@ _RETRIEVAL_PLANNING_DOCS_CHAR_LIMIT = 6000
 _RETRIEVAL_PLANNING_EVIDENCE_CHAR_LIMIT = 16000
 
 
+class PromptBudgetExceededError(ValueError):
+    """Raised when a prompt cannot fit inside the configured character budget."""
+
+
+def enforce_prompt_budget(prompt_name: str, prompt: str, max_chars: int) -> str:
+    """Return a prompt only when it fits the configured character budget."""
+
+    if len(prompt) > max_chars:
+        raise PromptBudgetExceededError(
+            f"{prompt_name} prompt is {len(prompt)} chars; configured budget is {max_chars}"
+        )
+    return prompt
+
+
 def _comparison_attempt_summary(attempt: dict[str, Any]) -> dict[str, Any]:
     """Render one attempt in a compact, comparison-friendly format."""
 
@@ -144,8 +158,56 @@ def _retrieval_planning_user_prompt(
     *,
     max_docs_chars: int = _RETRIEVAL_PLANNING_DOCS_CHAR_LIMIT,
     max_evidence_chars: int = _RETRIEVAL_PLANNING_EVIDENCE_CHAR_LIMIT,
+    max_total_chars: int | None = None,
 ) -> str:
     """Build a planner prompt limited to retrieved logical schema objects."""
+
+    docs_limit = max(0, max_docs_chars)
+    evidence_limit = max(0, max_evidence_chars)
+    prompt = _format_retrieval_planning_user_prompt(
+        task,
+        db,
+        docs_context,
+        retrieved_objects,
+        max_docs_chars=docs_limit,
+        max_evidence_chars=evidence_limit,
+    )
+    if max_total_chars is None or len(prompt) <= max_total_chars:
+        return prompt
+
+    # Keep exact object ids available, then shrink lossy evidence before docs.
+    for _ in range(12):
+        overflow = len(prompt) - max_total_chars
+        if evidence_limit > 0:
+            evidence_limit = max(0, evidence_limit - overflow - 256)
+        elif docs_limit > 0:
+            docs_limit = max(0, docs_limit - overflow - 256)
+        else:
+            break
+        prompt = _format_retrieval_planning_user_prompt(
+            task,
+            db,
+            docs_context,
+            retrieved_objects,
+            max_docs_chars=docs_limit,
+            max_evidence_chars=evidence_limit,
+        )
+        if len(prompt) <= max_total_chars:
+            return prompt
+
+    return enforce_prompt_budget("planning", prompt, max_total_chars)
+
+
+def _format_retrieval_planning_user_prompt(
+    task: Task,
+    db: str,
+    docs_context: str,
+    retrieved_objects: Sequence[RetrievedSchemaObject],
+    *,
+    max_docs_chars: int,
+    max_evidence_chars: int,
+) -> str:
+    """Render the planner prompt once with fixed context limits."""
 
     available_ids = [item.schema_object.object_id for item in retrieved_objects]
     return (

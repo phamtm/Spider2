@@ -10,11 +10,14 @@ def summarize_trace_diagnostics(trace: dict[str, Any]) -> str | None:
 
     attempts = trace.get("attempts") or []
     if not isinstance(attempts, list) or not attempts:
-        return None
+        return _prompt_budget_diagnostic(trace)
 
     final_attempt = attempts[-1] if isinstance(attempts[-1], dict) else {}
     diagnostics = _attempt_diagnostics(final_attempt)
-    return diagnostics["diagnostics"] or None
+    return _join_diagnostics(
+        _prompt_budget_diagnostic(trace),
+        diagnostics["diagnostics"],
+    )
 
 
 def summarize_failed_question(trace: dict[str, Any]) -> dict[str, Any]:
@@ -23,12 +26,62 @@ def summarize_failed_question(trace: dict[str, Any]) -> dict[str, Any]:
     attempts = trace.get("attempts") or []
     final_attempt = attempts[-1] if isinstance(attempts, list) and attempts else {}
     diagnostics = _attempt_diagnostics(final_attempt if isinstance(final_attempt, dict) else {})
+    prompt_budget_diagnostic = _prompt_budget_diagnostic(trace)
+    if prompt_budget_diagnostic:
+        diagnostics["diagnostics"] = _join_diagnostics(
+            prompt_budget_diagnostic,
+            diagnostics["diagnostics"],
+        )
     return {
         "instance_id": trace.get("instance_id"),
         "question": trace.get("question"),
         "status": trace.get("status"),
         **diagnostics,
     }
+
+
+def _join_diagnostics(*parts: str | None) -> str | None:
+    """Join non-empty diagnostic fragments in the same format as attempt details."""
+
+    values = [part for part in parts if part]
+    return " | ".join(values) if values else None
+
+
+def _prompt_budget_diagnostic(trace: dict[str, Any]) -> str | None:
+    """Return prompt budget sizes from trace diagnostics when available."""
+
+    budget = _prompt_budget(trace)
+    if not budget:
+        return None
+
+    max_chars = budget.get("max_schema_prompt_chars")
+    planning_chars = budget.get("planning_prompt_chars")
+    context_chars = budget.get("sql_reference_context_chars")
+    pieces: list[str] = []
+    if isinstance(planning_chars, int):
+        pieces.append(f"planning={planning_chars}")
+    if isinstance(context_chars, int):
+        pieces.append(f"context={context_chars}")
+    if not pieces:
+        return None
+    suffix = f"/{max_chars}" if isinstance(max_chars, int) else ""
+    return "prompt budget: " + ", ".join(f"{piece}{suffix}" for piece in pieces)
+
+
+def _prompt_budget(trace: dict[str, Any]) -> dict[str, Any]:
+    schema_selection = trace.get("schema_selection")
+    if isinstance(schema_selection, dict):
+        diagnostics = schema_selection.get("diagnostics")
+        if isinstance(diagnostics, dict):
+            budget = diagnostics.get("prompt_budget")
+            if isinstance(budget, dict):
+                return budget
+    schema_retrieval = trace.get("schema_retrieval")
+    if isinstance(schema_retrieval, dict):
+        budget = schema_retrieval.get("prompt_budget")
+        if isinstance(budget, dict):
+            return budget
+    return {}
 
 
 def _attempt_diagnostics(attempt: dict[str, Any]) -> dict[str, Any]:

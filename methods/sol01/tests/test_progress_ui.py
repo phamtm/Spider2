@@ -689,6 +689,15 @@ def test_load_records_extracts_trace_diagnostics_from_trace_json(tmp_path: Path)
           "status": "failed",
           "db": "DB_A",
           "question": "Find a customer.",
+          "schema_selection": {
+            "diagnostics": {
+              "prompt_budget": {
+                "planning_prompt_chars": 1200,
+                "sql_reference_context_chars": 900,
+                "max_schema_prompt_chars": 24000
+              }
+            }
+          },
           "attempts": [
             {
               "validation": {"ok": false, "errors": ["missing grouped key StyleID"]},
@@ -728,6 +737,7 @@ def test_load_records_extracts_trace_diagnostics_from_trace_json(tmp_path: Path)
 
     assert len(records) == 1
     assert records[0].diagnostics == (
+        "prompt budget: planning=1200/24000, context=900/24000 | "
         "validation: missing grouped key StyleID | "
         "execution: Validation failed before execution. | "
         "shape: missing grouped key StyleID | "

@@ -27,6 +27,7 @@ from sol01.llm.prompt_builders import (
     _sql_generation_batch_prompt,
     _sql_reference_context,
     _sql_repair_prompt,
+    enforce_prompt_budget,
     sanitize_hybrid_planning_decision,
     schema_expansion_trigger,
 )
@@ -454,17 +455,18 @@ def _run_planning(
         linked_docs=linked_docs,
         config=schema_retrieval_config,
     )
+    planning_prompt = _build_planning_prompt(
+        task,
+        docs_context,
+        retrieved_objects,
+        schema_retrieval_config=schema_retrieval_config,
+    )
     decision = _run_prompt(
         client,
         prompt_hashes=prompt_hashes,
         prompt_name="planning",
         output_type=HybridPlanningDecision,
-        user_prompt=_retrieval_planning_user_prompt(
-            task,
-            task.db,
-            docs_context,
-            retrieved_objects,
-        ),
+        user_prompt=planning_prompt,
     )
     sanitized_decision, planner_diagnostics = sanitize_hybrid_planning_decision(
         decision,
@@ -479,6 +481,16 @@ def _run_planning(
         retrieval_evidence=retrieved_objects,
         constraints=sanitized_decision.constraints,
     )
+    sql_reference_context = _checked_schema_prompt(
+        "sql_reference_context",
+        resolved.prompt_context,
+        schema_retrieval_config,
+    )
+    prompt_budget = _prompt_budget_diagnostics(
+        planning_prompt=planning_prompt,
+        sql_reference_context=sql_reference_context,
+        schema_retrieval_config=schema_retrieval_config,
+    )
 
     schema = SchemaSelection(
         db=task.db,
@@ -491,14 +503,11 @@ def _run_planning(
         rationale=sanitized_decision.rationale,
         confidence=sanitized_decision.confidence,
         diagnostics={
-            "selection_prompt_chars": len(
-                _retrieval_planning_user_prompt(
-                    task,
-                    task.db,
-                    docs_context,
-                    retrieved_objects,
-                )
-            ),
+            "selection_prompt_chars": len(planning_prompt),
+            "planning_prompt_chars": len(planning_prompt),
+            "sql_reference_context_chars": len(sql_reference_context),
+            "max_schema_prompt_chars": schema_retrieval_config.max_schema_prompt_chars,
+            "prompt_budget": prompt_budget,
             "retrieved_object_count": len(retrieved_objects),
             "selected_objects": [
                 selected.model_dump(mode="json") for selected in sanitized_decision.selected_objects
@@ -530,14 +539,82 @@ def _run_planning(
         ],
         "planner": planner_diagnostics,
         "resolver": resolved.diagnostics,
+        "prompt_budget": prompt_budget,
     }
     return (
         schema,
         sanitized_decision.intent,
         resolved.table_schemas,
-        resolved.prompt_context,
+        sql_reference_context,
         schema_retrieval,
     )
+
+
+def _build_planning_prompt(
+    task: Task,
+    docs_context: str,
+    retrieved_objects: list[Any],
+    *,
+    schema_retrieval_config: SchemaRetrievalConfig,
+) -> str:
+    """Build a planning prompt that fits the configured schema prompt budget."""
+
+    return _retrieval_planning_user_prompt(
+        task,
+        task.db,
+        docs_context,
+        retrieved_objects,
+        max_docs_chars=schema_retrieval_config.max_linked_doc_chars,
+        max_total_chars=schema_retrieval_config.max_schema_prompt_chars,
+    )
+
+
+def _checked_schema_prompt(
+    prompt_name: str,
+    prompt: str,
+    schema_retrieval_config: SchemaRetrievalConfig,
+) -> str:
+    """Enforce the shared schema prompt budget for generated schema contexts."""
+
+    return enforce_prompt_budget(
+        prompt_name,
+        prompt,
+        schema_retrieval_config.max_schema_prompt_chars,
+    )
+
+
+def _prompt_budget_diagnostics(
+    *,
+    planning_prompt: str | None = None,
+    sql_reference_context: str | None = None,
+    schema_retrieval_config: SchemaRetrievalConfig,
+) -> dict[str, object]:
+    """Return trace fields for prompt budget enforcement."""
+
+    diagnostics: dict[str, object] = {
+        "max_schema_prompt_chars": schema_retrieval_config.max_schema_prompt_chars,
+    }
+    if planning_prompt is not None:
+        planning_chars = len(planning_prompt)
+        diagnostics.update(
+            {
+                "planning_prompt_chars": planning_chars,
+                "planning_prompt_within_budget": (
+                    planning_chars <= schema_retrieval_config.max_schema_prompt_chars
+                ),
+            }
+        )
+    if sql_reference_context is not None:
+        context_chars = len(sql_reference_context)
+        diagnostics.update(
+            {
+                "sql_reference_context_chars": context_chars,
+                "sql_reference_context_within_budget": (
+                    context_chars <= schema_retrieval_config.max_schema_prompt_chars
+                ),
+            }
+        )
+    return diagnostics
 
 
 def _log_candidate(instance_id: str, attempt: dict[str, Any]) -> None:
@@ -792,6 +869,15 @@ def _rebuild_context_for_expansion(
     """Rebuild selected-schema context while preserving the original answer contract."""
 
     new_table_schemas = table_schemas or _table_schemas_for_selection(expanded_schema)
+    reference_context = sql_reference_context or _sql_reference_context(
+        expanded_schema,
+        new_table_schemas,
+    )
+    reference_context = _checked_schema_prompt(
+        "schema_expansion_sql_reference_context",
+        reference_context,
+        ctx.schema_retrieval_config,
+    )
     intent = _augment_intent_with_value_groundings(
         ctx.intent, task=ctx.task, schema=expanded_schema, table_schemas=new_table_schemas
     )
@@ -801,8 +887,7 @@ def _rebuild_context_for_expansion(
         intent=intent,
         schema=expanded_schema,
         table_schemas=new_table_schemas,
-        sql_reference_context=sql_reference_context
-        or _sql_reference_context(expanded_schema, new_table_schemas),
+        sql_reference_context=reference_context,
         docs_context=ctx.docs_context,
         prompt_hashes=ctx.prompt_hashes,
         schema_retrieval_version=ctx.schema_retrieval_version,
@@ -912,6 +997,10 @@ def _attempt_schema_expansion(
             "added_tables": added_tables,
             "planner": planner_diagnostics,
             "resolver": resolved.diagnostics,
+            "prompt_budget": _prompt_budget_diagnostics(
+                sql_reference_context=resolved.prompt_context,
+                schema_retrieval_config=ctx.schema_retrieval_config,
+            ),
         }
     )
     if not added_tables:
@@ -1015,17 +1104,18 @@ def _retrieve_expansion_objects(
             )
         }
     )
+    planning_prompt = _build_planning_prompt(
+        expansion_task,
+        ctx.docs_context,
+        retrieved_objects,
+        schema_retrieval_config=ctx.schema_retrieval_config,
+    )
     decision = _run_prompt(
         ctx.client,
         prompt_hashes=ctx.prompt_hashes,
         prompt_name="planning",
         output_type=HybridPlanningDecision,
-        user_prompt=_retrieval_planning_user_prompt(
-            expansion_task,
-            ctx.task.db,
-            ctx.docs_context,
-            retrieved_objects,
-        ),
+        user_prompt=planning_prompt,
     )
     sanitized_decision, planner_diagnostics = sanitize_hybrid_planning_decision(
         decision,
@@ -1040,6 +1130,10 @@ def _retrieve_expansion_objects(
     diagnostics = {
         "retrieval": retrieval_diagnostics,
         "planner": planner_diagnostics,
+        "prompt_budget": _prompt_budget_diagnostics(
+            planning_prompt=planning_prompt,
+            schema_retrieval_config=ctx.schema_retrieval_config,
+        ),
         "rationale": sanitized_decision.rationale,
         "confidence": sanitized_decision.confidence,
     }
@@ -1219,6 +1313,7 @@ def _schema_retrieval_with_expansion(
             "added_tables": expansion_payload.get("added_tables", []),
             "planner": expansion_payload.get("planner", {}),
             "resolver": expansion_payload.get("resolver", {}),
+            "prompt_budget": expansion_payload.get("prompt_budget", {}),
             "outcome": expansion_payload.get("outcome"),
         }
     )

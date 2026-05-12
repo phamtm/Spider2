@@ -270,6 +270,10 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
     assert trace["schema_selection"]["selected_tables"] == [SALES_TABLE]
     assert trace["schema_retrieval_version"] == "lexical_v1"
     assert trace["schema_retrieval"]["index"]["cache_key"] == "test-cache-key"
+    prompt_budget = trace["schema_selection"]["diagnostics"]["prompt_budget"]
+    assert prompt_budget["planning_prompt_chars"] <= prompt_budget["max_schema_prompt_chars"]
+    assert prompt_budget["sql_reference_context_chars"] <= prompt_budget["max_schema_prompt_chars"]
+    assert trace["schema_retrieval"]["prompt_budget"] == prompt_budget
     assert len(trace["attempts"]) == 1
     assert trace["candidate_review"]["preferred_stage"] == "initial_1"
     assert trace["candidate_review"]["review_reason"] == (
