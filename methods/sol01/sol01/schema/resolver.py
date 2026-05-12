@@ -18,6 +18,7 @@ from sol01.models import (
 from sol01.schema.reference_context import render_table_reference
 
 MAX_FAMILY_MEMBERS_IN_PROMPT = 16
+MAX_FAMILY_MEMBERS_TO_EXPAND = 64
 MAX_VARIANT_COLUMNS_IN_PROMPT = 12
 MAX_RETRIEVAL_EVIDENCE_LINES = 8
 
@@ -66,7 +67,7 @@ def resolve_schema_context(
             continue
 
         if schema_object.object_type == "family":
-            resolved, family_warnings, reason = _resolve_family(
+            resolved, family_warnings, reason, details = _resolve_family(
                 schema_object,
                 constraints=constraints,
                 question=question,
@@ -79,6 +80,7 @@ def resolve_schema_context(
                     "object_type": "family",
                     "resolved_tables": resolved,
                     "reason": reason,
+                    **details,
                 }
             )
             continue
@@ -100,6 +102,14 @@ def resolve_schema_context(
         for table_name in allowed_tables
         if table_name.lower() in table_lookup
     }
+    table_schemas.update(
+        _canonical_family_schemas(
+            selected_objects=selected_objects,
+            object_by_id=object_by_id,
+            table_lookup=table_lookup,
+            existing_tables=table_schemas,
+        )
+    )
     missing_schemas = [
         table_name for table_name in allowed_tables if table_name not in table_schemas
     ]
@@ -169,7 +179,7 @@ def _resolve_family(
     *,
     constraints: HybridPlanningConstraints,
     question: str,
-) -> tuple[list[str], list[str], str]:
+) -> tuple[list[str], list[str], str, dict[str, object]]:
     """Resolve one logical family object to physical members."""
 
     members = _family_members(schema_object)
@@ -178,16 +188,22 @@ def _resolve_family(
     warnings: list[str] = []
 
     if constraints.include_all:
-        return all_member_tables, warnings, "include_all"
+        return _budget_family_expansion(
+            schema_object,
+            all_member_tables,
+            "include_all",
+            "include_all requested every family member",
+        )
 
     matched_members = [
         member for member in members if _member_matches_constraints(member, constraints)
     ]
     if matched_members:
-        return (
+        return _budget_family_expansion(
+            schema_object,
             [member["table_full_name"] for member in matched_members],
-            warnings,
             "explicit_constraints",
+            "explicit constraints matched family members",
         )
 
     has_constraints = _has_explicit_constraints(constraints)
@@ -196,16 +212,87 @@ def _resolve_family(
             f"No family members matched constraints for {schema_object.object_id}; "
             f"using canonical member {canonical}."
         )
-        return [canonical], warnings, "constraints_no_match"
+        return (
+            [canonical],
+            warnings,
+            "constraints_no_match",
+            _family_resolution_details(schema_object, [canonical], symbolic=False),
+        )
 
     if _question_asks_broad_range(question):
-        return all_member_tables, warnings, "broad_question"
+        return _budget_family_expansion(
+            schema_object,
+            all_member_tables,
+            "broad_question",
+            "broad historical question matched every family member",
+        )
 
     warnings.append(
         f"No family member constraint was provided for {schema_object.object_id}; "
         f"using canonical member {canonical}."
     )
-    return [canonical], warnings, "ambiguous_family_default"
+    return (
+        [canonical],
+        warnings,
+        "ambiguous_family_default",
+        _family_resolution_details(schema_object, [canonical], symbolic=False),
+    )
+
+
+def _budget_family_expansion(
+    schema_object: SchemaObject,
+    resolved_tables: list[str],
+    reason: str,
+    explanation: str,
+) -> tuple[list[str], list[str], str, dict[str, object]]:
+    """Expand small family selections and keep oversized selections symbolic."""
+
+    details = _family_resolution_details(schema_object, resolved_tables, symbolic=False)
+    if len(resolved_tables) <= MAX_FAMILY_MEMBERS_TO_EXPAND:
+        return resolved_tables, [], reason, details
+
+    member_count = _family_member_count(schema_object)
+    warning = (
+        f"Table family {schema_object.object_id} kept symbolic: {explanation}, "
+        f"but {len(resolved_tables)} matched members exceed expansion budget "
+        f"{MAX_FAMILY_MEMBERS_TO_EXPAND}. Add an explicit date, date range, year, "
+        "suffix, or version constraint before using physical family members."
+    )
+    symbolic_details = _family_resolution_details(
+        schema_object,
+        [],
+        symbolic=True,
+        matched_member_count=len(resolved_tables),
+    )
+    symbolic_details["member_count"] = member_count
+    return [], [warning], f"symbolic_{reason}", symbolic_details
+
+
+def _family_resolution_details(
+    schema_object: SchemaObject,
+    resolved_tables: Sequence[str],
+    *,
+    symbolic: bool,
+    matched_member_count: int | None = None,
+) -> dict[str, object]:
+    """Return compact diagnostics for one table-family resolution."""
+
+    member_count = _family_member_count(schema_object)
+    return {
+        "family_member_count": member_count,
+        "matched_member_count": matched_member_count
+        if matched_member_count is not None
+        else len(resolved_tables),
+        "member_expansion_budget": MAX_FAMILY_MEMBERS_TO_EXPAND,
+        "symbolic": symbolic,
+    }
+
+
+def _family_member_count(schema_object: SchemaObject) -> int:
+    raw_count = schema_object.metadata.get("member_count")
+    if isinstance(raw_count, int) and raw_count >= 0:
+        return raw_count
+    return len(_family_member_refs(schema_object))
 
 
 def _member_matches_constraints(
@@ -265,6 +352,29 @@ def _physical_tables_for_object(schema_object: SchemaObject) -> list[str]:
     return _stable_sorted_tables(tables)
 
 
+def _canonical_family_schemas(
+    *,
+    selected_objects: Sequence[SelectedSchemaObject],
+    object_by_id: Mapping[str, SchemaObject],
+    table_lookup: Mapping[str, TableSchema],
+    existing_tables: Mapping[str, TableSchema],
+) -> dict[str, TableSchema]:
+    """Keep one canonical family schema available for prompt rendering."""
+
+    schemas: dict[str, TableSchema] = {}
+    for selected in selected_objects:
+        schema_object = object_by_id.get(selected.object_id)
+        if schema_object is None or schema_object.object_type != "family":
+            continue
+        canonical = _canonical_member(schema_object)
+        if canonical in existing_tables:
+            continue
+        table = table_lookup.get(canonical.lower())
+        if table is not None:
+            schemas[canonical] = table
+    return schemas
+
+
 def _render_prompt_context(
     *,
     db: str,
@@ -281,7 +391,7 @@ def _render_prompt_context(
         "Resolved schema context:",
         f"Database: {db}",
         "Allowed physical tables:",
-        *_bullet_lines(allowed_tables),
+        *(_bullet_lines(allowed_tables) if allowed_tables else ["- none resolved"]),
         "",
     ]
     rendered_tables: set[str] = set()
@@ -291,7 +401,13 @@ def _render_prompt_context(
         if schema_object is None:
             continue
         if schema_object.object_type == "family":
-            lines.extend(_render_family(schema_object, table_schemas))
+            lines.extend(
+                _render_family(
+                    schema_object,
+                    table_schemas,
+                    resolution=_family_resolution(selected.object_id, diagnostics),
+                )
+            )
             lines.append("")
             continue
         for table_name in _physical_tables_for_object(schema_object):
@@ -331,19 +447,31 @@ def _render_prompt_context(
 def _render_family(
     schema_object: SchemaObject,
     table_schemas: Mapping[str, TableSchema],
+    *,
+    resolution: Mapping[str, object] | None = None,
 ) -> list[str]:
     """Render one logical family with one canonical structure and compact members."""
 
     canonical = _canonical_member(schema_object)
     canonical_schema = table_schemas.get(canonical)
-    members = _family_member_refs(schema_object)
+    members = _resolved_family_members(schema_object, resolution)
     common_columns = _string_list(schema_object.metadata.get("common_columns"))
     variant_columns = _variant_column_lines(schema_object.metadata.get("variant_columns"))
+    member_count = _family_member_count(schema_object)
+    symbolic = bool(resolution and resolution.get("symbolic"))
     lines = [
         f"Table family: {schema_object.name}",
         f"Canonical structure: {canonical}",
-        f"Physical members: {_compact_member_list(members)}",
+        f"Family members: {member_count} total",
     ]
+    if symbolic:
+        budget = resolution.get("member_expansion_budget", MAX_FAMILY_MEMBERS_TO_EXPAND)
+        matched = resolution.get("matched_member_count", member_count)
+        lines.append(
+            f"Physical members: kept symbolic ({matched} matched; expansion budget {budget})"
+        )
+    elif members:
+        lines.append(f"Physical members: {_compact_member_list(members)}")
     if common_columns:
         lines.append(f"Common columns: {', '.join(common_columns)}")
     if variant_columns:
@@ -356,6 +484,30 @@ def _render_family(
     if canonical_schema is not None:
         lines.extend(_render_table(canonical_schema, header="Canonical table DDL and columns"))
     return lines
+
+
+def _family_resolution(
+    object_id: str,
+    diagnostics: Mapping[str, object],
+) -> Mapping[str, object] | None:
+    entries = diagnostics.get("resolution_entries")
+    if not isinstance(entries, list):
+        return None
+    for entry in entries:
+        if isinstance(entry, dict) and entry.get("object_id") == object_id:
+            return entry
+    return None
+
+
+def _resolved_family_members(
+    schema_object: SchemaObject,
+    resolution: Mapping[str, object] | None,
+) -> list[str]:
+    if resolution is not None:
+        resolved = resolution.get("resolved_tables")
+        if isinstance(resolved, list):
+            return _stable_sorted_tables(str(item).strip() for item in resolved)
+    return _family_member_refs(schema_object)
 
 
 def _render_table(table: TableSchema, *, header: str | None = None) -> list[str]:
@@ -511,8 +663,18 @@ def _suffix_dimension_lines(raw_dimensions: object) -> list[str]:
         values = _string_list(raw_dimension.get("values"))
         raw_values = _string_list(raw_dimension.get("raw_values"))
         if kind:
-            lines.append(f"{kind}: values={', '.join(values)} raw={', '.join(raw_values)}")
+            lines.append(
+                f"{kind}: values={_compact_value_list(values)} "
+                f"raw={_compact_value_list(raw_values)}"
+            )
     return lines
+
+
+def _compact_value_list(values: Sequence[str]) -> str:
+    if len(values) <= MAX_FAMILY_MEMBERS_IN_PROMPT:
+        return ", ".join(values)
+    shown = ", ".join(values[:MAX_FAMILY_MEMBERS_IN_PROMPT])
+    return f"{shown}, ... {len(values) - MAX_FAMILY_MEMBERS_IN_PROMPT} more"
 
 
 def _bullet_lines(values: Iterable[str]) -> list[str]:

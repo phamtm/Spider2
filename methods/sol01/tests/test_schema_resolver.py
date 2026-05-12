@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 from sol01.execution.validation import validate_sql
 from sol01.models import (
     ColumnSchema,
@@ -165,6 +167,73 @@ def test_resolver_has_deterministic_table_order_and_compact_family_prompt():
     assert "join_candidate: Join candidate:" in context.prompt_context
 
 
+def test_resolver_expands_large_date_family_only_to_matching_member():
+    family, members = _github_daily_family(120)
+    matched_table = members[2]["table_full_name"]
+    index = {
+        family.metadata["canonical_member"]: _github_table("_20240101"),
+        matched_table: _github_table("_20240103"),
+    }
+
+    context = resolve_schema_context(
+        db="GITHUB_REPOS_DATE",
+        selected_objects=[SelectedSchemaObject(object_id=family.object_id, role="primary")],
+        canonical_schema_objects=[family],
+        db_index=index,
+        question="Show GitHub repo events for 2024-01-03.",
+        constraints=HybridPlanningConstraints(
+            date_start="2024-01-03",
+            date_end="2024-01-03",
+        ),
+    )
+
+    assert context.allowed_tables == [matched_table]
+    assert context.resolution_diagnostics["resolution_entries"][0]["reason"] == (
+        "explicit_constraints"
+    )
+    assert f"Physical members: {matched_table}" in context.prompt_context
+    assert "GITHUB_REPOS_DATE.DAY._20240104" not in context.prompt_context
+
+
+def test_resolver_keeps_large_broad_github_family_symbolic_and_budgeted():
+    family, members = _github_daily_family(1500)
+    index = {family.metadata["canonical_member"]: _github_table("_20240101")}
+
+    broad_context = resolve_schema_context(
+        db="GITHUB_REPOS_DATE",
+        selected_objects=[SelectedSchemaObject(object_id=family.object_id, role="primary")],
+        canonical_schema_objects=[family],
+        db_index=index,
+        question="Show every historical GitHub repository event table.",
+    )
+    include_all_context = resolve_schema_context(
+        db="GITHUB_REPOS_DATE",
+        selected_objects=[SelectedSchemaObject(object_id=family.object_id, role="primary")],
+        canonical_schema_objects=[family],
+        db_index=index,
+        question="Show GitHub repository event tables.",
+        constraints=HybridPlanningConstraints(include_all=True),
+    )
+
+    entry = broad_context.resolution_diagnostics["resolution_entries"][0]
+    include_all_entry = include_all_context.resolution_diagnostics["resolution_entries"][0]
+    prompt = broad_context.prompt_context
+
+    assert broad_context.allowed_tables == []
+    assert include_all_context.allowed_tables == []
+    assert entry["reason"] == "symbolic_broad_question"
+    assert include_all_entry["reason"] == "symbolic_include_all"
+    assert entry["symbolic"] is True
+    assert entry["matched_member_count"] == len(members)
+    assert broad_context.resolution_diagnostics["warnings"]
+    assert "expansion budget" in broad_context.resolution_diagnostics["warnings"][0]
+    assert "Physical members: kept symbolic (1500 matched; expansion budget 64)" in prompt
+    assert "Large-schema summary: github_repos_day_events" in prompt
+    assert "GITHUB_REPOS_DATE.DAY._20240101" in prompt
+    assert "GITHUB_REPOS_DATE.DAY._20240410" not in prompt
+    assert prompt.count("GITHUB_REPOS_DATE.DAY._") < 20
+
+
 def test_validation_accepts_non_canonical_family_member_from_resolved_allowed_tables():
     index = {f"DB.PUBLIC.SALES_{year}": _table(f"SALES_{year}") for year in (2022, 2023, 2024)}
     context = _resolve_family(
@@ -281,6 +350,83 @@ def _table(
         ddl=ddl or f"CREATE TABLE {name} (ORDER_ID TEXT, AMOUNT NUMBER);",
         columns=table_columns,
         searchable_text=name.lower(),
+    )
+
+
+def _github_daily_family(
+    member_count: int,
+) -> tuple[SchemaObject, list[dict[str, object]]]:
+    start = date(2024, 1, 1)
+    members = [_github_member(start + timedelta(days=offset)) for offset in range(member_count)]
+    member_refs = [str(member["table_full_name"]) for member in members]
+    raw_values = [
+        str(member["suffix_dimension"]["raw_value"])
+        for member in members
+        if isinstance(member.get("suffix_dimension"), dict)
+    ]
+    values = [
+        str(member["suffix_dimension"]["value"])
+        for member in members
+        if isinstance(member.get("suffix_dimension"), dict)
+    ]
+    family = SchemaObject(
+        object_id="family:GITHUB_REPOS_DATE.DAY:github_repos:12345678",
+        object_type="family",
+        name="GITHUB_REPOS_DATE.DAY github repos table family",
+        db="GITHUB_REPOS_DATE",
+        table_name=member_refs[0],
+        searchable_text="github repos daily family",
+        metadata={
+            "canonical_member": member_refs[0],
+            "member_table_refs": member_refs,
+            "members": members,
+            "member_count": member_count,
+            "common_columns": ["public", "actor", "created_at", "type", "repo"],
+            "suffix_dimensions": [
+                {
+                    "kind": "YYYYMMDD",
+                    "raw_values": raw_values,
+                    "values": values,
+                }
+            ],
+        },
+    )
+    return family, members
+
+
+def _github_member(day: date) -> dict[str, object]:
+    raw_value = day.strftime("%Y%m%d")
+    short_name = f"_{raw_value}"
+    return {
+        "table_full_name": f"GITHUB_REPOS_DATE.DAY.{short_name}",
+        "short_name": short_name,
+        "suffix_dimension": {
+            "kind": "YYYYMMDD",
+            "raw_stem": "_",
+            "normalized_stem": "github_repos",
+            "raw_value": raw_value,
+            "value": day.isoformat(),
+            "source_table_name": short_name,
+        },
+    }
+
+
+def _github_table(name: str) -> TableSchema:
+    full_name = f"GITHUB_REPOS_DATE.DAY.{name}"
+    return TableSchema(
+        name=name,
+        database_name="GITHUB_REPOS_DATE",
+        schema_name="DAY",
+        full_name=full_name,
+        ddl=f"CREATE TABLE {name} (public BOOLEAN, actor VARIANT, created_at TIMESTAMP);",
+        columns=[
+            ColumnSchema(name="public", type="BOOLEAN"),
+            ColumnSchema(name="actor", type="VARIANT"),
+            ColumnSchema(name="created_at", type="TIMESTAMP"),
+            ColumnSchema(name="type", type="TEXT"),
+            ColumnSchema(name="repo", type="VARIANT"),
+        ],
+        searchable_text="github archive events",
     )
 
 
