@@ -26,7 +26,8 @@ def test_query_construction_extracts_signals_and_clips_linked_docs_by_overlap():
     )
 
     assert query.exact_literals == ("closed", "VIP_CUSTOMER")
-    assert "2024-01-03" in query.dates
+    assert query.dates == ("2024-01-03",)
+    assert "2024" in query.years
     assert "DB.PUBLIC.ORDERS" in query.identifiers
     assert "FY_2024" in query.uppercase_codes
     assert "vip_customer" in query.normalized_tokens
@@ -61,6 +62,8 @@ def test_hybrid_retrieval_merges_sparse_and_exact_hits():
     assert {"sparse", "exact"}.issubset(
         evidence["sample_value:DB.PUBLIC.ORDERS#STATUS:11111111::sample_value"]
     )
+    assert set(diagnostics["hit_counts"]) == {"sparse", "exact"}
+    assert set(diagnostics["candidate_counts"]) == {"merged", "by_type"}
 
 
 def test_type_quotas_deduplicate_and_limit_candidates():
@@ -80,7 +83,7 @@ def test_type_quotas_deduplicate_and_limit_candidates():
         },
     )
 
-    assert diagnostics["hit_counts"]["by_type"]["column"] == 1
+    assert diagnostics["candidate_counts"]["by_type"]["column"] == 1
 
 
 def test_object_aggregation_lifts_parent_tables_and_families_from_child_hits():
@@ -96,6 +99,37 @@ def test_object_aggregation_lifts_parent_tables_and_families_from_child_hits():
     assert scores["table:DB.PUBLIC.ORDERS"] > scores["column:DB.PUBLIC.ORDERS#STATUS"]
     assert scores["table:DB.PUBLIC.CUSTOMERS"] > 0
     assert scores["family:DB.PUBLIC:orders_family:deadbeef"] > 0
+
+
+def test_exact_date_table_and_column_terms_lift_objects_without_sparse_hits():
+    index = _exact_only_index()
+
+    objects, diagnostics = retrieve_schema_objects(
+        index,
+        "Count DB.PUBLIC._20240103 rows by CREATED_AT on 2024-01-03",
+        config=SchemaRetrievalConfig(object_top_k=5),
+    )
+
+    assert diagnostics["hit_counts"]["sparse"] == 0
+    assert diagnostics["hit_counts"]["exact"] >= 2
+    selected = [obj.schema_object.object_id for obj in objects]
+    assert "table:DB.PUBLIC._20240103" in selected
+    assert "column:DB.PUBLIC._20240103#CREATED_AT" in selected
+    assert all(hasattr(obj, "schema_object") and hasattr(obj, "chunks") for obj in objects)
+
+
+def test_curated_summary_aliases_are_exact_retrieval_terms():
+    index = _exact_only_index()
+
+    objects, diagnostics = retrieve_schema_objects(
+        index,
+        "Use the daily github archive for event counts",
+        config=SchemaRetrievalConfig(object_top_k=5),
+    )
+
+    assert diagnostics["hit_counts"]["sparse"] == 0
+    assert diagnostics["hit_counts"]["exact"] >= 1
+    assert objects[0].schema_object.object_id == "family:DB.PUBLIC:github_events:12345678"
 
 
 def _fake_index() -> SchemaRetrievalIndex:
@@ -227,6 +261,82 @@ def _fake_index() -> SchemaRetrievalIndex:
         db="DB",
         cache_key="test",
         cache_dir=Path("/tmp/test-schema-index"),
+        manifest={},
+        objects=objects,
+        chunks=chunks,
+        sparse=_build_sparse_index(chunks),
+    )
+
+
+def _exact_only_index() -> SchemaRetrievalIndex:
+    objects = [
+        SchemaObject(
+            object_id="table:DB.PUBLIC._20240103",
+            object_type="table",
+            name="_20240103",
+            db="DB",
+            table_name="DB.PUBLIC._20240103",
+            searchable_text="partition table",
+        ),
+        SchemaObject(
+            object_id="column:DB.PUBLIC._20240103#CREATED_AT",
+            object_type="column",
+            name="CREATED_AT",
+            db="DB",
+            table_name="DB.PUBLIC._20240103",
+            column_name="CREATED_AT",
+            searchable_text="timestamp column",
+        ),
+        SchemaObject(
+            object_id="family:DB.PUBLIC:github_events:12345678",
+            object_type="family",
+            name="github_events",
+            db="DB",
+            searchable_text="github events family",
+            metadata={"member_table_refs": ["DB.PUBLIC._20240103"]},
+        ),
+    ]
+    chunks = [
+        RetrievalChunk(
+            chunk_id="table:DB.PUBLIC._20240103::table",
+            object_id="table:DB.PUBLIC._20240103",
+            chunk_type="table",
+            bm25_text="partition shard",
+            prompt_text="Table DB.PUBLIC._20240103 with CREATED_AT.",
+            metadata={
+                "table_name": "DB.PUBLIC._20240103",
+                "short_name": "_20240103",
+            },
+        ),
+        RetrievalChunk(
+            chunk_id="column:DB.PUBLIC._20240103#CREATED_AT::column",
+            object_id="column:DB.PUBLIC._20240103#CREATED_AT",
+            chunk_type="column",
+            parent_object_ids=["table:DB.PUBLIC._20240103"],
+            bm25_text="timestamp field",
+            prompt_text="Column CREATED_AT on DB.PUBLIC._20240103.",
+            metadata={
+                "table_name": "DB.PUBLIC._20240103",
+                "column_name": "CREATED_AT",
+            },
+        ),
+        RetrievalChunk(
+            chunk_id="family:DB.PUBLIC:github_events:12345678::table_family",
+            object_id="family:DB.PUBLIC:github_events:12345678",
+            chunk_type="table_family",
+            parent_object_ids=["table:DB.PUBLIC._20240103"],
+            bm25_text="partition shard",
+            prompt_text="Curated table family.",
+            metadata={
+                "member_table_refs": ["DB.PUBLIC._20240103"],
+                "summary_aliases": ["daily github archive", "repository event"],
+            },
+        ),
+    ]
+    return SchemaRetrievalIndex(
+        db="DB",
+        cache_key="test-exact",
+        cache_dir=Path("/tmp/test-schema-index-exact"),
         manifest={},
         objects=objects,
         chunks=chunks,

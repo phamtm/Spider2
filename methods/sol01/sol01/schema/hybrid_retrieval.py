@@ -1,4 +1,4 @@
-"""Hybrid query-time retrieval over versioned schema chunks."""
+"""Lexical query-time retrieval over versioned schema chunks."""
 
 from __future__ import annotations
 
@@ -31,13 +31,14 @@ _QUOTED_LITERAL_RE = re.compile(r"'([^']+)'|\"([^\"]+)\"")
 
 @dataclass(frozen=True)
 class RetrievalQuery:
-    """Search text and extracted high-signal terms for hybrid schema retrieval."""
+    """Search text and extracted high-signal terms for schema retrieval."""
 
     text: str
     question: str
     linked_doc_context: str
     exact_literals: tuple[str, ...]
     dates: tuple[str, ...]
+    years: tuple[str, ...]
     identifiers: tuple[str, ...]
     uppercase_codes: tuple[str, ...]
     normalized_tokens: tuple[str, ...]
@@ -60,6 +61,15 @@ class _Candidate:
         return self.pre_score
 
 
+@dataclass(frozen=True)
+class _ExactLookup:
+    text: str
+    tokens: frozenset[str]
+    table_names: frozenset[str]
+    column_names: frozenset[str]
+    aliases: tuple[str, ...]
+
+
 def build_retrieval_query(
     question: str,
     *,
@@ -76,11 +86,12 @@ def build_retrieval_query(
             *(_clean_text(value) for value in exact_literals),
         ]
     )
-    dates = _stable_unique([*_DATE_RE.findall(clean_question), *_YEAR_RE.findall(clean_question)])
+    dates = _stable_unique(_DATE_RE.findall(clean_question))
+    years = _stable_unique(_YEAR_RE.findall(clean_question))
     identifiers = _stable_unique(_DOTTED_OR_UNDERSCORE_RE.findall(clean_question))
     uppercase_codes = _stable_unique(_UPPER_CODE_RE.findall(clean_question))
     normalized_tokens = _normalized_tokens(
-        [clean_question, *literals, *dates, *identifiers, *uppercase_codes]
+        [clean_question, *literals, *dates, *years, *identifiers, *uppercase_codes]
     )
     linked_doc_context = clip_linked_docs(
         linked_docs,
@@ -102,6 +113,7 @@ def build_retrieval_query(
         linked_doc_context=linked_doc_context,
         exact_literals=tuple(literals),
         dates=tuple(dates),
+        years=tuple(years),
         identifiers=tuple(identifiers),
         uppercase_codes=tuple(uppercase_codes),
         normalized_tokens=tuple(normalized_tokens),
@@ -239,24 +251,165 @@ def _sparse_hits(index: SchemaRetrievalIndex, query_text: str) -> list[tuple[str
 
 
 def _exact_hits(chunks: Sequence[RetrievalChunk], query: RetrievalQuery) -> list[tuple[str, float]]:
-    phrases = _stable_unique(
-        [
-            *query.exact_literals,
-            *query.dates,
-            *query.identifiers,
-            *query.uppercase_codes,
-        ]
-    )
-    tokens = [token for token in query.normalized_tokens if len(token) >= 3]
     hits: list[tuple[str, float]] = []
     for chunk in chunks:
-        haystack = _chunk_lookup_text(chunk)
-        phrase_hits = [phrase for phrase in phrases if phrase.casefold() in haystack]
-        token_hits = [token for token in tokens if token in haystack]
-        score = (EXACT_BOOST * len(phrase_hits)) + (0.75 * len(token_hits))
+        lookup = _exact_lookup(chunk)
+        score = _exact_score(query, lookup)
         if score > 0.0:
             hits.append((chunk.chunk_id, score))
     return sorted(hits, key=lambda item: (-item[1], item[0]))
+
+
+def _exact_score(query: RetrievalQuery, lookup: _ExactLookup) -> float:
+    score = 0.0
+    for literal in query.exact_literals:
+        if _contains_phrase(lookup.text, literal):
+            score += EXACT_BOOST
+    for date in query.dates:
+        score += EXACT_BOOST * _variant_match_count(_date_variants(date), lookup)
+    for year in query.years:
+        if _contains_token(lookup.tokens, year):
+            score += EXACT_BOOST * 0.75
+    for identifier in query.identifiers:
+        score += EXACT_BOOST * _identifier_match_count(identifier, lookup)
+    for code in query.uppercase_codes:
+        if _contains_token(lookup.tokens, code):
+            score += EXACT_BOOST * 0.75
+    for token in query.normalized_tokens:
+        if token in lookup.table_names:
+            score += EXACT_BOOST
+        if token in lookup.column_names:
+            score += EXACT_BOOST
+    for alias in lookup.aliases:
+        if _contains_phrase(query.text.casefold(), alias):
+            score += EXACT_BOOST * 1.5
+    return score
+
+
+def _exact_lookup(chunk: RetrievalChunk) -> _ExactLookup:
+    metadata_strings = _flatten_strings(chunk.metadata)
+    lookup_text = _join_text(
+        [
+            chunk.chunk_id,
+            chunk.object_id,
+            chunk.bm25_text,
+            chunk.prompt_text,
+            chunk.source_definition,
+            chunk.inferred_usage,
+            " ".join(metadata_strings),
+        ]
+    ).casefold()
+    return _ExactLookup(
+        text=lookup_text,
+        tokens=frozenset(_tokenize(lookup_text)),
+        table_names=frozenset(_table_name_terms(_table_name_values(chunk))),
+        column_names=frozenset(_column_name_terms(_column_name_values(chunk))),
+        aliases=tuple(alias.casefold() for alias in _summary_aliases(chunk) if alias.strip()),
+    )
+
+
+def _table_name_values(chunk: RetrievalChunk) -> list[str]:
+    values = [
+        str(chunk.metadata.get("table_name") or ""),
+        str(chunk.metadata.get("table_full_name") or ""),
+        str(chunk.metadata.get("full_name") or ""),
+        str(chunk.metadata.get("short_name") or ""),
+    ]
+    if chunk.object_id.startswith("table:"):
+        values.append(chunk.object_id.removeprefix("table:"))
+    return [value for value in values if value.strip()]
+
+
+def _column_name_values(chunk: RetrievalChunk) -> list[str]:
+    values = [
+        str(chunk.metadata.get("column_name") or ""),
+        str(chunk.metadata.get("normalized_column_name") or ""),
+    ]
+    if chunk.object_id.startswith("column:") and "#" in chunk.object_id:
+        values.append(chunk.object_id.rsplit("#", 1)[-1])
+    return [value for value in values if value.strip()]
+
+
+def _summary_aliases(chunk: RetrievalChunk) -> list[str]:
+    aliases: list[str] = []
+    for key in ("aliases", "summary_aliases", "curated_summary_aliases"):
+        aliases.extend(_string_list(chunk.metadata.get(key)))
+    summaries = chunk.metadata.get("large_schema_summaries")
+    if isinstance(summaries, Sequence) and not isinstance(summaries, str):
+        for summary in summaries:
+            if isinstance(summary, Mapping):
+                aliases.extend(_string_list(summary.get("aliases")))
+    return _stable_unique(aliases)
+
+
+def _table_name_terms(values: Sequence[str]) -> list[str]:
+    terms: list[str] = []
+    for value in values:
+        cleaned = _clean_text(value)
+        short_name = cleaned.rsplit(".", 1)[-1]
+        terms.extend([cleaned.casefold(), short_name.casefold()])
+        terms.extend(_normalized_tokens([short_name]))
+    return _stable_unique(terms)
+
+
+def _column_name_terms(values: Sequence[str]) -> list[str]:
+    terms: list[str] = []
+    for value in values:
+        cleaned = _clean_text(value)
+        terms.append(cleaned.casefold())
+        terms.extend(_normalized_tokens([cleaned]))
+    return _stable_unique(terms)
+
+
+def _identifier_variants(identifier: str) -> list[str]:
+    cleaned = _clean_text(identifier)
+    variants = [cleaned.casefold()]
+    if "." in cleaned:
+        variants.append(cleaned.rsplit(".", 1)[-1].casefold())
+    return _stable_unique(variants)
+
+
+def _identifier_match_count(identifier: str, lookup: _ExactLookup) -> int:
+    variants = _identifier_variants(identifier)
+    return sum(1 for variant in variants if _contains_token_or_phrase(lookup, variant))
+
+
+def _date_variants(date: str) -> list[str]:
+    match = re.fullmatch(r"(?P<year>\d{4})[-/](?P<month>\d{1,2})[-/](?P<day>\d{1,2})", date)
+    if match is None:
+        return [date]
+    year = match.group("year")
+    month = match.group("month").zfill(2)
+    day = match.group("day").zfill(2)
+    compact = f"{year}{month}{day}"
+    return [date, f"{year}-{month}-{day}", f"{year}/{month}/{day}", compact, f"_{compact}"]
+
+
+def _variant_match_count(variants: Sequence[str], lookup: _ExactLookup) -> int:
+    return sum(
+        1 for variant in _stable_unique(variants) if _contains_token_or_phrase(lookup, variant)
+    )
+
+
+def _contains_token_or_phrase(lookup: _ExactLookup, value: str) -> bool:
+    normalized = value.casefold()
+    if _contains_token(lookup.tokens, normalized):
+        return True
+    return _contains_phrase(lookup.text, normalized)
+
+
+def _contains_token(tokens: frozenset[str], value: str) -> bool:
+    return value.casefold() in tokens
+
+
+def _contains_phrase(haystack: str, phrase: str) -> bool:
+    normalized = phrase.casefold().strip()
+    if not normalized:
+        return False
+    if re.fullmatch(r"[A-Za-z0-9_]+", normalized):
+        boundary_pattern = rf"(?<![A-Za-z0-9_]){re.escape(normalized)}(?![A-Za-z0-9_])"
+        return re.search(boundary_pattern, haystack) is not None
+    return normalized in haystack
 
 
 def _quota_hits(
@@ -398,6 +551,7 @@ def _diagnostics(
             "text": query.text,
             "exact_literals": list(query.exact_literals),
             "dates": list(query.dates),
+            "years": list(query.years),
             "identifiers": list(query.identifiers),
             "uppercase_codes": list(query.uppercase_codes),
             "normalized_tokens": list(query.normalized_tokens[:50]),
@@ -406,6 +560,8 @@ def _diagnostics(
         "hit_counts": {
             "sparse": len(sparse_hits),
             "exact": len(exact_hits),
+        },
+        "candidate_counts": {
             "merged": len(candidates),
             "by_type": dict(sorted(candidate_types.items())),
         },
@@ -457,18 +613,20 @@ def _tokenize(text: str) -> list[str]:
     return _normalized_tokens([text])
 
 
-def _chunk_lookup_text(chunk: RetrievalChunk) -> str:
-    return _join_text(
-        [
-            chunk.chunk_id,
-            chunk.object_id,
-            chunk.bm25_text,
-            chunk.prompt_text,
-            chunk.source_definition,
-            chunk.inferred_usage,
-            " ".join(_string_list(chunk.metadata.values())),
+def _flatten_strings(value: object) -> list[str]:
+    if isinstance(value, Mapping):
+        return [
+            item
+            for nested_value in value.values()
+            for item in _flatten_strings(nested_value)
+            if item
         ]
-    ).casefold()
+    if isinstance(value, Sequence) and not isinstance(value, str):
+        return [item for nested_value in value for item in _flatten_strings(nested_value) if item]
+    if value is None:
+        return []
+    text = str(value).strip()
+    return [text] if text else []
 
 
 def _clean_text(text: str) -> str:
