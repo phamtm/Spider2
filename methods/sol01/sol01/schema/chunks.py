@@ -7,6 +7,10 @@ from collections.abc import Iterable
 from typing import Any
 
 from sol01.models import RetrievalChunk, SchemaObject, is_schema_object_id
+from sol01.schema.large_schema_summaries import (
+    LargeSchemaSummary,
+    load_large_schema_summary_registry,
+)
 
 MAX_COLUMNS_IN_CHUNK = 30
 MAX_FAMILY_MEMBERS_IN_PROMPT = 12
@@ -38,6 +42,10 @@ def _render_schema_chunk(obj: SchemaObject) -> RetrievalChunk:
 
 
 def _table_chunk(obj: SchemaObject) -> RetrievalChunk:
+    summaries = _large_schema_summaries_for_obj(obj)
+    if summaries:
+        return _summary_table_chunk(obj, summaries)
+
     columns = _column_summaries(obj.metadata.get("columns"))
     column_names = [column["name"] for column in columns]
     displayed_columns = _bounded_list(
@@ -230,6 +238,10 @@ def _sample_value_chunk(obj: SchemaObject) -> RetrievalChunk:
 
 
 def _table_family_chunk(obj: SchemaObject) -> RetrievalChunk:
+    summaries = _large_schema_summaries_for_obj(obj)
+    if summaries:
+        return _summary_table_family_chunk(obj, summaries)
+
     members = _string_list(obj.metadata.get("member_table_refs"))
     common_columns = _string_list(obj.metadata.get("common_columns"))
     family_kind = _metadata_text(obj, "family_kind")
@@ -274,6 +286,87 @@ def _table_family_chunk(obj: SchemaObject) -> RetrievalChunk:
     )
 
 
+def _summary_table_chunk(
+    obj: SchemaObject,
+    summaries: list[LargeSchemaSummary],
+) -> RetrievalChunk:
+    table_ref = obj.table_name or _metadata_text(obj, "full_name") or obj.name
+    summary_text = _summary_text(summaries)
+    metadata = {**_base_metadata(obj), **_summary_chunk_metadata(summaries)}
+    return RetrievalChunk(
+        chunk_id=f"{obj.object_id}::table",
+        object_id=obj.object_id,
+        chunk_type="table",
+        bm25_text=_join_text(
+            [
+                *_identifier_terms(obj),
+                table_ref,
+                *_summary_bm25_terms(summaries),
+            ]
+        ),
+        prompt_text=_join_sentences(
+            [
+                f"Table {table_ref}.",
+                summary_text,
+            ]
+        ),
+        source_definition=_join_sentences(
+            [
+                f"Source table {table_ref}.",
+                summary_text,
+            ]
+        ),
+        source="schema",
+        metadata=metadata,
+    )
+
+
+def _summary_table_family_chunk(
+    obj: SchemaObject,
+    summaries: list[LargeSchemaSummary],
+) -> RetrievalChunk:
+    members = _string_list(obj.metadata.get("member_table_refs"))
+    common_columns = _string_list(obj.metadata.get("common_columns"))
+    canonical = _metadata_text(obj, "canonical_member")
+    summary_text = _summary_text(summaries)
+    metadata = {**_base_metadata(obj), **_summary_chunk_metadata(summaries)}
+    return RetrievalChunk(
+        chunk_id=f"{obj.object_id}::table_family",
+        object_id=obj.object_id,
+        chunk_type="table_family",
+        parent_object_ids=_table_parent_ids_from_names(members),
+        bm25_text=_join_text(
+            [
+                *_identifier_terms(obj, extra=[canonical, *common_columns]),
+                *_summary_bm25_terms(summaries),
+            ]
+        ),
+        prompt_text=_join_sentences(
+            [
+                f"Table family {obj.name}.",
+                f"Canonical member: {canonical}." if canonical else "",
+                _field_list("Common columns", common_columns),
+                summary_text,
+            ]
+        ),
+        source_definition=_join_sentences(
+            [
+                f"Table-family record {obj.name}.",
+                f"Canonical member: {canonical}." if canonical else "",
+                summary_text,
+            ]
+        ),
+        inferred_usage=_join_sentences(
+            [
+                "Use curated summary evidence for this large table family.",
+                "Expand physical members only when question constraints require it.",
+            ]
+        ),
+        source="family",
+        metadata=metadata,
+    )
+
+
 def _base_metadata(obj: SchemaObject) -> dict[str, object]:
     return {
         "object_type": obj.object_type,
@@ -281,6 +374,108 @@ def _base_metadata(obj: SchemaObject) -> dict[str, object]:
         "table_name": obj.table_name,
         "column_name": obj.column_name,
     }
+
+
+def _large_schema_summaries_for_obj(obj: SchemaObject) -> list[LargeSchemaSummary]:
+    if obj.object_type == "table":
+        refs = _table_ref_candidates(obj)
+    elif obj.object_type == "family":
+        refs = _string_list(obj.metadata.get("member_table_refs"))
+        canonical = _metadata_text(obj, "canonical_member")
+        if canonical:
+            refs = [canonical, *refs]
+    else:
+        return []
+    return _large_schema_summaries_for_refs(refs)
+
+
+def _large_schema_summaries_for_refs(refs: Iterable[str]) -> list[LargeSchemaSummary]:
+    registry = load_large_schema_summary_registry()
+    by_id: dict[str, LargeSchemaSummary] = {}
+    for ref in refs:
+        if ref.count(".") not in {1, 2}:
+            continue
+        for summary in registry.match_table_ref(ref):
+            by_id.setdefault(summary.summary_id, summary)
+    return [by_id[summary_id] for summary_id in sorted(by_id)]
+
+
+def _table_ref_candidates(obj: SchemaObject) -> list[str]:
+    candidates = [
+        obj.table_name,
+        _metadata_text(obj, "full_name"),
+        _metadata_text(obj, "table_full_name"),
+    ]
+    database = _metadata_text(obj, "database_name")
+    schema_name = _metadata_text(obj, "schema_name")
+    short_name = _metadata_text(obj, "short_name")
+    if schema_name and short_name:
+        candidates.append(
+            f"{database}.{schema_name}.{short_name}" if database else f"{schema_name}.{short_name}"
+        )
+    return _stable_unique([candidate for candidate in candidates if candidate])
+
+
+def _summary_chunk_metadata(summaries: list[LargeSchemaSummary]) -> dict[str, object]:
+    return {
+        "large_schema_summaries": [_summary_payload(summary) for summary in summaries],
+        "summary_ids": [summary.summary_id for summary in summaries],
+        "summary_aliases": _stable_unique(
+            alias for summary in summaries for alias in summary.aliases
+        ),
+    }
+
+
+def _summary_payload(summary: LargeSchemaSummary) -> dict[str, object]:
+    return {
+        "summary_id": summary.summary_id,
+        "purpose": summary.purpose,
+        "grain": summary.grain,
+        "stable_columns": summary.stable_columns,
+        "repeated_column_rules": summary.repeated_column_rules,
+        "inclusive_ranges": summary.inclusive_ranges,
+        "quote_spelling_rules": summary.quote_spelling_rules,
+        "examples": summary.examples,
+        "aliases": summary.aliases,
+    }
+
+
+def _summary_text(summaries: list[LargeSchemaSummary]) -> str:
+    lines: list[str] = []
+    for summary in summaries:
+        lines.extend(
+            [
+                f"Large-schema summary: {summary.summary_id}.",
+                f"Purpose: {summary.purpose}",
+                f"Grain: {summary.grain}",
+                _field_list("Stable exact columns", summary.stable_columns),
+                _field_list("Repeated or partition column rules", summary.repeated_column_rules),
+                _field_list("Inclusive ranges", summary.inclusive_ranges),
+                _field_list("Quote and spelling rules", summary.quote_spelling_rules),
+                _field_list("Exact safe examples", summary.examples),
+                _field_list("Aliases", summary.aliases),
+            ]
+        )
+    return _join_sentences(lines)
+
+
+def _summary_bm25_terms(summaries: list[LargeSchemaSummary]) -> list[str]:
+    terms: list[str] = []
+    for summary in summaries:
+        terms.extend(
+            [
+                summary.summary_id,
+                summary.purpose,
+                summary.grain,
+                *summary.stable_columns,
+                *summary.repeated_column_rules,
+                *summary.inclusive_ranges,
+                *summary.quote_spelling_rules,
+                *summary.examples,
+                *summary.aliases,
+            ]
+        )
+    return terms
 
 
 def _column_summaries(raw_columns: object) -> list[dict[str, str]]:

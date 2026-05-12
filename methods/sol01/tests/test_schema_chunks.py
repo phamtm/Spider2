@@ -168,3 +168,73 @@ def test_family_prompt_text_renders_canonical_structure_compactly():
     assert "members=3" in family_chunk.prompt_text
     assert "Common columns: ORDER_ID, AMOUNT." in family_chunk.prompt_text
     assert "Partition dimensions: YYYY values 2022, 2023, 2024." in family_chunk.prompt_text
+
+
+def test_covered_large_table_chunk_uses_curated_summary_not_raw_metadata():
+    objects = build_schema_objects(
+        {
+            "GITHUB_REPOS_DATE.DAY._20240103": TableSchema(
+                name="_20240103",
+                database_name="GITHUB_REPOS_DATE",
+                schema_name="DAY",
+                full_name="GITHUB_REPOS_DATE.DAY._20240103",
+                ddl="CREATE TABLE _20240103 (SECRET_DDL_MARKER TEXT);",
+                columns=[
+                    ColumnSchema(name="public", type="BOOLEAN"),
+                    ColumnSchema(name="actor", type="VARIANT"),
+                    ColumnSchema(name="created_at", type="TIMESTAMP"),
+                    ColumnSchema(name="type", type="TEXT"),
+                    ColumnSchema(name="repo", type="VARIANT"),
+                    ColumnSchema(name="payload", type="VARIANT"),
+                    ColumnSchema(name="id", type="TEXT"),
+                    ColumnSchema(name="other", type="VARIANT"),
+                    ColumnSchema(name="org", type="VARIANT"),
+                    ColumnSchema(name="SECRET_COLUMN_MARKER", type="TEXT"),
+                ],
+                sample_rows=[{"SECRET_SAMPLE_MARKER": "hidden"}],
+                searchable_text="github archive events",
+            )
+        }
+    )
+
+    table_chunk = next(
+        chunk for chunk in render_schema_chunks(objects) if chunk.chunk_type == "table"
+    )
+
+    assert "Large-schema summary: github_repos_day_events." in table_chunk.prompt_text
+    assert "daily github archive" in table_chunk.bm25_text
+    assert "CREATE TABLE" not in table_chunk.prompt_text
+    assert "SECRET_DDL_MARKER" not in table_chunk.prompt_text
+    assert "SECRET_COLUMN_MARKER" not in table_chunk.prompt_text
+    assert "SECRET_SAMPLE_MARKER" not in table_chunk.prompt_text
+    assert table_chunk.metadata["summary_ids"] == ["github_repos_day_events"]
+    assert "daily github archive" in table_chunk.metadata["summary_aliases"]
+
+
+def test_covered_large_table_family_chunk_uses_curated_summary_not_member_dump():
+    family = SchemaObject(
+        object_id="family:GITHUB_REPOS_DATE.DAY:github_repos:12345678",
+        object_type="family",
+        name="GITHUB_REPOS_DATE.DAY github repos table family",
+        db="GITHUB_REPOS_DATE",
+        table_name="GITHUB_REPOS_DATE.DAY._20240101",
+        searchable_text="github repos daily family",
+        metadata={
+            "canonical_member": "GITHUB_REPOS_DATE.DAY._20240101",
+            "member_table_refs": [
+                "GITHUB_REPOS_DATE.DAY._20240101",
+                "GITHUB_REPOS_DATE.DAY._20240102",
+                "GITHUB_REPOS_DATE.DAY._20240103",
+            ],
+            "common_columns": ["public", "actor", "created_at", "type", "repo"],
+        },
+    )
+
+    family_chunk = next(
+        chunk for chunk in render_schema_chunks([family]) if chunk.chunk_type == "table_family"
+    )
+
+    assert "Large-schema summary: github_repos_day_events." in family_chunk.prompt_text
+    assert "Member preview" not in family_chunk.prompt_text
+    assert "daily github archive" in family_chunk.bm25_text
+    assert family_chunk.metadata["summary_ids"] == ["github_repos_day_events"]

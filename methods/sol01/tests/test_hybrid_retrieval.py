@@ -5,12 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from sol01.infra.config import SchemaRetrievalConfig
-from sol01.models import RetrievalChunk, SchemaObject
+from sol01.models import ColumnSchema, RetrievalChunk, SchemaObject, TableSchema
+from sol01.schema.chunks import render_schema_chunks
 from sol01.schema.hybrid_retrieval import (
     build_retrieval_query,
     clip_linked_docs,
     retrieve_schema_objects,
 )
+from sol01.schema.objects import build_schema_objects
 from sol01.schema.retrieval_index import SchemaRetrievalIndex, _build_sparse_index
 
 
@@ -130,6 +132,53 @@ def test_curated_summary_aliases_are_exact_retrieval_terms():
     assert diagnostics["hit_counts"]["sparse"] == 0
     assert diagnostics["hit_counts"]["exact"] >= 1
     assert objects[0].schema_object.object_id == "family:DB.PUBLIC:github_events:12345678"
+
+
+def test_curated_summary_aliases_are_searchable_from_rendered_chunks():
+    table = TableSchema(
+        name="_20240103",
+        database_name="GITHUB_REPOS_DATE",
+        schema_name="DAY",
+        full_name="GITHUB_REPOS_DATE.DAY._20240103",
+        ddl="CREATE TABLE _20240103 (SECRET_DDL_MARKER TEXT);",
+        columns=[
+            ColumnSchema(name="public", type="BOOLEAN"),
+            ColumnSchema(name="actor", type="VARIANT"),
+            ColumnSchema(name="created_at", type="TIMESTAMP"),
+            ColumnSchema(name="type", type="TEXT"),
+            ColumnSchema(name="repo", type="VARIANT"),
+            ColumnSchema(name="payload", type="VARIANT"),
+            ColumnSchema(name="id", type="TEXT"),
+            ColumnSchema(name="other", type="VARIANT"),
+            ColumnSchema(name="org", type="VARIANT"),
+        ],
+        sample_rows=[],
+        searchable_text="github events",
+    )
+    objects = build_schema_objects({"GITHUB_REPOS_DATE.DAY._20240103": table})
+    chunks = render_schema_chunks(objects)
+    index = SchemaRetrievalIndex(
+        db="GITHUB_REPOS_DATE",
+        cache_key="summary-rendered",
+        cache_dir=Path("/tmp/test-schema-index-summary-rendered"),
+        manifest={},
+        objects=objects,
+        chunks=chunks,
+        sparse=_build_sparse_index(chunks),
+    )
+
+    retrieved, diagnostics = retrieve_schema_objects(
+        index,
+        "Count daily github archive repository events",
+        config=SchemaRetrievalConfig(object_top_k=5),
+    )
+
+    assert diagnostics["hit_counts"]["sparse"] > 0
+    assert diagnostics["hit_counts"]["exact"] > 0
+    assert retrieved[0].schema_object.object_id == "table:GITHUB_REPOS_DATE.DAY._20240103"
+    assert (
+        "Large-schema summary: github_repos_day_events." in retrieved[0].chunks[0].chunk.prompt_text
+    )
 
 
 def _fake_index() -> SchemaRetrievalIndex:

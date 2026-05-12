@@ -20,6 +20,8 @@ from sol01.models import (
     TableSchema,
     Task,
 )
+from sol01.schema.chunks import render_schema_chunks
+from sol01.schema.objects import build_schema_objects
 
 
 def test_retrieval_planning_prompt_uses_retrieved_objects_without_full_schema_summary():
@@ -42,6 +44,62 @@ def test_retrieval_planning_prompt_uses_retrieved_objects_without_full_schema_su
     assert "Schema summary:" not in prompt
     assert "CREATE TABLE" not in prompt
     assert len(prompt.split("Document context:\n", 1)[1].split("\n\n", 1)[0]) <= 123
+
+
+def test_retrieval_planning_prompt_uses_curated_summary_evidence_for_covered_tables():
+    table = TableSchema(
+        name="_20240103",
+        database_name="GITHUB_REPOS_DATE",
+        schema_name="DAY",
+        full_name="GITHUB_REPOS_DATE.DAY._20240103",
+        ddl="CREATE TABLE _20240103 (SECRET_DDL_MARKER TEXT);",
+        columns=[
+            ColumnSchema(name="public", type="BOOLEAN"),
+            ColumnSchema(name="actor", type="VARIANT"),
+            ColumnSchema(name="created_at", type="TIMESTAMP"),
+            ColumnSchema(name="type", type="TEXT"),
+            ColumnSchema(name="repo", type="VARIANT"),
+            ColumnSchema(name="payload", type="VARIANT"),
+            ColumnSchema(name="id", type="TEXT"),
+            ColumnSchema(name="other", type="VARIANT"),
+            ColumnSchema(name="org", type="VARIANT"),
+        ],
+        sample_rows=[{"SECRET_SAMPLE_MARKER": "hidden"}],
+        searchable_text="github event archive",
+    )
+    schema_object = next(
+        obj
+        for obj in build_schema_objects({"GITHUB_REPOS_DATE.DAY._20240103": table})
+        if obj.object_type == "table"
+    )
+    chunk = next(
+        chunk for chunk in render_schema_chunks([schema_object]) if chunk.chunk_type == "table"
+    )
+    prompt = _retrieval_planning_user_prompt(
+        Task(
+            instance_id="sf_bq_test",
+            db="GITHUB_REPOS_DATE",
+            question="How many daily github archive events occurred on 2024-01-03?",
+        ),
+        "GITHUB_REPOS_DATE",
+        "",
+        [
+            RetrievedSchemaObject(
+                schema_object=schema_object,
+                chunks=[RetrievedChunk(chunk=chunk, rank=1, score=1.0)],
+                rank=1,
+                score=1.0,
+            )
+        ],
+    )
+
+    assert "Available object ids:" in prompt
+    assert "table:GITHUB_REPOS_DATE.DAY._20240103" in prompt
+    assert "Large-schema summary: github_repos_day_events." in prompt
+    assert "daily github archive" in prompt
+    assert "CREATE TABLE" not in prompt
+    assert "SECRET_DDL_MARKER" not in prompt
+    assert "SECRET_SAMPLE_MARKER" not in prompt
 
 
 def test_hybrid_planning_decision_constraints_have_defaults_and_parse_values():
