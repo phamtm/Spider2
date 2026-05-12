@@ -101,11 +101,6 @@ def build_retrieval_index(
     config = config or SchemaRetrievalConfig()
     db_index = dict(db_index) if db_index is not None else _load_db_index(db)
     source_hash = schema_source_hash(db_index)
-    objects = build_schema_objects(
-        db_index,
-        family_similarity_threshold=config.family_similarity_threshold,
-    )
-    chunks = render_schema_chunks(objects)
     curated_summary_registry_hash = large_schema_summary_registry_hash(
         curated_summary_registry_path
     )
@@ -125,8 +120,6 @@ def build_retrieval_index(
         "schema retrieval index start",
         db=db,
         table_count=len(db_index),
-        object_count=len(objects),
-        chunk_count=len(chunks),
         cache_key=cache_key,
     )
 
@@ -214,6 +207,19 @@ def build_retrieval_index(
 
         if version_dir.exists():
             _quarantine_invalid_version_directory(version_dir)
+
+        objects = build_schema_objects(
+            db_index,
+            family_similarity_threshold=config.family_similarity_threshold,
+        )
+        chunks = render_schema_chunks(objects)
+        logger.info(
+            "schema retrieval index objects rendered",
+            db=db,
+            cache_key=cache_key,
+            object_count=len(objects),
+            chunk_count=len(chunks),
+        )
 
         temp_dir = _new_temp_version_dir(cache_root, db, cache_key)
         try:

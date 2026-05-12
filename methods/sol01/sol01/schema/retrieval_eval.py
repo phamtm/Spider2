@@ -21,7 +21,7 @@ from sol01.models import (
 from sol01.schema.hybrid_retrieval import retrieve_schema_objects
 from sol01.schema.large_schema_summaries import load_large_schema_summary_registry
 from sol01.schema.resolver import resolve_schema_context
-from sol01.schema.retrieval import db_schema_summary, load_db_index
+from sol01.schema.retrieval import load_db_index
 from sol01.schema.retrieval_index import SchemaRetrievalIndex, build_retrieval_index
 
 DEFAULT_GOLD_TABLE_PATH = REPO_ROOT / "methods" / "gold-tables" / "spider2-snow-gold-tables.jsonl"
@@ -29,6 +29,29 @@ DEFAULT_FAILURE_EVIDENCE_LIMIT = 5
 DEFAULT_FAILURE_LIMIT = 20
 DEFAULT_PROMPT_WIN_LIMIT = 20
 DEFAULT_PROMPT_WIN_THRESHOLD = 0.25
+
+
+def db_schema_summary(db_index: Mapping[str, TableSchema]) -> str:
+    """Render the full-schema baseline used by offline retrieval evaluation."""
+
+    parts: list[str] = []
+    for table_name in sorted(db_index):
+        table = db_index[table_name]
+        columns = ", ".join(_column_summary(column) for column in table.columns)
+        parts.append(f"Table {table_name}: {columns}")
+    return "\n".join(parts)
+
+
+def _column_summary(column: Any) -> str:
+    summary = column.name
+    if column.type:
+        summary += f" [{column.type}]"
+    if column.description:
+        summary += f" - {column.description}"
+    elif column.sample_values:
+        preview = ", ".join(column.sample_values[:2])
+        summary += f" - sample values: {preview}"
+    return summary
 
 
 @dataclass(frozen=True)

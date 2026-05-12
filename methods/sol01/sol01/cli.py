@@ -100,13 +100,6 @@ def run(
         bool,
         typer.Option(help="Skip failed traces during resume mode."),
     ] = False,
-    prewarm_schema_index: Annotated[
-        bool,
-        typer.Option(
-            "--prewarm-schema-index/--no-prewarm-schema-index",
-            help="Build retrieval indexes for selected databases before solver workers start.",
-        ),
-    ] = False,
     selectors: Annotated[
         list[str] | None,
         typer.Argument(
@@ -128,7 +121,6 @@ def run(
         limit=limit,
         force=force,
         skip_failed=skip_failed,
-        prewarm_schema_index=prewarm_schema_index,
         selectors=selectors or [],
     )
     handle_run_kwargs: dict[str, Any] = {
@@ -140,7 +132,6 @@ def run(
         "limit": limit,
         "force": force,
         "skip_failed": skip_failed,
-        "prewarm_schema_index": prewarm_schema_index,
     }
     if concurrency is not None:
         handle_run_kwargs["concurrency"] = concurrency
@@ -532,7 +523,6 @@ def handle_run(
     limit: int | None,
     force: bool,
     skip_failed: bool,
-    prewarm_schema_index: bool = False,
     selectors: list[str] | None = None,
 ) -> dict[str, Any]:
     """Load tasks, then pass them to the batch coordinator."""
@@ -547,9 +537,6 @@ def handle_run(
     if not tasks:
         logger.warning("no tasks matched the filters")
         raise typer.Exit(code=1)
-
-    if prewarm_schema_index:
-        _prewarm_schema_retrieval_indexes(task.db for task in tasks)
 
     config = RuntimeConfig.from_env(
         require_api_key=True,

@@ -85,7 +85,6 @@ class RuntimeConfig(BaseModel):
 class SchemaRetrievalConfig(BaseModel):
     """Local schema-retrieval settings used before LLM planning."""
 
-    schema_retrieval_version: str = DEFAULT_SCHEMA_RETRIEVAL_VERSION
     chunk_top_k: int = Field(default=DEFAULT_RETRIEVAL_CHUNK_TOP_K, ge=1)
     object_top_k: int = Field(default=DEFAULT_RETRIEVAL_OBJECT_TOP_K, ge=1)
     family_top_k: int = Field(default=DEFAULT_RETRIEVAL_FAMILY_TOP_K, ge=1)
@@ -104,9 +103,6 @@ class SchemaRetrievalConfig(BaseModel):
         _load_local_dotenv(dotenv_path)
 
         return cls(
-            schema_retrieval_version=(
-                _env_first("SOL01_SCHEMA_RETRIEVAL_VERSION") or DEFAULT_SCHEMA_RETRIEVAL_VERSION
-            ),
             chunk_top_k=_env_positive_int(
                 "SOL01_SCHEMA_CHUNK_TOP_K",
                 default=DEFAULT_RETRIEVAL_CHUNK_TOP_K,

@@ -139,8 +139,6 @@ def resolve_schema_context(
         allowed_tables=allowed_tables,
         table_schemas=table_schemas,
         prompt_context=prompt_context,
-        schema_prompt=prompt_context,
-        resolution_diagnostics=diagnostics,
         diagnostics=diagnostics,
     )
 

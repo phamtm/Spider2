@@ -125,7 +125,7 @@ Build retrieval indexes before a batch run with either command:
 
 ```bash
 uv run sol01 prewarm-schema-index E_COMMERCE
-uv run sol01 run --db E_COMMERCE --prewarm-schema-index
+uv run sol01 run --db E_COMMERCE
 ```
 
 The retrieval index cache key includes the source schema hash, schema-object
@@ -256,7 +256,6 @@ Relevant runtime settings:
 - `SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD`, default `0.82`
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
 - `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
-- `SOL01_SCHEMA_RETRIEVAL_VERSION`, default `lexical_v1`
 
 These can be set in the shell or in `methods/sol01/.env`.
 

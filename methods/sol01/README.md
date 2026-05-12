@@ -56,7 +56,6 @@ just check
 uv run sol01 index
 uv run sol01 prewarm-schema-index E_COMMERCE
 uv run sol01 run --concurrency 4
-uv run sol01 run --db E_COMMERCE --prewarm-schema-index
 uv run sol01 eval --run-id <run_id>
 uv run sol01 retrieval-eval
 uv run sol01 analyze --run-id <run_id>
@@ -72,9 +71,9 @@ just gold sf_bq320
 `SOL01_CONCURRENCY` or the default value of `4`.
 `sol01 run <selector>...` accepts exact IDs, globs, `tier:<n>`,
 `tag:<name>`, or `all`.
-`--prewarm-schema-index` builds retrieval caches for selected databases before
-task workers start. `uv run sol01 prewarm-schema-index <DB>...` builds the same
-cache artifacts without running solver tasks.
+`sol01 run` builds retrieval caches for selected databases before task workers
+start. `uv run sol01 prewarm-schema-index <DB>...` builds the same cache
+artifacts without running solver tasks.
 
 `sol01 retrieval-eval` measures lexical/exact schema-retrieval coverage against
 the offline gold-table JSONL file at
@@ -185,7 +184,6 @@ Runtime config can be set in the shell or `methods/sol01/.env`:
 - `SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD`, default `0.82`
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
 - `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
-- `SOL01_SCHEMA_RETRIEVAL_VERSION`, default `lexical_v1`
 
 Sample values are indexed only for bounded, low-cardinality categorical
 evidence. High-cardinality, opaque, free-text, numeric, temporal,

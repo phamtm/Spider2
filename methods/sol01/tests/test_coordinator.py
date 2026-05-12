@@ -138,6 +138,7 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
         ),
     }
     monkeypatch.setattr("sol01.coordinator.load_db_index", lambda *args, **kwargs: schema)
+    monkeypatch.setattr("sol01.schema.expansion.load_db_index", lambda *args, **kwargs: schema)
     monkeypatch.setattr(
         "sol01.candidates.verification.load_db_index", lambda *args, **kwargs: schema
     )
@@ -170,7 +171,21 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
         lambda *args, **kwargs: retrieval_index,
     )
     monkeypatch.setattr(
+        "sol01.schema.expansion.build_retrieval_index",
+        lambda *args, **kwargs: retrieval_index,
+    )
+    monkeypatch.setattr(
         "sol01.coordinator.retrieve_schema_objects",
+        lambda *args, **kwargs: (
+            [
+                RetrievedSchemaObject(schema_object=schema_objects[0], rank=1, score=0.9),
+                RetrievedSchemaObject(schema_object=schema_objects[1], rank=2, score=0.8),
+            ],
+            {"query": {"text": "test query"}, "candidate_count": 2},
+        ),
+    )
+    monkeypatch.setattr(
+        "sol01.schema.expansion.retrieve_schema_objects",
         lambda *args, **kwargs: (
             [
                 RetrievedSchemaObject(schema_object=schema_objects[0], rank=1, score=0.9),
@@ -488,15 +503,14 @@ def test_schema_expansion_retrieves_candidates_for_missing_column(
 
     def fake_retrieve_schema_objects(index: Any, question: str, **kwargs: Any):
         queries.append(question)
-        table_name = SALES_TABLE if len(queries) == 1 else ORDERS_TABLE
-        schema_object = next(obj for obj in index.objects if obj.table_name == table_name)
+        schema_object = next(obj for obj in index.objects if obj.table_name == ORDERS_TABLE)
         return (
             [RetrievedSchemaObject(schema_object=schema_object, rank=1, score=0.9)],
             {"query": {"text": question}, "candidate_count": 1},
         )
 
     monkeypatch.setattr(
-        "sol01.coordinator.retrieve_schema_objects",
+        "sol01.schema.expansion.retrieve_schema_objects",
         fake_retrieve_schema_objects,
     )
     task = Task(instance_id="sf_retrieve_expand", db="TEST_DB", question="Show order totals.")
@@ -531,10 +545,10 @@ def test_schema_expansion_retrieves_candidates_for_missing_column(
     )
 
     assert answer.status == "success"
-    assert len(queries) == 2
-    assert "Original question: Show order totals." in queries[1]
-    assert f"Failed SQL: SELECT MISSING_COLUMN FROM {SALES_TABLE}" in queries[1]
-    assert f"Current selected object ids: table:{SALES_TABLE}" in queries[1]
+    assert len(queries) == 1
+    assert "Original question: Show order totals." in queries[0]
+    assert f"Failed SQL: SELECT MISSING_COLUMN FROM {SALES_TABLE}" in queries[0]
+    assert f"Current selected object ids: table:{SALES_TABLE}" in queries[0]
     trace = json.loads(
         (run_paths.traces_dir / "sf_retrieve_expand.json").read_text(encoding="utf-8")
     )

@@ -6,13 +6,11 @@ from sol01.infra.config import (
     DEFAULT_BASE_URL,
     DEFAULT_DOTENV_PATH,
     DEFAULT_MODEL,
-    DEFAULT_SCHEMA_RETRIEVAL_VERSION,
     RuntimeConfig,
     SchemaRetrievalConfig,
 )
 
 SCHEMA_RETRIEVAL_ENV_VARS = [
-    "SOL01_SCHEMA_RETRIEVAL_VERSION",
     "SOL01_SCHEMA_CHUNK_TOP_K",
     "SOL01_SCHEMA_OBJECT_TOP_K",
     "SOL01_SCHEMA_FAMILY_TOP_K",
@@ -211,8 +209,6 @@ def test_schema_retrieval_config_defaults_to_single_local_path(monkeypatch):
 
     config = SchemaRetrievalConfig.from_env()
 
-    assert config.schema_retrieval_version == DEFAULT_SCHEMA_RETRIEVAL_VERSION
-    assert config.schema_retrieval_version == "lexical_v1"
     assert config.chunk_top_k > config.object_top_k
     assert config.family_top_k > 0
     assert 0.0 <= config.family_similarity_threshold <= 1.0
@@ -221,7 +217,6 @@ def test_schema_retrieval_config_defaults_to_single_local_path(monkeypatch):
 
 
 def test_schema_retrieval_config_env_overrides(monkeypatch):
-    monkeypatch.setenv("SOL01_SCHEMA_RETRIEVAL_VERSION", "schema-retrieval-v2")
     monkeypatch.setenv("SOL01_SCHEMA_CHUNK_TOP_K", "60")
     monkeypatch.setenv("SOL01_SCHEMA_OBJECT_TOP_K", "9")
     monkeypatch.setenv("SOL01_SCHEMA_FAMILY_TOP_K", "5")
@@ -231,7 +226,6 @@ def test_schema_retrieval_config_env_overrides(monkeypatch):
 
     config = SchemaRetrievalConfig.from_env()
 
-    assert config.schema_retrieval_version == "schema-retrieval-v2"
     assert config.chunk_top_k == 60
     assert config.object_top_k == 9
     assert config.family_top_k == 5

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 from functools import cache
 from pathlib import Path
-from typing import Any
 
 from sol01.models import TableSchema
 from sol01.schema.index import CACHE_PATH, build_db_index, build_index_cache
@@ -82,60 +81,3 @@ def _path_signature(path: Path) -> tuple[int, int] | None:
     except FileNotFoundError:
         return None
     return stat_result.st_mtime_ns, stat_result.st_size
-
-
-def db_schema_summary(db_index: dict[str, TableSchema]) -> str:
-    """Render one compact all-table schema summary for the selector."""
-
-    parts: list[str] = []
-    for table_name in sorted(db_index):
-        table = db_index[table_name]
-        columns = ", ".join(_column_summary(column) for column in table.columns)
-        parts.append(f"Table {table_name}: {columns}")
-    return "\n".join(parts)
-
-
-def _column_summary(column: Any) -> str:
-    """Keep one column summary short enough for selector prompts."""
-
-    summary = column.name
-    if column.type:
-        summary += f" [{column.type}]"
-    if column.description:
-        summary += f" - {column.description}"
-    elif column.sample_values:
-        preview = ", ".join(column.sample_values[:2])
-        summary += f" - sample values: {preview}"
-    return summary
-
-
-def sanitize_llm_tables(
-    requested_tables: list[str],
-    db_index: dict[str, TableSchema],
-) -> list[str]:
-    """Keep valid unique table names and surface an empty selection when none survive."""
-
-    valid_tables = {table_name.lower(): table_name for table_name in db_index}
-    suffix_lookup: dict[str, list[str]] = {}
-    for table_identity in db_index:
-        parts = table_identity.lower().split(".")
-        for start in range(len(parts)):
-            suffix = ".".join(parts[start:])
-            suffix_lookup.setdefault(suffix, []).append(table_identity)
-
-    selected_tables: list[str] = []
-    for table_name in requested_tables:
-        normalized = table_name.strip().lower()
-        canonical = valid_tables.get(normalized)
-        if canonical is None:
-            matches = suffix_lookup.get(normalized, [])
-            if len(matches) == 1:
-                canonical = matches[0]
-        if canonical is None or canonical in selected_tables:
-            continue
-        selected_tables.append(canonical)
-    return selected_tables
-
-
-_db_schema_summary = db_schema_summary
-_sanitize_llm_tables = sanitize_llm_tables

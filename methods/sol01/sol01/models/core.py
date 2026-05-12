@@ -226,23 +226,6 @@ class RetrievedSchemaObject(BaseModel):
     score: float | None = None
 
 
-class SelectionConstraints(BaseModel):
-    """Optional hard bounds applied when selecting retrieved schema objects."""
-
-    required_object_ids: list[str] = Field(default_factory=list)
-    excluded_object_ids: list[str] = Field(default_factory=list)
-    allowed_object_types: list[SchemaObjectKind] = Field(default_factory=list)
-    max_objects: int | None = Field(default=None, ge=1)
-    max_tables: int | None = Field(default=None, ge=1)
-    max_columns_per_table: int | None = Field(default=None, ge=1)
-    include_families: bool = True
-
-    @field_validator("required_object_ids", "excluded_object_ids")
-    @classmethod
-    def _validate_object_ids(cls, object_ids: list[str]) -> list[str]:
-        return [validate_schema_object_id(object_id) for object_id in object_ids]
-
-
 class HybridPlanningConstraints(BaseModel):
     """Question constraints inferred while selecting retrieved schema objects."""
 
@@ -279,24 +262,7 @@ class ResolvedSchemaContext(BaseModel):
     allowed_tables: list[str] = Field(default_factory=list)
     table_schemas: dict[str, TableSchema] = Field(default_factory=dict)
     prompt_context: str = ""
-    schema_prompt: str = ""
-    resolution_diagnostics: dict[str, object] = Field(default_factory=dict)
     diagnostics: dict[str, object] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def _sync_resolver_aliases(self) -> ResolvedSchemaContext:
-        """Keep older and newer resolver field names equivalent."""
-
-        if self.prompt_context and not self.schema_prompt:
-            self.schema_prompt = self.prompt_context
-        elif self.schema_prompt and not self.prompt_context:
-            self.prompt_context = self.schema_prompt
-
-        if self.resolution_diagnostics and not self.diagnostics:
-            self.diagnostics = self.resolution_diagnostics
-        elif self.diagnostics and not self.resolution_diagnostics:
-            self.resolution_diagnostics = self.diagnostics
-        return self
 
 
 class SchemaSelection(BaseModel):
@@ -317,15 +283,6 @@ class SchemaSelection(BaseModel):
         return [validate_schema_object_id(object_id) for object_id in object_ids]
 
 
-class PlanningDecision(BaseModel):
-    """Combined table selection and answer-contract planning output."""
-
-    selected_tables: list[str] = Field(default_factory=list)
-    rationale: str
-    confidence: float = Field(ge=0.0, le=1.0)
-    intent: Intent
-
-
 class HybridPlanningDecision(BaseModel):
     """Future planner output that combines intent with selected schema objects."""
 
@@ -335,18 +292,6 @@ class HybridPlanningDecision(BaseModel):
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
     intent: Intent
-
-
-class MetricDefinition(BaseModel):
-    """A task-aware metric definition extracted from allowed documents."""
-
-    metric_name: str
-    source_file: str | None = None
-    heading: str | None = None
-    definition: str
-    formula: str | None = None
-    sql_notes: str | None = None
-    confidence: float = Field(ge=0.0, le=1.0)
 
 
 class SQLCandidate(BaseModel):
@@ -425,15 +370,6 @@ class AggregateGrainReport(BaseModel):
     uses_distinct: bool = False
     has_joins: bool = False
     selected_tables: list[str] = Field(default_factory=list)
-
-
-class SchemaExpansionDecision(BaseModel):
-    """LLM decision on whether to widen the table selection after a failure."""
-
-    should_expand: bool
-    additional_tables: list[str] = Field(default_factory=list)
-    rationale: str
-    confidence: float = Field(ge=0.0, le=1.0)
 
 
 class CandidateReviewReport(BaseModel):

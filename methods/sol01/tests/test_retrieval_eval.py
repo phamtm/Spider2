@@ -12,6 +12,7 @@ from sol01 import cli
 from sol01.infra.config import SchemaRetrievalConfig
 from sol01.models import ColumnSchema, RetrievalChunk, SchemaObject, TableSchema, Task
 from sol01.schema.retrieval_eval import (
+    db_schema_summary,
     load_gold_tables,
     run_retrieval_eval,
     write_retrieval_eval_report,
@@ -38,6 +39,14 @@ def test_load_gold_tables_reads_offline_jsonl(tmp_path: Path):
         "sf001": ["DB.PUBLIC.ORDERS"],
         "sf002": ["DB.PUBLIC.CUSTOMERS"],
     }
+
+
+def test_db_schema_summary_keeps_column_types_docs_and_samples():
+    summary = db_schema_summary(_db_index())
+
+    assert "Table DB.PUBLIC.SALES_2022:" in summary
+    assert "ORDER_ID [TEXT]" in summary
+    assert "AMOUNT [NUMBER]" in summary
 
 
 def test_retrieval_eval_reports_gold_coverage_family_success_and_failures():

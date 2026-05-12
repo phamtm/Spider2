@@ -10,7 +10,6 @@ from sol01.models import (
     ExecutionResult,
     FinalAnswer,
     Intent,
-    MetricDefinition,
     ResolvedSchemaContext,
     RetrievalChunk,
     RetrievedChunk,
@@ -18,7 +17,6 @@ from sol01.models import (
     SchemaObject,
     SchemaSelection,
     SelectedSchemaObject,
-    SelectionConstraints,
     SQLCandidate,
     TableSchema,
     Task,
@@ -91,7 +89,7 @@ def test_schema_models_use_independent_default_lists():
     assert table.sample_rows == []
 
 
-def test_retrieval_and_metric_models_validate_confidence_range():
+def test_schema_selection_model_validates_confidence_range():
     selection = SchemaSelection(
         db="E_commerce",
         selected_object_ids=["table:orders"],
@@ -102,17 +100,10 @@ def test_retrieval_and_metric_models_validate_confidence_range():
         confidence=0.8,
         diagnostics={"selection_prompt_chars": 100, "candidate_table_count": 2},
     )
-    metric = MetricDefinition(
-        metric_name="retention rate",
-        definition="Share of users retained over a period.",
-        confidence=0.7,
-    )
-
     assert selection.confidence == 0.8
     assert selection.selected_object_ids == ["table:orders"]
     assert selection.allowed_tables == ["orders", "customers"]
     assert selection.diagnostics["selection_prompt_chars"] == 100
-    assert metric.source_file is None
 
     with pytest.raises(ValidationError):
         SchemaSelection(
@@ -243,13 +234,9 @@ def test_retrieval_core_models_construct_and_validate_object_types():
         )
 
 
-def test_selection_constraints_default_and_unknown_role_construct():
-    constraints = SelectionConstraints()
+def test_selected_schema_object_unknown_role_constructs():
     selected = SelectedSchemaObject(object_id="table:DB.PUBLIC.ORDERS", role="unknown")
 
-    assert constraints.required_object_ids == []
-    assert constraints.allowed_object_types == []
-    assert constraints.include_families is True
     assert selected.role == "unknown"
 
 
@@ -264,12 +251,13 @@ def test_resolved_schema_context_keeps_compact_selection_context():
         selected_objects=[selected],
         resolved_tables=["DB.PUBLIC.ORDERS"],
         allowed_tables=["DB.PUBLIC.ORDERS"],
-        schema_prompt="Table DB.PUBLIC.ORDERS: AMOUNT",
+        prompt_context="Table DB.PUBLIC.ORDERS: AMOUNT",
         diagnostics={"retrieved_object_count": 1},
     )
 
     assert context.selected_objects[0].role == "metric"
     assert context.allowed_tables == ["DB.PUBLIC.ORDERS"]
+    assert context.prompt_context == "Table DB.PUBLIC.ORDERS: AMOUNT"
     assert context.diagnostics == {"retrieved_object_count": 1}
 
 

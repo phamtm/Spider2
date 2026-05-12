@@ -109,7 +109,7 @@ def test_resolver_defaults_ambiguous_family_to_canonical_member_with_warning():
     context = _resolve_family(index, question="Show sales amount.")
 
     assert context.allowed_tables == ["DB.PUBLIC.SALES_2022"]
-    assert context.resolution_diagnostics["warnings"] == [
+    assert context.diagnostics["warnings"] == [
         "No family member constraint was provided for "
         f"{context.selected_objects[0].object_id}; using canonical member DB.PUBLIC.SALES_2022."
     ]
@@ -125,10 +125,8 @@ def test_resolver_uses_canonical_member_when_constraints_match_no_family_member(
     )
 
     assert context.allowed_tables == ["DB.PUBLIC.SALES_2022"]
-    assert "No family members matched constraints" in context.resolution_diagnostics["warnings"][0]
-    assert (
-        context.resolution_diagnostics["resolution_entries"][0]["reason"] == "constraints_no_match"
-    )
+    assert "No family members matched constraints" in context.diagnostics["warnings"][0]
+    assert context.diagnostics["resolution_entries"][0]["reason"] == "constraints_no_match"
 
 
 def test_resolver_has_deterministic_table_order_and_compact_family_prompt():
@@ -188,9 +186,7 @@ def test_resolver_expands_large_date_family_only_to_matching_member():
     )
 
     assert context.allowed_tables == [matched_table]
-    assert context.resolution_diagnostics["resolution_entries"][0]["reason"] == (
-        "explicit_constraints"
-    )
+    assert context.diagnostics["resolution_entries"][0]["reason"] == ("explicit_constraints")
     assert f"Physical members: {matched_table}" in context.prompt_context
     assert "GITHUB_REPOS_DATE.DAY._20240104" not in context.prompt_context
 
@@ -215,8 +211,8 @@ def test_resolver_keeps_large_broad_github_family_symbolic_and_budgeted():
         constraints=HybridPlanningConstraints(include_all=True),
     )
 
-    entry = broad_context.resolution_diagnostics["resolution_entries"][0]
-    include_all_entry = include_all_context.resolution_diagnostics["resolution_entries"][0]
+    entry = broad_context.diagnostics["resolution_entries"][0]
+    include_all_entry = include_all_context.diagnostics["resolution_entries"][0]
     prompt = broad_context.prompt_context
 
     assert broad_context.allowed_tables == []
@@ -225,8 +221,8 @@ def test_resolver_keeps_large_broad_github_family_symbolic_and_budgeted():
     assert include_all_entry["reason"] == "symbolic_include_all"
     assert entry["symbolic"] is True
     assert entry["matched_member_count"] == len(members)
-    assert broad_context.resolution_diagnostics["warnings"]
-    assert "expansion budget" in broad_context.resolution_diagnostics["warnings"][0]
+    assert broad_context.diagnostics["warnings"]
+    assert "expansion budget" in broad_context.diagnostics["warnings"][0]
     assert "Physical members: kept symbolic (1500 matched; expansion budget 64)" in prompt
     assert "Large-schema summary: github_repos_day_events" in prompt
     assert "GITHUB_REPOS_DATE.DAY._20240101" in prompt

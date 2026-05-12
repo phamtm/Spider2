@@ -95,7 +95,6 @@ def test_run_command_dispatches_expected_filters(monkeypatch):
         "limit": None,
         "force": False,
         "skip_failed": False,
-        "prewarm_schema_index": False,
     }
     assert "Eval summary: 1/1 correct, missing CSV 0" in result.output
     assert "Exec time:" in result.output
@@ -183,45 +182,6 @@ def test_run_command_forwards_explicit_concurrency(monkeypatch):
     assert called["concurrency"] == 8
 
 
-def test_run_command_forwards_schema_index_prewarm_flag(monkeypatch):
-    """The run command should expose batch prewarm plumbing before worker startup."""
-
-    called: dict[str, Any] = {}
-
-    def fake_handle_run(**kwargs: Any) -> dict[str, Any]:
-        called.update(kwargs)
-        return {
-            "tasks": [Task(instance_id="local003", db="db", question="Question text")],
-            "results": [
-                FinalAnswer(
-                    instance_id="local003",
-                    status="success",
-                    sql="SELECT 1",
-                    csv_path="out.csv",
-                    trace_path="trace.json",
-                )
-            ],
-            "eval_summary": {
-                "correct_tasks": 1,
-                "attempted_tasks": 1,
-                "missing_csv_count": 0,
-                "per_instance": [
-                    {"instance_id": "local003", "passed": True, "score": 1, "csv_present": True}
-                ],
-            },
-        }
-
-    monkeypatch.setattr(cli, "handle_run", fake_handle_run)
-
-    result = runner.invoke(
-        cli.app,
-        ["run", "--instance-id", "local003", "--prewarm-schema-index"],
-    )
-
-    assert result.exit_code == 0
-    assert called["prewarm_schema_index"] is True
-
-
 def test_handle_run_passes_default_dotenv_path(monkeypatch):
     """The run handler should opt into the method-local dotenv file."""
 
@@ -298,8 +258,8 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
     assert result["eval_summary"]["correct_tasks"] == 1
 
 
-def test_handle_run_prewarms_unique_task_databases_before_workers(monkeypatch):
-    """Schema index prewarm should happen once per database before run_tasks starts."""
+def test_handle_run_leaves_schema_prewarm_to_batch_coordinator(monkeypatch):
+    """The run handler should not duplicate schema index prewarm work."""
 
     events: list[tuple[str, Any]] = []
 
@@ -313,10 +273,6 @@ def test_handle_run_prewarms_unique_task_databases_before_workers(monkeypatch):
         ],
     )
 
-    def fake_prewarm(dbs):
-        events.append(("prewarm", sorted(set(dbs))))
-        return []
-
     def fake_from_env(cls, require_api_key=False, dotenv_path=None, concurrency=None):
         events.append(("config", require_api_key))
         return RuntimeConfig(api_key="test-key")
@@ -325,7 +281,6 @@ def test_handle_run_prewarms_unique_task_databases_before_workers(monkeypatch):
         events.append(("run_tasks", [task.instance_id for task in tasks]))
         return []
 
-    monkeypatch.setattr(cli, "_prewarm_schema_retrieval_indexes", fake_prewarm)
     monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
     monkeypatch.setattr(cli, "run_tasks", fake_run_tasks)
     monkeypatch.setattr(
@@ -349,11 +304,9 @@ def test_handle_run_prewarms_unique_task_databases_before_workers(monkeypatch):
         limit=None,
         force=False,
         skip_failed=False,
-        prewarm_schema_index=True,
     )
 
-    assert events[:2] == [("prewarm", ["DB_A", "DB_B"]), ("config", True)]
-    assert events[2][0] == "run_tasks"
+    assert events[:2] == [("config", True), ("run_tasks", ["one", "two", "three"])]
 
 
 def test_handle_run_forwards_all_expected_ids_to_persisted_eval(monkeypatch, tmp_path: Path):
