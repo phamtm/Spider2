@@ -19,6 +19,7 @@ from sol01.models import (
     Task,
 )
 from sol01.schema.hybrid_retrieval import retrieve_schema_objects
+from sol01.schema.large_schema_summaries import load_large_schema_summary_registry
 from sol01.schema.resolver import resolve_schema_context
 from sol01.schema.retrieval import db_schema_summary, load_db_index
 from sol01.schema.retrieval_index import SchemaRetrievalIndex, build_retrieval_index
@@ -26,6 +27,8 @@ from sol01.schema.retrieval_index import SchemaRetrievalIndex, build_retrieval_i
 DEFAULT_GOLD_TABLE_PATH = REPO_ROOT / "methods" / "gold-tables" / "spider2-snow-gold-tables.jsonl"
 DEFAULT_FAILURE_EVIDENCE_LIMIT = 5
 DEFAULT_FAILURE_LIMIT = 20
+DEFAULT_PROMPT_WIN_LIMIT = 20
+DEFAULT_PROMPT_WIN_THRESHOLD = 0.25
 
 
 @dataclass(frozen=True)
@@ -34,12 +37,18 @@ class RetrievalEvalReport:
 
     task_count: int
     object_cutoff: int
+    covered_task_count: int
+    pre_resolver_gold_recall: float
     pre_resolver_any_gold_recall: float
+    post_resolver_gold_recall: float
     post_resolver_all_gold_recall: float
     family_expansion_success: float | None
     average_prompt_reduction: float
     tasks: list[dict[str, Any]]
     failures: list[dict[str, Any]]
+    recall_regressions: list[dict[str, Any]]
+    prompt_size_wins: list[dict[str, Any]]
+    hallucinated_column_failures: list[dict[str, Any]]
 
     def summary(self) -> dict[str, Any]:
         """Return compact metrics suitable for JSON output or CLI display."""
@@ -47,11 +56,29 @@ class RetrievalEvalReport:
         return {
             "task_count": self.task_count,
             "object_cutoff": self.object_cutoff,
+            "covered_task_count": self.covered_task_count,
+            "pre_resolver_gold_recall": self.pre_resolver_gold_recall,
             "pre_resolver_any_gold_recall": self.pre_resolver_any_gold_recall,
+            "post_resolver_gold_recall": self.post_resolver_gold_recall,
             "post_resolver_all_gold_recall": self.post_resolver_all_gold_recall,
             "family_expansion_success": self.family_expansion_success,
             "average_prompt_reduction": self.average_prompt_reduction,
             "failure_count": len(self.failures),
+            "recall_regression_count": len(self.recall_regressions),
+            "prompt_size_win_count": len(self.prompt_size_wins),
+            "hallucinated_column_failure_count": len(self.hallucinated_column_failures),
+        }
+
+    def payload(self) -> dict[str, Any]:
+        """Return the complete report as a JSON-serializable object."""
+
+        return {
+            "summary": self.summary(),
+            "tasks": self.tasks,
+            "failures": self.failures,
+            "recall_regressions": self.recall_regressions,
+            "prompt_size_wins": self.prompt_size_wins,
+            "hallucinated_column_failures": self.hallucinated_column_failures,
         }
 
 
@@ -86,6 +113,9 @@ def run_retrieval_eval(
     document_loader: Callable[[str], str] = load_document_text,
     failure_evidence_limit: int = DEFAULT_FAILURE_EVIDENCE_LIMIT,
     failure_limit: int = DEFAULT_FAILURE_LIMIT,
+    covered_only: bool = False,
+    baseline_tasks: Mapping[str, Mapping[str, Any]] | None = None,
+    trace_dirs: Sequence[Path] = (),
 ) -> RetrievalEvalReport:
     """Evaluate retrieval and resolver coverage against offline gold tables."""
 
@@ -97,6 +127,9 @@ def run_retrieval_eval(
     for task in tasks:
         gold_tables = _stable_tables(gold_tables_by_instance.get(task.instance_id, ()))
         if not gold_tables:
+            continue
+        covered_summary_ids = _covered_summary_ids(gold_tables)
+        if covered_only and not covered_summary_ids:
             continue
 
         db_index = dict(db_index_loader(task.db))
@@ -128,14 +161,16 @@ def run_retrieval_eval(
 
         retrieved_tables = _tables_from_retrieved_objects(cutoff_objects)
         resolved_tables = _stable_tables(resolved.allowed_tables)
+        retrieved_gold_tables = _gold_overlap(gold_tables, retrieved_tables)
+        resolved_gold_tables = _gold_overlap(gold_tables, resolved_tables)
         missing_tables = [
             table
             for table in gold_tables
             if _normalize_table(table) not in _normalized(resolved_tables)
         ]
-        pre_any_gold = any(
-            _normalize_table(table) in _normalized(retrieved_tables) for table in gold_tables
-        )
+        pre_recall = _gold_recall(gold_tables, retrieved_tables)
+        post_recall = _gold_recall(gold_tables, resolved_tables)
+        pre_any_gold = bool(retrieved_gold_tables)
         post_all_gold = not missing_tables
         family_case, family_success = _family_expansion_result(
             gold_tables,
@@ -145,20 +180,28 @@ def run_retrieval_eval(
         full_schema_chars = len(db_schema_summary(db_index))
         resolved_prompt_chars = len(resolved.prompt_context)
         prompt_reduction = _prompt_reduction(full_schema_chars, resolved_prompt_chars)
+        prompt_chars_saved = max(0, full_schema_chars - resolved_prompt_chars)
         row = {
             "instance_id": task.instance_id,
             "db": task.db,
             "gold_tables": gold_tables,
+            "covered_gold_tables": _covered_tables(gold_tables),
+            "covered_summary_ids": covered_summary_ids,
             "retrieved_object_ids": [item.schema_object.object_id for item in cutoff_objects],
             "retrieved_tables": retrieved_tables,
+            "retrieved_gold_tables": retrieved_gold_tables,
             "resolved_tables": resolved_tables,
+            "resolved_gold_tables": resolved_gold_tables,
+            "pre_resolver_gold_recall": pre_recall,
             "pre_resolver_any_gold": pre_any_gold,
+            "post_resolver_gold_recall": post_recall,
             "post_resolver_all_gold": post_all_gold,
             "missing_gold_tables": missing_tables,
             "family_expansion_case": family_case,
             "family_expansion_success": family_success,
             "full_schema_chars": full_schema_chars,
             "resolved_prompt_chars": resolved_prompt_chars,
+            "prompt_chars_saved": prompt_chars_saved,
             "prompt_reduction": prompt_reduction,
             "retrieval_diagnostics": retrieval_diagnostics,
         }
@@ -173,7 +216,64 @@ def run_retrieval_eval(
                 }
             )
 
-    return _build_report(rows, object_cutoff=config.object_top_k, failures=failures)
+    return _build_report(
+        rows,
+        object_cutoff=config.object_top_k,
+        failures=failures,
+        baseline_tasks=baseline_tasks or {},
+        hallucinated_column_failures=_hallucinated_column_failures(trace_dirs),
+    )
+
+
+def load_retrieval_eval_task_rows(path: Path) -> dict[str, dict[str, Any]]:
+    """Load task rows from a previous persisted retrieval-eval report."""
+
+    task_rows_path = path / "tasks.jsonl" if path.is_dir() else path
+    rows: list[dict[str, Any]] = []
+    if task_rows_path.suffix == ".jsonl":
+        with task_rows_path.open(encoding="utf-8") as handle:
+            rows = [json.loads(line) for line in handle if line.strip()]
+    else:
+        payload = json.loads(task_rows_path.read_text(encoding="utf-8"))
+        rows = list(payload.get("tasks") or [])
+    return {
+        str(row.get("instance_id")): row
+        for row in rows
+        if isinstance(row, dict) and row.get("instance_id")
+    }
+
+
+def write_retrieval_eval_report(report: RetrievalEvalReport, output_dir: Path) -> Path:
+    """Persist retrieval-eval artifacts under the repo-local outputs tree."""
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "report.json").write_text(
+        json.dumps(report.payload(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (output_dir / "summary.json").write_text(
+        json.dumps(report.summary(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (output_dir / "tasks.jsonl").write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in report.tasks),
+        encoding="utf-8",
+    )
+    (output_dir / "failures.json").write_text(
+        json.dumps(
+            {
+                "recall_regressions": report.recall_regressions,
+                "missing_gold_tables": report.failures,
+                "hallucinated_column_failures": report.hallucinated_column_failures,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (output_dir / "summary.md").write_text(_render_report_markdown(report), encoding="utf-8")
+    return output_dir
 
 
 def _build_index_for_eval(
@@ -195,13 +295,18 @@ def _build_report(
     *,
     object_cutoff: int,
     failures: list[dict[str, Any]],
+    baseline_tasks: Mapping[str, Mapping[str, Any]],
+    hallucinated_column_failures: list[dict[str, Any]],
 ) -> RetrievalEvalReport:
     task_count = len(rows)
     family_rows = [row for row in rows if row["family_expansion_case"]]
     return RetrievalEvalReport(
         task_count=task_count,
         object_cutoff=object_cutoff,
+        covered_task_count=sum(1 for row in rows if row["covered_summary_ids"]),
+        pre_resolver_gold_recall=_mean_float(row["pre_resolver_gold_recall"] for row in rows),
         pre_resolver_any_gold_recall=_mean_bool(row["pre_resolver_any_gold"] for row in rows),
+        post_resolver_gold_recall=_mean_float(row["post_resolver_gold_recall"] for row in rows),
         post_resolver_all_gold_recall=_mean_bool(row["post_resolver_all_gold"] for row in rows),
         family_expansion_success=(
             _mean_bool(row["family_expansion_success"] for row in family_rows)
@@ -211,6 +316,9 @@ def _build_report(
         average_prompt_reduction=_mean_float(row["prompt_reduction"] for row in rows),
         tasks=rows,
         failures=failures,
+        recall_regressions=_recall_regressions(rows, baseline_tasks=baseline_tasks),
+        prompt_size_wins=_prompt_size_wins(rows),
+        hallucinated_column_failures=hallucinated_column_failures,
     )
 
 
@@ -271,6 +379,29 @@ def _tables_from_chunk_id(object_id: str) -> list[str]:
         left, _, right = body.partition("->")
         return [left.split("#", 1)[0], right.split("#", 1)[0]]
     return []
+
+
+def _covered_summary_ids(gold_tables: Sequence[str]) -> list[str]:
+    registry = load_large_schema_summary_registry()
+    return sorted(
+        {summary.summary_id for table in gold_tables for summary in registry.match_table_ref(table)}
+    )
+
+
+def _covered_tables(gold_tables: Sequence[str]) -> list[str]:
+    registry = load_large_schema_summary_registry()
+    return [table for table in gold_tables if registry.match_table_ref(table)]
+
+
+def _gold_overlap(gold_tables: Sequence[str], candidate_tables: Sequence[str]) -> list[str]:
+    candidate_lookup = _normalized(candidate_tables)
+    return [table for table in gold_tables if _normalize_table(table) in candidate_lookup]
+
+
+def _gold_recall(gold_tables: Sequence[str], candidate_tables: Sequence[str]) -> float:
+    if not gold_tables:
+        return 0.0
+    return round(len(_gold_overlap(gold_tables, candidate_tables)) / len(gold_tables), 6)
 
 
 def _family_expansion_result(
@@ -342,6 +473,224 @@ def _mean_float(values: Sequence[float] | Any) -> float:
     return round(sum(float(item) for item in items) / len(items), 6)
 
 
+def _recall_regressions(
+    rows: Sequence[Mapping[str, Any]],
+    *,
+    baseline_tasks: Mapping[str, Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    regressions: list[dict[str, Any]] = []
+    for row in rows:
+        baseline = baseline_tasks.get(str(row["instance_id"]))
+        if baseline:
+            regression = _baseline_recall_regression(row, baseline)
+        else:
+            regression = _incomplete_recall_regression(row)
+        if regression:
+            regressions.append(regression)
+    return sorted(
+        regressions,
+        key=lambda item: (
+            item["post_resolver_gold_recall"],
+            item["pre_resolver_gold_recall"],
+            item["instance_id"],
+        ),
+    )
+
+
+def _baseline_recall_regression(
+    row: Mapping[str, Any],
+    baseline: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    pre_recall = float(row["pre_resolver_gold_recall"])
+    post_recall = float(row["post_resolver_gold_recall"])
+    baseline_pre = _baseline_recall_value(
+        baseline,
+        "pre_resolver_gold_recall",
+        "pre_resolver_any_gold",
+    )
+    baseline_post = _baseline_recall_value(
+        baseline,
+        "post_resolver_gold_recall",
+        "post_resolver_all_gold",
+    )
+    if pre_recall >= baseline_pre and post_recall >= baseline_post:
+        return None
+    stages = []
+    if pre_recall < baseline_pre:
+        stages.append("pre_resolver")
+    if post_recall < baseline_post:
+        stages.append("post_resolver")
+    return {
+        "instance_id": row["instance_id"],
+        "db": row["db"],
+        "stage": "+".join(stages),
+        "pre_resolver_gold_recall": pre_recall,
+        "baseline_pre_resolver_gold_recall": baseline_pre,
+        "post_resolver_gold_recall": post_recall,
+        "baseline_post_resolver_gold_recall": baseline_post,
+        "missing_gold_tables": row["missing_gold_tables"],
+        "covered_summary_ids": row["covered_summary_ids"],
+    }
+
+
+def _baseline_recall_value(
+    baseline: Mapping[str, Any],
+    recall_key: str,
+    bool_key: str,
+) -> float:
+    if recall_key in baseline:
+        return float(baseline[recall_key])
+    if bool_key in baseline:
+        return 1.0 if baseline[bool_key] else 0.0
+    return 0.0
+
+
+def _incomplete_recall_regression(row: Mapping[str, Any]) -> dict[str, Any] | None:
+    pre_recall = float(row["pre_resolver_gold_recall"])
+    post_recall = float(row["post_resolver_gold_recall"])
+    if pre_recall >= 1.0 and post_recall >= 1.0:
+        return None
+    if pre_recall < 1.0:
+        stage = "pre_resolver"
+    else:
+        stage = "post_resolver"
+    return {
+        "instance_id": row["instance_id"],
+        "db": row["db"],
+        "stage": stage,
+        "pre_resolver_gold_recall": pre_recall,
+        "post_resolver_gold_recall": post_recall,
+        "missing_gold_tables": row["missing_gold_tables"],
+        "covered_summary_ids": row["covered_summary_ids"],
+    }
+
+
+def _prompt_size_wins(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    wins = [
+        {
+            "instance_id": row["instance_id"],
+            "db": row["db"],
+            "full_schema_chars": row["full_schema_chars"],
+            "resolved_prompt_chars": row["resolved_prompt_chars"],
+            "prompt_chars_saved": row["prompt_chars_saved"],
+            "prompt_reduction": row["prompt_reduction"],
+            "covered_summary_ids": row["covered_summary_ids"],
+        }
+        for row in rows
+        if float(row["prompt_reduction"]) >= DEFAULT_PROMPT_WIN_THRESHOLD
+    ]
+    return sorted(
+        wins,
+        key=lambda item: (-item["prompt_chars_saved"], item["instance_id"]),
+    )[:DEFAULT_PROMPT_WIN_LIMIT]
+
+
+def _hallucinated_column_failures(trace_dirs: Sequence[Path]) -> list[dict[str, Any]]:
+    failures: list[dict[str, Any]] = []
+    for trace_path in _iter_trace_files(trace_dirs):
+        trace = json.loads(trace_path.read_text(encoding="utf-8"))
+        errors = _hallucinated_column_errors(trace)
+        if not errors:
+            continue
+        failures.append(
+            {
+                "instance_id": trace.get("instance_id") or trace_path.stem,
+                "db": trace.get("db"),
+                "status": trace.get("status"),
+                "trace_path": str(trace_path),
+                "error_count": len(errors),
+                "errors": errors[:5],
+            }
+        )
+    return sorted(failures, key=lambda item: str(item["instance_id"]))
+
+
+def _iter_trace_files(trace_dirs: Sequence[Path]) -> list[Path]:
+    trace_files: list[Path] = []
+    for trace_dir in trace_dirs:
+        if trace_dir.is_file():
+            trace_files.append(trace_dir)
+        elif trace_dir.exists():
+            trace_files.extend(sorted(trace_dir.glob("*.json")))
+    return trace_files
+
+
+def _hallucinated_column_errors(trace: Mapping[str, Any]) -> list[str]:
+    errors: list[str] = []
+    for attempt in trace.get("attempts") or []:
+        validation = attempt.get("validation") or {}
+        for error in validation.get("errors") or []:
+            text = str(error)
+            if _is_hallucinated_column_error(text):
+                errors.append(text)
+    return _stable_strings(errors)
+
+
+def _is_hallucinated_column_error(error: str) -> bool:
+    text = error.casefold()
+    return (
+        "unknown column" in text
+        or "unknown quoted column" in text
+        or "no selected table has it" in text
+    )
+
+
+def _render_report_markdown(report: RetrievalEvalReport) -> str:
+    summary = report.summary()
+    lines = [
+        "# Retrieval Evaluation",
+        "",
+        f"- tasks: {summary['task_count']}",
+        f"- covered schema tasks: {summary['covered_task_count']}",
+        f"- object cutoff: {summary['object_cutoff']}",
+        f"- pre-resolver gold recall: {summary['pre_resolver_gold_recall']:.3f}",
+        f"- post-resolver gold recall: {summary['post_resolver_gold_recall']:.3f}",
+        f"- average prompt reduction: {summary['average_prompt_reduction']:.3f}",
+        f"- recall regressions: {summary['recall_regression_count']}",
+        f"- hallucinated-column failures: {summary['hallucinated_column_failure_count']}",
+        "",
+        "## Recall Regressions",
+    ]
+    if report.recall_regressions:
+        lines.extend(
+            (
+                f"- {item['instance_id']}: {item['stage']} "
+                f"pre={item['pre_resolver_gold_recall']:.3f} "
+                f"post={item['post_resolver_gold_recall']:.3f} "
+                f"missing={', '.join(item['missing_gold_tables']) or 'none'}"
+            )
+            for item in report.recall_regressions[:10]
+        )
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "## Prompt Size Wins"])
+    if report.prompt_size_wins:
+        lines.extend(
+            (
+                f"- {item['instance_id']}: saved {item['prompt_chars_saved']} chars "
+                f"({item['prompt_reduction']:.1%})"
+            )
+            for item in report.prompt_size_wins[:10]
+        )
+    else:
+        lines.append("- none")
+
+    lines.extend(["", "## Hallucinated Column Failures"])
+    if report.hallucinated_column_failures:
+        lines.extend(
+            (
+                f"- {item['instance_id']}: {item['error_count']} validation error(s); "
+                f"{item['errors'][0]}"
+            )
+            for item in report.hallucinated_column_failures[:10]
+        )
+    else:
+        lines.append("- none")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _stable_tables(values: Sequence[str] | Any) -> list[str]:
     seen: set[str] = set()
     tables: list[str] = []
@@ -355,6 +704,18 @@ def _stable_tables(values: Sequence[str] | Any) -> list[str]:
         seen.add(normalized)
         tables.append(table)
     return tables
+
+
+def _stable_strings(values: Sequence[str] | Any) -> list[str]:
+    seen: set[str] = set()
+    strings: list[str] = []
+    for value in values:
+        item = str(value).strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        strings.append(item)
+    return strings
 
 
 def _normalized(values: Sequence[str]) -> set[str]:

@@ -40,7 +40,9 @@ from sol01.schema.index import CACHE_PATH, build_index_cache
 from sol01.schema.retrieval_eval import (
     DEFAULT_GOLD_TABLE_PATH,
     load_gold_tables,
+    load_retrieval_eval_task_rows,
     run_retrieval_eval,
+    write_retrieval_eval_report,
 )
 from sol01.schema.retrieval_index import (
     DEFAULT_RETRIEVAL_INDEX_CACHE_ROOT,
@@ -386,6 +388,31 @@ def retrieval_eval_command(
         int | None,
         typer.Option(min=1, help="Override the retrieval object cutoff."),
     ] = None,
+    covered_only: Annotated[
+        bool,
+        typer.Option(
+            "--covered-only/--all-gold",
+            help="Evaluate only tasks whose gold tables touch curated large-schema summaries.",
+        ),
+    ] = False,
+    baseline_path: Annotated[
+        Path | None,
+        typer.Option(
+            "--baseline-path",
+            help="Previous retrieval-eval report.json or tasks.jsonl for recall regression checks.",
+        ),
+    ] = None,
+    trace_run_ids: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--trace-run-id",
+            help="Existing solver run ID whose traces should be scanned for hallucinated columns.",
+        ),
+    ] = None,
+    output_id: Annotated[
+        str | None,
+        typer.Option(help="Persist report artifacts under outputs/<output_id>/retrieval_eval."),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Print the full evaluation report as JSON."),
@@ -409,23 +436,28 @@ def retrieval_eval_command(
         question_contains=question_contains,
         limit=limit,
         object_cutoff=object_cutoff,
+        covered_only=covered_only,
+        baseline_path=baseline_path,
+        trace_run_ids=trace_run_ids or [],
     )
-    if json_output:
-        typer.echo(
-            json.dumps(
-                {
-                    "summary": report.summary(),
-                    "tasks": report.tasks,
-                    "failures": report.failures,
-                },
-                indent=2,
-                sort_keys=True,
-            )
+    output_dir = None
+    if output_id:
+        output_dir = write_retrieval_eval_report(
+            report,
+            OUTPUTS_ROOT / output_id / "retrieval_eval",
         )
+    if json_output:
+        payload = report.payload()
+        if output_dir is not None:
+            payload["output_dir"] = str(output_dir)
+        typer.echo(json.dumps(payload, indent=2, sort_keys=True))
         return
 
     typer.echo(f"Evaluated {report.task_count} task(s) at object cutoff {report.object_cutoff}.")
+    typer.echo(f"Covered-schema tasks: {report.covered_task_count}")
+    typer.echo(f"Pre-resolver gold recall: {_format_rate(report.pre_resolver_gold_recall)}")
     typer.echo(f"Pre-resolver any-gold recall: {_format_rate(report.pre_resolver_any_gold_recall)}")
+    typer.echo(f"Post-resolver gold recall: {_format_rate(report.post_resolver_gold_recall)}")
     typer.echo(
         f"Post-resolver all-gold recall: {_format_rate(report.post_resolver_all_gold_recall)}"
     )
@@ -434,10 +466,15 @@ def retrieval_eval_command(
     else:
         typer.echo(f"Family expansion success: {_format_rate(report.family_expansion_success)}")
     typer.echo(f"Average prompt reduction: {_format_rate(report.average_prompt_reduction)}")
+    typer.echo(f"Recall regressions: {len(report.recall_regressions)}")
+    typer.echo(f"Prompt-size wins: {len(report.prompt_size_wins)}")
+    typer.echo(f"Hallucinated-column failures: {len(report.hallucinated_column_failures)}")
     if report.failures:
         typer.echo("Missing gold tables:")
         for failure in report.failures[:5]:
             typer.echo(f"- {failure['instance_id']}: {', '.join(failure['missing_gold_tables'])}")
+    if output_dir is not None:
+        typer.echo(f"Report output: {output_dir}")
 
 
 @app.command()
@@ -611,6 +648,9 @@ def handle_retrieval_eval(
     question_contains: str | None,
     limit: int | None,
     object_cutoff: int | None = None,
+    covered_only: bool = False,
+    baseline_path: Path | None = None,
+    trace_run_ids: list[str] | None = None,
 ) -> Any:
     """Run offline retrieval evaluation for selected tasks."""
 
@@ -629,10 +669,15 @@ def handle_retrieval_eval(
     config = SchemaRetrievalConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
     if object_cutoff is not None:
         config = config.model_copy(update={"object_top_k": object_cutoff})
+    baseline_tasks = load_retrieval_eval_task_rows(baseline_path) if baseline_path else {}
+    trace_dirs = [ensure_run_paths(run_id).traces_dir for run_id in trace_run_ids or []]
     return run_retrieval_eval(
         tasks,
         gold_tables_by_instance=gold_tables,
         config=config,
+        covered_only=covered_only,
+        baseline_tasks=baseline_tasks,
+        trace_dirs=trace_dirs,
     )
 
 

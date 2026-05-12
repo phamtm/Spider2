@@ -81,6 +81,12 @@ gold-table JSONL file at `methods/gold-tables/spider2-snow-gold-tables.jsonl`
 by default. Use `--gold-path <path>` only when evaluating another local label
 file. Gold tables are evaluation labels only; runtime planning, SQL generation,
 repair, and candidate review do not receive gold tables.
+Use `--covered-only` to limit the report to gold tables covered by curated
+large-schema summaries. `--baseline-path <report.json|tasks.jsonl>` compares
+recall to a previous report, `--trace-run-id <run_id>` scans saved traces for
+hallucinated-column validation failures, and `--output-id <id>` writes
+`summary.json`, `tasks.jsonl`, `failures.json`, `report.json`, and `summary.md`
+under `outputs/<id>/retrieval_eval/`.
 
 `just run` runs the default solver CLI.
 `just run-selected` runs one or more selected solver tasks.
