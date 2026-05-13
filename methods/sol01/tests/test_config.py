@@ -17,9 +17,25 @@ SCHEMA_CONTEXT_ENV_VARS = [
     "SOL01_SCHEMA_MAX_PROMPT_CHARS",
 ]
 
+LLM_ENV_VARS = [
+    "OPENROUTER_API_KEY",
+    "OPENROUTER_BASE_URL",
+    "OPENROUTER_MODEL",
+    "OPENROUTER_PROVIDER_ONLY",
+    "OPENROUTER_ALLOW_FALLBACKS",
+    "LLM_API_KEY",
+    "LLM_BASE_URL",
+    "LLM_MODEL",
+]
+
 
 def _clear_schema_context_env(monkeypatch):
     for name in SCHEMA_CONTEXT_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+
+
+def _clear_llm_env(monkeypatch):
+    for name in LLM_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
 
 
@@ -28,14 +44,7 @@ def test_default_dotenv_path_points_to_method_root():
 
 
 def test_default_config_uses_deepseek_openrouter_policy(monkeypatch):
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
-    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
-    monkeypatch.delenv("OPENROUTER_PROVIDER_ONLY", raising=False)
-    monkeypatch.delenv("OPENROUTER_ALLOW_FALLBACKS", raising=False)
-    monkeypatch.delenv("LLM_API_KEY", raising=False)
-    monkeypatch.delenv("LLM_BASE_URL", raising=False)
-    monkeypatch.delenv("LLM_MODEL", raising=False)
+    _clear_llm_env(monkeypatch)
 
     config = RuntimeConfig.from_env()
 
@@ -48,37 +57,48 @@ def test_default_config_uses_deepseek_openrouter_policy(monkeypatch):
     assert config.provider_routing == {"provider": {"only": ["deepseek"], "allow_fallbacks": False}}
 
 
-def test_openrouter_env_overrides_generic_aliases(monkeypatch):
-    monkeypatch.setenv("LLM_API_KEY", "generic-key")
-    monkeypatch.setenv("LLM_BASE_URL", "https://generic.example/v1")
-    monkeypatch.setenv("LLM_MODEL", "generic/model")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "openrouter-key")
-    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://openrouter.example/v1")
-    monkeypatch.setenv("OPENROUTER_MODEL", "deepseek/custom")
-    monkeypatch.setenv("OPENROUTER_PROVIDER_ONLY", "deepseek")
-    monkeypatch.setenv("OPENROUTER_ALLOW_FALLBACKS", "false")
+@pytest.mark.parametrize(
+    "env_setup,expected_key,expected_url,expected_model",
+    [
+        pytest.param(
+            {
+                "LLM_API_KEY": "generic-key",
+                "LLM_BASE_URL": "https://generic.example/v1",
+                "LLM_MODEL": "deepseek/generic",
+                "OPENROUTER_API_KEY": "openrouter-key",
+                "OPENROUTER_BASE_URL": "https://openrouter.example/v1",
+                "OPENROUTER_MODEL": "deepseek/custom",
+                "OPENROUTER_PROVIDER_ONLY": "deepseek",
+                "OPENROUTER_ALLOW_FALLBACKS": "false",
+            },
+            "openrouter-key",
+            "https://openrouter.example/v1",
+            "deepseek/custom",
+            id="openrouter-wins-over-generic",
+        ),
+        pytest.param(
+            {
+                "LLM_API_KEY": "generic-key",
+                "LLM_BASE_URL": "https://generic.example/v1",
+                "LLM_MODEL": "deepseek/generic",
+            },
+            "generic-key",
+            "https://generic.example/v1",
+            "deepseek/generic",
+            id="generic-when-no-openrouter",
+        ),
+    ],
+)
+def test_env_precedence(monkeypatch, env_setup, expected_key, expected_url, expected_model):
+    _clear_llm_env(monkeypatch)
+    for k, v in env_setup.items():
+        monkeypatch.setenv(k, v)
 
     config = RuntimeConfig.from_env()
 
-    assert config.api_key == "openrouter-key"
-    assert config.base_url == "https://openrouter.example/v1"
-    assert config.model == "deepseek/custom"
-    assert config.provider_routing == {"provider": {"only": ["deepseek"], "allow_fallbacks": False}}
-
-
-def test_generic_llm_aliases_work_when_openrouter_env_is_absent(monkeypatch):
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
-    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
-    monkeypatch.setenv("LLM_API_KEY", "generic-key")
-    monkeypatch.setenv("LLM_BASE_URL", "https://generic.example/v1")
-    monkeypatch.setenv("LLM_MODEL", "deepseek/generic")
-
-    config = RuntimeConfig.from_env()
-
-    assert config.api_key == "generic-key"
-    assert config.base_url == "https://generic.example/v1"
-    assert config.model == "deepseek/generic"
+    assert config.api_key == expected_key
+    assert config.base_url == expected_url
+    assert config.model == expected_model
 
 
 def test_required_api_key_fails_fast_for_live_runs(monkeypatch):
@@ -96,100 +116,73 @@ def test_fallbacks_remain_disabled_by_default_even_with_truthy_env(monkeypatch):
         RuntimeConfig.from_env()
 
 
-def test_dotenv_file_loads_openrouter_settings_when_shell_is_empty(
-    monkeypatch,
-    tmp_path: Path,
-):
-    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.delenv("OPENROUTER_BASE_URL", raising=False)
-    monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
-    monkeypatch.delenv("LLM_API_KEY", raising=False)
-    monkeypatch.delenv("LLM_BASE_URL", raising=False)
-    monkeypatch.delenv("LLM_MODEL", raising=False)
+@pytest.mark.parametrize(
+    "shell_env,expected_key,expected_url,expected_model",
+    [
+        pytest.param(
+            {},
+            "dotenv-key",
+            "https://dotenv.example/v1",
+            "deepseek/dotenv",
+            id="dotenv-loads-when-shell-empty",
+        ),
+        pytest.param(
+            {
+                "OPENROUTER_API_KEY": "shell-key",
+                "OPENROUTER_BASE_URL": "https://shell.example/v1",
+                "OPENROUTER_MODEL": "deepseek/shell",
+            },
+            "shell-key",
+            "https://shell.example/v1",
+            "deepseek/shell",
+            id="shell-wins-over-dotenv",
+        ),
+        pytest.param(
+            {
+                "OPENROUTER_API_KEY": "   ",
+                "OPENROUTER_BASE_URL": "",
+                "OPENROUTER_MODEL": " ",
+            },
+            "dotenv-key",
+            "https://dotenv.example/v1",
+            "deepseek/dotenv",
+            id="blank-shell-falls-back-to-dotenv",
+        ),
+    ],
+)
+def test_dotenv_fallback(monkeypatch, tmp_path, shell_env, expected_key, expected_url, expected_model):
+    _clear_llm_env(monkeypatch)
+    for k, v in shell_env.items():
+        monkeypatch.setenv(k, v)
+
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text(
-        "\n".join(
-            [
-                "OPENROUTER_API_KEY=dotenv-key",
-                "OPENROUTER_BASE_URL=https://dotenv.example/v1",
-                "OPENROUTER_MODEL=deepseek/dotenv",
-            ]
-        )
+        "\n".join([
+            "OPENROUTER_API_KEY=dotenv-key",
+            "OPENROUTER_BASE_URL=https://dotenv.example/v1",
+            "OPENROUTER_MODEL=deepseek/dotenv",
+        ])
         + "\n",
         encoding="utf-8",
     )
 
     config = RuntimeConfig.from_env(dotenv_path=dotenv_path)
 
-    assert config.api_key == "dotenv-key"
-    assert config.base_url == "https://dotenv.example/v1"
-    assert config.model == "deepseek/dotenv"
+    assert config.api_key == expected_key
+    assert config.base_url == expected_url
+    assert config.model == expected_model
 
 
-def test_shell_env_still_wins_over_dotenv_file(monkeypatch, tmp_path: Path):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "shell-key")
-    monkeypatch.setenv("OPENROUTER_BASE_URL", "https://shell.example/v1")
-    monkeypatch.setenv("OPENROUTER_MODEL", "deepseek/shell")
-    dotenv_path = tmp_path / ".env"
-    dotenv_path.write_text(
-        "\n".join(
-            [
-                "OPENROUTER_API_KEY=dotenv-key",
-                "OPENROUTER_BASE_URL=https://dotenv.example/v1",
-                "OPENROUTER_MODEL=deepseek/dotenv",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    config = RuntimeConfig.from_env(dotenv_path=dotenv_path)
-
-    assert config.api_key == "shell-key"
-    assert config.base_url == "https://shell.example/v1"
-    assert config.model == "deepseek/shell"
-
-
-def test_blank_shell_env_allows_dotenv_fallback(monkeypatch, tmp_path: Path):
-    monkeypatch.setenv("OPENROUTER_API_KEY", "   ")
-    monkeypatch.setenv("OPENROUTER_BASE_URL", "")
-    monkeypatch.setenv("OPENROUTER_MODEL", " ")
-    dotenv_path = tmp_path / ".env"
-    dotenv_path.write_text(
-        "\n".join(
-            [
-                "OPENROUTER_API_KEY=dotenv-key",
-                "OPENROUTER_BASE_URL=https://dotenv.example/v1",
-                "OPENROUTER_MODEL=deepseek/dotenv",
-            ]
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-
-    config = RuntimeConfig.from_env(dotenv_path=dotenv_path)
-
-    assert config.api_key == "dotenv-key"
-    assert config.base_url == "https://dotenv.example/v1"
-    assert config.model == "deepseek/dotenv"
-
-
-def test_sol01_concurrency_env_overrides_default(monkeypatch):
+def test_concurrency_validation(monkeypatch):
     monkeypatch.setenv("SOL01_CONCURRENCY", "7")
+    assert RuntimeConfig.from_env().concurrency == 7
 
-    config = RuntimeConfig.from_env()
-
-    assert config.concurrency == 7
-
-
-def test_sol01_concurrency_env_must_be_positive(monkeypatch):
     monkeypatch.setenv("SOL01_CONCURRENCY", "0")
-
     with pytest.raises(ValueError, match="positive integer"):
         RuntimeConfig.from_env()
 
 
-def test_default_from_env_does_not_read_dotenv_implicitly(monkeypatch, tmp_path: Path):
+def test_default_from_env_does_not_read_dotenv_implicitly(monkeypatch, tmp_path):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("LLM_API_KEY", raising=False)
     dotenv_path = tmp_path / ".env"
@@ -202,7 +195,7 @@ def test_default_from_env_does_not_read_dotenv_implicitly(monkeypatch, tmp_path:
         RuntimeConfig.from_env(require_api_key=True, dotenv_path=None)
 
 
-def test_schema_context_config_defaults_to_single_local_path(monkeypatch):
+def test_schema_context_config_defaults(monkeypatch):
     _clear_schema_context_env(monkeypatch)
 
     config = SchemaContextConfig.from_env()
@@ -213,29 +206,56 @@ def test_schema_context_config_defaults_to_single_local_path(monkeypatch):
     assert config.max_schema_prompt_chars > config.max_linked_doc_chars
 
 
-def test_schema_context_config_env_overrides(monkeypatch):
-    monkeypatch.setenv("SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF", "9")
-    monkeypatch.setenv("SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD", "0.7")
-    monkeypatch.setenv("SOL01_SCHEMA_MAX_LINKED_DOC_CHARS", "4000")
-    monkeypatch.setenv("SOL01_SCHEMA_MAX_PROMPT_CHARS", "18000")
+@pytest.mark.parametrize(
+    "env_overrides,expected",
+    [
+        pytest.param(
+            {
+                "SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF": "9",
+                "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD": "0.7",
+                "SOL01_SCHEMA_MAX_LINKED_DOC_CHARS": "4000",
+                "SOL01_SCHEMA_MAX_PROMPT_CHARS": "18000",
+            },
+            {
+                "object_cutoff": 9,
+                "family_similarity_threshold": 0.7,
+                "max_linked_doc_chars": 4000,
+                "max_schema_prompt_chars": 18000,
+            },
+            id="env-overrides",
+        ),
+    ],
+)
+def test_schema_context_env_overrides(monkeypatch, env_overrides, expected):
+    _clear_schema_context_env(monkeypatch)
+    for k, v in env_overrides.items():
+        monkeypatch.setenv(k, v)
 
     config = SchemaContextConfig.from_env()
 
-    assert config.object_cutoff == 9
-    assert config.family_similarity_threshold == 0.7
-    assert config.max_linked_doc_chars == 4000
-    assert config.max_schema_prompt_chars == 18000
+    for field, value in expected.items():
+        assert getattr(config, field) == value
 
 
-def test_schema_context_numeric_env_values_are_validated(monkeypatch):
+@pytest.mark.parametrize(
+    "bad_env,match",
+    [
+        pytest.param(
+            {"SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF": "0"},
+            "positive integer",
+            id="zero-cutoff",
+        ),
+        pytest.param(
+            {"SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF": "3", "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD": "1.1"},
+            "between 0 and 1",
+            id="threshold-above-one",
+        ),
+    ],
+)
+def test_schema_context_numeric_validation(monkeypatch, bad_env, match):
     _clear_schema_context_env(monkeypatch)
-    monkeypatch.setenv("SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF", "0")
+    for k, v in bad_env.items():
+        monkeypatch.setenv(k, v)
 
-    with pytest.raises(ValueError, match="positive integer"):
-        SchemaContextConfig.from_env()
-
-    monkeypatch.setenv("SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF", "3")
-    monkeypatch.setenv("SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD", "1.1")
-
-    with pytest.raises(ValueError, match="between 0 and 1"):
+    with pytest.raises(ValueError, match=match):
         SchemaContextConfig.from_env()

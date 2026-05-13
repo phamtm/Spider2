@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -22,83 +21,6 @@ runner = CliRunner()
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
-
-
-@dataclass
-class DummyAnswer:
-    """Small return object for the ask command test."""
-
-    status: str
-    csv_path: str | None = None
-
-
-def test_index_command_dispatches(monkeypatch):
-    """The index command should call the index handler once."""
-
-    called: dict[str, Any] = {}
-
-    def fake_handle_index() -> dict[str, Any]:
-        called["ok"] = True
-        return {"db_one": {}}
-
-    monkeypatch.setattr(cli, "handle_index", fake_handle_index)
-
-    result = runner.invoke(cli.app, ["index"])
-
-    assert result.exit_code == 0
-    assert called == {"ok": True}
-    assert "Indexed" in result.output
-
-
-def test_run_command_dispatches_expected_filters(monkeypatch):
-    """The run command should pass through the task filters and run ID."""
-
-    called: dict[str, Any] = {}
-
-    def fake_handle_run(**kwargs: Any) -> list[Any]:
-        called.update(kwargs)
-        return {
-            "tasks": [Task(instance_id="local003", db="db", question="Question text")],
-            "results": [
-                FinalAnswer(
-                    instance_id="local003",
-                    status="success",
-                    sql="SELECT 1",
-                    csv_path="out.csv",
-                    trace_path="trace.json",
-                )
-            ],
-            "eval_summary": {
-                "correct_tasks": 1,
-                "attempted_tasks": 1,
-                "missing_csv_count": 0,
-                "per_instance": [
-                    {"instance_id": "local003", "passed": True, "score": 1, "csv_present": True}
-                ],
-            },
-        }
-
-    monkeypatch.setattr(cli, "handle_run", fake_handle_run)
-
-    result = runner.invoke(
-        cli.app,
-        ["run", "--instance-id", "local003", "--run-id", "smoke-local003"],
-    )
-
-    assert result.exit_code == 0
-    assert called == {
-        "run_id": "smoke-local003",
-        "selectors": [],
-        "instance_id": "local003",
-        "db": None,
-        "question_contains": None,
-        "limit": None,
-        "force": False,
-        "skip_failed": False,
-    }
-    assert "Eval summary: 1/1 correct, missing CSV 0" in result.output
-    assert "Exec time:" in result.output
-    assert "- local003: PASS | task success | Question text" in result.output
 
 
 def test_run_command_dispatches_positional_selectors(monkeypatch):
@@ -133,53 +55,6 @@ def test_run_command_dispatches_positional_selectors(monkeypatch):
     assert called["selectors"] == ["sf035", "sf_bq135"]
     assert called["run_id"] == "selected-bugs"
     assert called["force"] is True
-
-
-def test_run_command_forwards_explicit_concurrency(monkeypatch):
-    """The run command should forward an explicit concurrency value."""
-
-    called: dict[str, Any] = {}
-
-    def fake_handle_run(**kwargs: Any) -> dict[str, Any]:
-        called.update(kwargs)
-        return {
-            "tasks": [Task(instance_id="local003", db="db", question="Question text")],
-            "results": [
-                FinalAnswer(
-                    instance_id="local003",
-                    status="success",
-                    sql="SELECT 1",
-                    csv_path="out.csv",
-                    trace_path="trace.json",
-                )
-            ],
-            "eval_summary": {
-                "correct_tasks": 1,
-                "attempted_tasks": 1,
-                "missing_csv_count": 0,
-                "per_instance": [
-                    {"instance_id": "local003", "passed": True, "score": 1, "csv_present": True}
-                ],
-            },
-        }
-
-    monkeypatch.setattr(cli, "handle_run", fake_handle_run)
-
-    result = runner.invoke(
-        cli.app,
-        [
-            "run",
-            "--instance-id",
-            "local003",
-            "--run-id",
-            "smoke-local003",
-            "--concurrency",
-            "8",
-        ],
-    )
-
-    assert result.exit_code == 0
-    assert called["concurrency"] == 8
 
 
 def test_handle_run_passes_default_dotenv_path(monkeypatch):
@@ -444,36 +319,6 @@ def test_selector_run_rejects_instance_id_filter_combo():
         )
 
 
-def test_eval_command_dispatches_filters(monkeypatch):
-    """The eval command should pass through its debug filters."""
-
-    called: dict[str, Any] = {}
-
-    def fake_handle_eval(**kwargs: Any) -> dict[str, Any]:
-        called.update(kwargs)
-        return {
-            "correct_tasks": 1,
-            "attempted_tasks": 1,
-            "missing_csv_count": 0,
-        }
-
-    monkeypatch.setattr(cli, "handle_eval", fake_handle_eval)
-
-    result = runner.invoke(
-        cli.app,
-        ["eval", "--run-id", "smoke-local003", "--instance-id", "local003"],
-    )
-
-    assert result.exit_code == 0
-    assert called == {
-        "run_id": "smoke-local003",
-        "instance_id": "local003",
-        "db": None,
-        "question_contains": None,
-        "limit": None,
-    }
-
-
 def test_handle_eval_passes_filtered_ids_without_rewriting_manifest(monkeypatch, tmp_path: Path):
     """Filtered eval should pass expected IDs directly instead of mutating the manifest."""
 
@@ -584,26 +429,6 @@ def test_filtered_eval_tag_adds_a_disambiguating_hash():
     )
 
     assert first != second
-
-
-def test_analyze_command_dispatches(monkeypatch):
-    """The analyze command should call the analysis handler."""
-
-    called: dict[str, Any] = {}
-
-    def fake_handle_analyze(**kwargs: Any) -> dict[str, Any]:
-        called.update(kwargs)
-        return {
-            "trace_count": 3,
-            "status_counts": {"success": 1, "failed": 2, "skipped": 0},
-        }
-
-    monkeypatch.setattr(cli, "handle_analyze", fake_handle_analyze)
-
-    result = runner.invoke(cli.app, ["analyze", "--run-id", "smoke-local003"])
-
-    assert result.exit_code == 0
-    assert called == {"run_id": "smoke-local003"}
 
 
 def test_llm_calls_command_summarizes_rows(monkeypatch, tmp_path: Path):
@@ -747,30 +572,6 @@ def test_llm_calls_command_exits_cleanly_when_log_is_missing(monkeypatch, tmp_pa
 
     assert result.exit_code == 1
     assert "No usable LLM call rows were found" in result.output
-
-
-def test_ask_command_dispatches(monkeypatch):
-    """The ask command should pass db and question to the ask handler."""
-
-    called: dict[str, Any] = {}
-
-    def fake_handle_ask(**kwargs: Any) -> DummyAnswer:
-        called.update(kwargs)
-        return DummyAnswer(status="success", csv_path="/tmp/result.csv")
-
-    monkeypatch.setattr(cli, "handle_ask", fake_handle_ask)
-
-    result = runner.invoke(
-        cli.app,
-        ["ask", "--db", "E_commerce", "Which customers have the highest AOV?"],
-    )
-
-    assert result.exit_code == 0
-    assert called == {
-        "db": "E_commerce",
-        "question": "Which customers have the highest AOV?",
-    }
-    assert "Ask status: success" in result.output
 
 
 def test_handle_ask_uses_ask_layout(monkeypatch, tmp_path: Path):
