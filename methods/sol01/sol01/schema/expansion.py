@@ -137,7 +137,7 @@ def attempt_schema_expansion(
         ctx,
         expanded_schema,
         table_schemas=resolved.table_schemas,
-        sql_reference_context=resolved.prompt_context,
+        prebuilt_reference=resolved.prompt_context,
     )
 
     expansion_stage = "schema_expansion"
