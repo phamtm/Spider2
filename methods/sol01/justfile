@@ -26,7 +26,7 @@ run-selected +selectors:
 
 # Run one Spider2-snow gold SQL instance ID and score the CSV output.
 gold instance_id:
-    uv run python -m sol01.gold_run "{{instance_id}}"
+    uv run python -m sol01.analysis.gold_run "{{instance_id}}"
 
 # Run the progress dashboard.
 progress:

@@ -128,7 +128,7 @@ def _format_llm_call_option(row: dict[str, Any]) -> str:
 
 def build_run_command(dataset_path: Path, source_path: Path) -> str:
     return (
-        "uv run streamlit run progress_ui.py -- "
+        "uv run streamlit run sol01/progress_ui/app.py -- "
         f"--dataset {shlex.quote(str(dataset_path))} "
         f"--source {shlex.quote(str(source_path))}"
     )

@@ -673,7 +673,7 @@ def test_build_run_command_includes_dataset_and_source_paths():
     )
 
     assert command == (
-        "uv run streamlit run progress_ui.py -- "
+        "uv run streamlit run sol01/progress_ui/app.py -- "
         "--dataset /tmp/dataset.jsonl "
         "--source /tmp/results/latest.json"
     )

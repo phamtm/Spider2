@@ -527,7 +527,8 @@ trace races.
 
 ## Main Files
 
-- `sol01/tasks.py`: loads and filters Spider2-Snow tasks.
+- `sol01/loading/tasks.py`: loads and filters Spider2-Snow tasks.
+- `sol01/loading/docs.py`: loads linked markdown documents.
 - `sol01/schema/index.py`: builds the Snowflake metadata cache.
 - `sol01/schema/objects.py`: builds canonical logical schema objects.
 - `sol01/schema/chunks.py`: renders schema-context chunks from schema objects.
@@ -535,21 +536,22 @@ trace races.
 - `sol01/schema/schema_context.py`: selects deterministic schema context.
 - `sol01/schema/resolver.py`: resolves selected logical objects to physical table context.
 - `sol01/schema/schema_context_eval.py`: evaluates offline schema-context coverage.
-- `sol01/docs.py`: loads linked markdown documents.
 - `sol01/llm/client.py`: runs structured LLM calls and logs raw call data.
-- `sol01/prompt_builders.py`: builds the prompts for each pipeline stage.
+- `sol01/llm/prompt_builders.py`: builds the prompts for each pipeline stage.
+- `sol01/llm/llm_call_logs.py`: reads persisted LLM call logs for CLI/UI inspection.
 - `sol01/coordinator.py`: runs the per-task solver pipeline.
-- `sol01/candidate_evaluator.py`: validates, executes, profiles, and scores a candidate.
-- `sol01/candidate_scoring.py`: produces local score breakdowns for review evidence.
-- `sol01/candidate_verification.py`: adds shape, filter, aggregate, and metric-source checks.
-- `sol01/validation.py`: blocks unsafe or out-of-scope SQL before execution.
-- `sol01/snowflake_runner.py`: executes SQL against Snowflake.
-- `sol01/output.py`: creates run folders and writes artifacts.
-- `sol01/eval_runner.py`: runs and persists official evaluator output.
-- `sol01/registry.py`: records local run history.
+- `sol01/candidates/evaluator.py`: validates, executes, profiles, and scores a candidate.
+- `sol01/candidates/scoring.py`: produces local score breakdowns for review evidence.
+- `sol01/candidates/verification.py`: adds shape, filter, aggregate, and metric-source checks.
+- `sol01/execution/validation.py`: blocks unsafe or out-of-scope SQL before execution.
+- `sol01/execution/snowflake_runner.py`: executes SQL against Snowflake.
+- `sol01/output/output.py`: creates run folders and writes artifacts.
+- `sol01/output/registry.py`: records local run history.
+- `sol01/analysis/eval_runner.py`: runs and persists official evaluator output.
+- `sol01/analysis/gold_run.py`: runs one official gold SQL file.
+- `sol01/analysis/analysis.py`: summarizes persisted solver runs.
 - `sol01/cli.py`: wires the user-facing commands to the solver pipeline.
-- `sol01/gold_run.py`: runs one official gold SQL file.
-- `progress_ui.py`: shows run progress, failures, and LLM call details.
+- `sol01/progress_ui/app.py`: shows run progress, failures, and LLM call details.
 
 ## Boundaries
 

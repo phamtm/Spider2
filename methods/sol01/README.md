@@ -227,7 +227,7 @@ Pass/fail comes from the official evaluator:
 6. Check `methods/sol01/outputs/registry/latest.json`.
 7. Inspect `schema_context` in `traces/<instance_id>.json` for selection,
    planner, resolver, and expansion diagnostics.
-8. Use the Streamlit `LLM calls` view in `progress_ui.py` to pick a question
+8. Use the Streamlit `LLM calls` view in `sol01/progress_ui/app.py` to pick a question
    and inspect the call timeline.
 9. Use `uv run sol01 llm-calls --run-id <run_id> --instance-id <instance_id>`
    for a terminal summary, or add `--call-id <call_id>` for one full call.

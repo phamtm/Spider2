@@ -44,7 +44,7 @@ def test_just_gold_remains_separate_from_solver_cli():
 
     assert completed.returncode == 0
     output = _combined_output(completed)
-    assert "python -m sol01.gold_run" in output
+    assert "python -m sol01.analysis.gold_run" in output
     assert "uv run sol01 run" not in output
 
 
