@@ -7,13 +7,13 @@ from collections.abc import Iterable
 from typing import Any
 
 from sol01.models import SchemaContextChunk, SchemaObject, is_schema_object_id
+from sol01.schema.constants import MAX_FAMILY_MEMBERS_IN_PROMPT
 from sol01.schema.large_schema_summaries import (
     LargeSchemaSummary,
     load_large_schema_summary_registry,
 )
 
 MAX_COLUMNS_IN_CHUNK = 30
-MAX_FAMILY_MEMBERS_IN_PROMPT = 12
 MAX_SAMPLE_LITERAL_CHARS = 80
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")

@@ -15,9 +15,9 @@ from sol01.models import (
     SelectedSchemaObject,
     TableSchema,
 )
+from sol01.schema.constants import MAX_FAMILY_MEMBERS_IN_PROMPT
 from sol01.schema.reference_context import render_table_reference
 
-MAX_FAMILY_MEMBERS_IN_PROMPT = 16
 MAX_FAMILY_MEMBERS_TO_EXPAND = 64
 MAX_VARIANT_COLUMNS_IN_PROMPT = 12
 MAX_SCHEMA_CONTEXT_EVIDENCE_LINES = 8
