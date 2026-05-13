@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from sol01.loading.tasks import REPO_ROOT
+from sol01.infra.paths import REPO_ROOT
 
 OUTPUTS_ROOT = REPO_ROOT / "methods" / "sol01" / "outputs"
 
