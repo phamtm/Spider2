@@ -1,0 +1,13 @@
+{
+  "active": true,
+  "iteration": 1,
+  "minIterations": 1,
+  "maxIterations": 9,
+  "completionPromise": "COMPLETE",
+  "tasksMode": false,
+  "taskPromise": "READY_FOR_NEXT_TASK",
+  "prompt": "implement the first ready bead task, commit after wards",
+  "startedAt": "2026-05-13T03:31:04.900Z",
+  "model": "",
+  "agent": "opencode"
+}
