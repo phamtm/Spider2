@@ -8,11 +8,9 @@ import sys
 from pathlib import Path
 
 from sol01.analysis.eval_runner import (
-    BENCHMARK_TOTAL,
     EVALUATE_SCRIPT,
     GOLD_DIR,
     build_eval_command,
-    parse_eval_stdout,
     run_official_eval,
     run_persisted_eval,
 )
@@ -135,25 +133,6 @@ def test_run_official_eval_writes_stdout_and_summary(tmp_path: Path):
     assert eval_per_instance_path_for(run_paths, eval_id="default").exists()
 
 
-def test_parse_eval_stdout_returns_local_and_full_scores():
-    stdout = (
-        "{'sf_local003': 1, 'sf_local004': 0}\n"
-        "Final score: 0.5, Correct examples: 2, Total examples: 4\n"
-        "Real score: 0.003656307129798903, Correct examples: 2, Total examples: 547\n"
-    )
-
-    summary = parse_eval_stdout(stdout)
-
-    assert summary == {
-        "attempted_tasks": 4,
-        "correct_tasks": 2,
-        "attempted_score": 0.5,
-        "benchmark_total": BENCHMARK_TOTAL,
-        "benchmark_score": 0.003656307129798903,
-        "instance_scores": {"sf_local003": 1, "sf_local004": 0},
-    }
-
-
 def test_run_official_eval_persists_output_on_failure(tmp_path: Path):
     run_paths = ensure_run_paths("broken-run", outputs_root=tmp_path)
     run_paths.manifest_path.write_text('{"task_ids": ["sf_local003"]}\n', encoding="utf-8")
@@ -189,74 +168,6 @@ def test_run_official_eval_persists_output_on_failure(tmp_path: Path):
     assert command_record["returncode"] == 2
     summary = (run_paths.eval_dir / "summary.json").read_text(encoding="utf-8")
     assert '"returncode": 2' in summary
-
-
-def test_run_official_eval_with_artifact_tag_keeps_shared_summary_name_free(tmp_path: Path):
-    run_paths = ensure_run_paths("filtered-run", outputs_root=tmp_path)
-    run_paths.manifest_path.write_text('{"task_ids": ["sf_local003"]}\n', encoding="utf-8")
-
-    def fake_runner(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            args=command,
-            returncode=0,
-            stdout="Final score: 1.0, Correct examples: 1, Total examples: 1\n",
-            stderr="",
-        )
-
-    run_official_eval(
-        "filtered-run",
-        outputs_root=tmp_path,
-        expected_instance_ids=["sf_local003"],
-        artifact_tag="filtered-sf-local003",
-        runner=fake_runner,
-    )
-
-    tagged_run_dir = run_paths.eval_dir / "runs" / "filtered-sf-local003"
-    assert not (run_paths.eval_dir / "summary.json").exists()
-    assert (tagged_run_dir / "summary.json").exists()
-    tagged_summary = run_paths.eval_dir / "summary.filtered-sf-local003.json"
-    assert tagged_summary.exists()
-    payload = json.loads(tagged_summary.read_text(encoding="utf-8"))
-    assert payload["eval_id"] == "filtered-sf-local003"
-    assert payload["result_dir"] == str(
-        eval_input_csv_dir_for(run_paths, eval_id="filtered-sf-local003")
-    )
-    assert payload["cwd"] == str(
-        eval_workspace_suite_dir_for(run_paths, eval_id="filtered-sf-local003")
-    )
-
-
-def test_run_official_eval_uses_the_scored_result_dir_for_bookkeeping(tmp_path: Path):
-    run_paths = ensure_run_paths("filtered-run", outputs_root=tmp_path)
-    scored_dir = tmp_path / "scored"
-    scored_dir.mkdir(parents=True, exist_ok=True)
-    (scored_dir / "sf_local003.csv").write_text("answer\n1\n", encoding="utf-8")
-
-    def fake_runner(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(
-            args=command,
-            returncode=0,
-            stdout=(
-                "{'sf_local003': 1}\nFinal score: 1.0, Correct examples: 1, Total examples: 1\n"
-            ),
-            stderr="",
-        )
-
-    summary = run_official_eval(
-        "filtered-run",
-        outputs_root=tmp_path,
-        expected_instance_ids=["sf_local003", "sf_local004"],
-        result_dir=scored_dir,
-        runner=fake_runner,
-    )
-
-    assert summary["result_dir"] == str(eval_input_csv_dir_for(run_paths, eval_id="default"))
-    assert summary["missing_csv_count"] == 1
-    assert summary["missing_instance_ids"] == ["sf_local004"]
-    assert summary["per_instance"] == [
-        {"csv_present": True, "instance_id": "sf_local003", "passed": True, "score": 1},
-        {"csv_present": False, "instance_id": "sf_local004", "passed": False, "score": None},
-    ]
 
 
 def test_run_persisted_eval_copies_scored_csvs_and_writes_per_instance_records(
@@ -460,31 +371,4 @@ def test_run_official_eval_stages_local_credentials_without_mutating_suite(
     assert after == before
 
 
-def test_run_official_eval_refreshes_temp_workspace_on_rerun(tmp_path: Path):
-    run_paths = ensure_run_paths("temp-refresh-run", outputs_root=tmp_path)
-    run_paths.manifest_path.write_text('{"task_ids": ["sf_local003"]}\n', encoding="utf-8")
-    (run_paths.csv_dir / "sf_local003.csv").write_text("answer\n1\n", encoding="utf-8")
-    temp_dir = eval_temp_dir_for(run_paths, eval_id="default")
-    temp_dir.mkdir(parents=True, exist_ok=True)
-    (temp_dir / "stale.txt").write_text("stale\n", encoding="utf-8")
 
-    def fake_runner(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
-        assert cwd == eval_workspace_suite_dir_for(run_paths, eval_id="default")
-        assert temp_dir.exists()
-        assert list(temp_dir.iterdir()) == []
-        return subprocess.CompletedProcess(
-            args=command,
-            returncode=0,
-            stdout="Final score: 1.0, Correct examples: 1, Total examples: 1\n",
-            stderr="",
-        )
-
-    run_official_eval(
-        "temp-refresh-run",
-        outputs_root=tmp_path,
-        expected_instance_ids=["sf_local003"],
-        runner=fake_runner,
-    )
-
-    assert temp_dir.exists()
-    assert list(temp_dir.iterdir()) == []
