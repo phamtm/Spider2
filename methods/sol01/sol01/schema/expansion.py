@@ -15,6 +15,7 @@ from sol01.llm.prompt_builders import (
     sql_generation_batch_prompt,
 )
 from sol01.models import (
+    AttemptRecord,
     SchemaPlanningDecision,
     SchemaSelection,
     SelectedSchemaObject,
@@ -44,38 +45,38 @@ class ExpansionContext(Protocol):
 RunPrompt = Callable[..., Any]
 BuildPlanningPrompt = Callable[..., str]
 PromptBudgetDiagnostics = Callable[..., dict[str, object]]
-LogCandidate = Callable[[str, dict[str, Any]], None]
+LogCandidate = Callable[[str, AttemptRecord], None]
 RebuildContext = Callable[..., ExpansionContext]
 
 
 def attempt_schema_expansion(
     ctx: ExpansionContext,
-    attempts: list[dict[str, Any]],
-    best_attempt: dict[str, Any] | None,
+    attempts: list[AttemptRecord],
+    current_best: AttemptRecord | None,
     *,
     run_prompt: RunPrompt,
     build_planning_prompt: BuildPlanningPrompt,
     prompt_budget_diagnostics: PromptBudgetDiagnostics,
     rebuild_context: RebuildContext,
     log_candidate: LogCandidate,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None, ExpansionContext | None]:
+) -> tuple[AttemptRecord | None, dict[str, Any] | None, ExpansionContext | None]:
     """Run one schema-expansion recovery attempt when evidence warrants it."""
 
-    if best_attempt is None:
-        return best_attempt, None, None
+    if current_best is None:
+        return current_best, None, None
 
-    trigger = schema_expansion_trigger(best_attempt)
+    trigger = schema_expansion_trigger(current_best)
     if trigger is None:
-        return best_attempt, None, None
+        return current_best, None, None
 
     try:
         db_index = load_db_index(ctx.task.db)
     except Exception:
-        return best_attempt, None, None
+        return current_best, None, None
 
     expansion_payload: dict[str, Any] = {
         "trigger": trigger,
-        "expansion_query": _schema_expansion_query(ctx, best_attempt, trigger),
+        "expansion_query": _schema_expansion_query(ctx, current_best, trigger),
         "decision": None,
         "added_tables": [],
         "outcome": "no_new_tables",
@@ -86,7 +87,7 @@ def attempt_schema_expansion(
         config=ctx.schema_context_config,
     )
 
-    deterministic_tables = _deterministic_expansion_tables(best_attempt, ctx.schema, db_index)
+    deterministic_tables = _deterministic_expansion_tables(current_best, ctx.schema, db_index)
     if deterministic_tables:
         expansion_payload["decision"] = {
             "source": "exact_name",
@@ -105,7 +106,7 @@ def attempt_schema_expansion(
     else:
         selected_additions, schema_context_objects, planner_diagnostics = _select_expansion_objects(
             ctx,
-            best_attempt,
+            current_best,
             trigger,
             schema_context_cache=schema_context_cache,
             expansion_query=expansion_payload["expansion_query"],
@@ -143,7 +144,7 @@ def attempt_schema_expansion(
     )
     if not added_tables:
         expansion_payload["outcome"] = "no_new_tables"
-        return best_attempt, expansion_payload, None
+        return current_best, expansion_payload, None
 
     expanded_ctx = rebuild_context(
         ctx,
@@ -187,7 +188,7 @@ def attempt_schema_expansion(
     log_candidate(ctx.task.instance_id, expansion_attempt)
 
     expansion_payload["outcome"] = (
-        "expanded" if expansion_attempt["execution_result"]["ok"] else "expanded_failed"
+        "expanded" if expansion_attempt.execution_result.ok else "expanded_failed"
     )
     expanded_ctx.schema_context = _schema_context_with_expansion(
         ctx.schema_context,
@@ -198,7 +199,7 @@ def attempt_schema_expansion(
 
 def _select_expansion_objects(
     ctx: ExpansionContext,
-    attempt: dict[str, Any],
+    attempt: AttemptRecord,
     trigger: str,
     *,
     schema_context_cache: Any,
@@ -320,20 +321,18 @@ def _resolve_expanded_schema(
 
 def _schema_expansion_query(
     ctx: ExpansionContext,
-    attempt: dict[str, Any],
+    attempt: AttemptRecord,
     trigger: str,
 ) -> str:
     """Build the augmented planning question used to find expansion candidates."""
 
-    validation = attempt.get("validation", {})
-    execution = attempt.get("execution_result", {})
     parts = [
         f"Original question: {ctx.task.question}",
         f"Schema expansion trigger: {trigger}",
-        f"Failed SQL: {attempt.get('sql') or ''}",
-        f"Validation errors: {'; '.join(validation.get('errors', [])) or 'none'}",
-        f"Validation warnings: {'; '.join(validation.get('warnings', [])) or 'none'}",
-        f"Execution error: {execution.get('error') or 'none'}",
+        f"Failed SQL: {attempt.sql}",
+        f"Validation errors: {'; '.join(attempt.validation.errors) or 'none'}",
+        f"Validation warnings: {'; '.join(attempt.validation.warnings) or 'none'}",
+        f"Execution error: {attempt.execution_result.error or 'none'}",
         "Current selected object ids: " + ", ".join(ctx.schema.selected_object_ids),
         "Current allowed tables: " + ", ".join(ctx.schema.expanded_tables),
     ]
@@ -341,7 +340,7 @@ def _schema_expansion_query(
 
 
 def _deterministic_expansion_tables(
-    attempt: dict[str, Any],
+    attempt: AttemptRecord,
     schema: SchemaSelection,
     db_index: dict[str, Any],
 ) -> list[str]:
@@ -358,17 +357,16 @@ def _deterministic_expansion_tables(
     return selected
 
 
-def _table_names_from_schema_errors(attempt: dict[str, Any]) -> list[str]:
+def _table_names_from_schema_errors(attempt: AttemptRecord) -> list[str]:
     """Extract table-like names explicitly reported by validation or execution."""
 
     names: list[str] = []
-    validation = attempt.get("validation", {})
-    for error in validation.get("errors", []):
+    for error in attempt.validation.errors:
         match = re.search(r"Unknown table referenced:\s*([A-Za-z0-9_.$\"]+)", error)
         if match:
-            names.append(match.group(1).strip('".'))
+            names.append(match.group(1).strip('".')  )
 
-    execution_error = str(attempt.get("execution_result", {}).get("error") or "")
+    execution_error = attempt.execution_result.error or ""
     if execution_error:
         quoted_names = re.findall(r"['\"]([A-Za-z0-9_.$]+)['\"]", execution_error)
         names.extend(match.strip('"') for match in quoted_names)

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 SchemaObjectKind = Literal[
     "table",
@@ -393,6 +393,35 @@ class CandidateReviewReport(BaseModel):
     issues: list[str] = Field(default_factory=list)
     should_repair: bool
     repair_focus: str | None = None
+
+
+class AttemptRecord(BaseModel):
+    """Typed record for one evaluated SQL candidate through the pipeline."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    stage: str
+    sql: str
+    explanation: str
+    assumptions: list[str] = Field(default_factory=list)
+    constraint_ledger: list[str] = Field(default_factory=list)
+    unsupported_assumptions: list[str] = Field(default_factory=list)
+    candidate_confidence: float
+    validation: ValidationReport
+    execution_result: ExecutionResult
+    filter_grounding_report: FilterGroundingReport | None = None
+    shape_report: OutputShapeReport | None = None
+    score_breakdown: dict[str, float] = Field(default_factory=dict)
+    verification_penalty_reasons: dict[str, float] = Field(default_factory=dict)
+    score: float
+    result_profile: dict[str, Any] | None = None
+    aggregate_grain: AggregateGrainReport | None = None
+    elapsed_seconds: float = 0.0
+    critic: dict[str, Any] | None = None
+    candidate_review: dict[str, Any] | None = None
+    repair_skipped_reason: str | None = None
+
+    _dataframe: Any = PrivateAttr(default=None)
 
 
 class FinalAnswer(BaseModel):

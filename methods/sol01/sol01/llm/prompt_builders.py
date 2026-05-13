@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from sol01.models import (
+    AttemptRecord,
     ConfidenceReport,
     Intent,
     SchemaContextObject,
@@ -47,23 +48,31 @@ def enforce_prompt_budget(prompt_name: str, prompt: str, max_chars: int) -> str:
     return prompt
 
 
-def _comparison_attempt_summary(attempt: dict[str, Any]) -> dict[str, Any]:
+def _comparison_attempt_summary(attempt: AttemptRecord) -> dict[str, Any]:
     """Render one attempt in a compact, comparison-friendly format."""
 
     return {
-        "stage": attempt["stage"],
-        "sql": attempt["sql"],
-        "assumptions": attempt.get("assumptions", []),
-        "constraint_ledger": attempt.get("constraint_ledger", []),
-        "unsupported_assumptions": attempt.get("unsupported_assumptions", []),
-        "candidate_confidence": attempt["candidate_confidence"],
-        "score": attempt["score"],
-        "score_breakdown": attempt.get("score_breakdown", {}),
-        "validation": attempt["validation"],
-        "execution_result": attempt["execution_result"],
-        "filter_grounding_report": attempt.get("filter_grounding_report"),
-        "shape_report": attempt.get("shape_report"),
-        "result_profile": attempt.get("result_profile", {}),
+        "stage": attempt.stage,
+        "sql": attempt.sql,
+        "assumptions": attempt.assumptions,
+        "constraint_ledger": attempt.constraint_ledger,
+        "unsupported_assumptions": attempt.unsupported_assumptions,
+        "candidate_confidence": attempt.candidate_confidence,
+        "score": attempt.score,
+        "score_breakdown": attempt.score_breakdown,
+        "validation": attempt.validation.model_dump(mode="json"),
+        "execution_result": attempt.execution_result.model_dump(mode="json"),
+        "filter_grounding_report": (
+            attempt.filter_grounding_report.model_dump(mode="json")
+            if attempt.filter_grounding_report is not None
+            else None
+        ),
+        "shape_report": (
+            attempt.shape_report.model_dump(mode="json")
+            if attempt.shape_report is not None
+            else None
+        ),
+        "result_profile": attempt.result_profile or {},
     }
 
 
@@ -435,7 +444,7 @@ def sql_generation_batch_prompt(
 def sql_repair_prompt(
     task: Task,
     intent: Intent | None,
-    attempt: dict[str, Any],
+    attempt: AttemptRecord,
     sql_reference_context: str,
     docs_context: str,
 ) -> str:
@@ -450,9 +459,13 @@ def sql_repair_prompt(
         f"{sql_reference_context}\n\n"
         f"Document context:\n{docs_context}\n\n"
         f"Question: {task.question}\n\n"
-        f"Failed SQL:\n{attempt['sql']}\n\n"
-        f"Validation:\n{json.dumps(attempt['validation'], indent=2, sort_keys=True)}\n\n"
-        f"Execution:\n{json.dumps(attempt['execution_result'], indent=2, sort_keys=True)}\n\n"
+        f"Failed SQL:\n{attempt.sql}\n\n"
+        f"Validation:\n"
+        f"{json.dumps(attempt.validation.model_dump(mode='json'), indent=2, sort_keys=True)}"
+        "\n\n"
+        f"Execution:\n"
+        f"{json.dumps(attempt.execution_result.model_dump(mode='json'), indent=2, sort_keys=True)}"
+        "\n\n"
         f"{grounded_literal_block}"
     )
 
@@ -460,7 +473,7 @@ def sql_repair_prompt(
 def candidate_review_prompt(
     task: Task,
     intent: Intent,
-    attempts: list[dict[str, Any]],
+    attempts: list[AttemptRecord],
     sql_reference_context: str,
     docs_context: str,
     *,
@@ -494,7 +507,7 @@ def candidate_review_prompt(
 def semantic_repair_prompt(
     task: Task,
     intent: Intent,
-    attempt: dict[str, Any],
+    attempt: AttemptRecord,
     critic: ConfidenceReport,
     sql_reference_context: str,
     docs_context: str,
@@ -509,18 +522,18 @@ def semantic_repair_prompt(
         f"Question: {task.question}\n\n"
         f"Current answer contract:\n{intent.model_dump_json(indent=2)}\n\n"
         f"{grounded_literal_block}"
-        f"Current SQL:\n{attempt['sql']}\n\n"
+        f"Current SQL:\n{attempt.sql}\n\n"
         "Candidate assumptions:\n"
-        f"{json.dumps(attempt.get('assumptions', []), indent=2, sort_keys=True)}\n\n"
+        f"{json.dumps(attempt.assumptions, indent=2, sort_keys=True)}\n\n"
         "Candidate constraint ledger:\n"
-        f"{json.dumps(attempt.get('constraint_ledger', []), indent=2, sort_keys=True)}\n\n"
+        f"{json.dumps(attempt.constraint_ledger, indent=2, sort_keys=True)}\n\n"
         "Candidate unsupported assumptions:\n"
-        f"{json.dumps(attempt.get('unsupported_assumptions', []), indent=2, sort_keys=True)}\n\n"
+        f"{json.dumps(attempt.unsupported_assumptions, indent=2, sort_keys=True)}\n\n"
         f"Critic issues:\n{json.dumps(critic.model_dump(mode='json'), indent=2, sort_keys=True)}"
     )
 
 
-def schema_expansion_trigger(attempt: dict[str, Any]) -> str | None:
+def schema_expansion_trigger(attempt: AttemptRecord) -> str | None:
     """Return why schema expansion is warranted for this attempt, or None.
 
     Only returns a non-None value when there is explicit evidence that the
@@ -529,24 +542,23 @@ def schema_expansion_trigger(attempt: dict[str, Any]) -> str | None:
     object/table-not-found execution error, or a critic repair_focus that
     names schema_selection or missing_join.
     """
-    validation = attempt.get("validation", {})
-    for error in validation.get("errors", []):
+    for error in attempt.validation.errors:
         error_lower = error.lower()
         if "unknown table referenced" in error_lower:
             return f"validation_unknown_table: {error}"
         if "unknown column" in error_lower:
             return f"validation_unknown_column: {error}"
 
-    for warning in validation.get("warnings", []):
+    for warning in attempt.validation.warnings:
         if "no selected table has it" in warning.lower():
             return f"validation_missing_column: {warning}"
 
-    exec_error = (attempt.get("execution_result", {}).get("error") or "").lower()
+    exec_error = (attempt.execution_result.error or "").lower()
     if exec_error and any(t in exec_error for t in _EXEC_TABLE_MISSING_SUBSTRINGS):
-        raw_error = attempt.get("execution_result", {}).get("error") or ""
+        raw_error = attempt.execution_result.error or ""
         return f"execution_error: {raw_error[:300]}"
 
-    critic = attempt.get("critic") or {}
+    critic = attempt.critic or {}
     repair_focus = (critic.get("repair_focus") or "").lower()
     if "schema_selection" in repair_focus or "missing_join" in repair_focus:
         return f"critic_repair_focus: {critic.get('repair_focus')}"

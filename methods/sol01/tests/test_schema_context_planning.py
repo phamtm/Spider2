@@ -12,7 +12,9 @@ from sol01.llm.prompt_builders import (
     sanitize_schema_planning_decision,
 )
 from sol01.models import (
+    AttemptRecord,
     ColumnSchema,
+    ExecutionResult,
     Intent,
     SchemaContextChunk,
     SchemaContextChunkEvidence,
@@ -24,6 +26,7 @@ from sol01.models import (
     SelectedSchemaObject,
     TableSchema,
     Task,
+    ValidationReport,
 )
 from sol01.schema.chunks import render_schema_chunks
 from sol01.schema.objects import build_schema_objects
@@ -248,11 +251,19 @@ def test_sql_reference_and_repair_prompts_use_large_schema_summary_context():
     repair_prompt = _sql_repair_prompt(
         Task(instance_id="sf_bq_test", db="COVID19_USA", question="Show confirmed cases."),
         _intent(),
-        {
-            "sql": f"SELECT state FROM {table_name}",
-            "validation": {"ok": False, "errors": ["unknown column: bad_column"]},
-            "execution_result": {"ok": False, "error": "unknown column"},
-        },
+        AttemptRecord(
+            sql=f"SELECT state FROM {table_name}",
+            stage="test",
+            explanation="test",
+            candidate_confidence=0.5,
+            validation=ValidationReport(
+                ok=False, errors=["unknown column: bad_column"]
+            ),
+            execution_result=ExecutionResult(
+                ok=False, row_count=0, error="unknown column"
+            ),
+            score=0.0,
+        ),
         reference_context,
         "Confirmed cases are county-level.",
     )

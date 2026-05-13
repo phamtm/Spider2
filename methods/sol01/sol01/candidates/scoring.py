@@ -7,6 +7,7 @@ from typing import Any
 
 from sol01.models import (
     AggregateGrainReport,
+    AttemptRecord,
     ExecutionResult,
     FilterGroundingReport,
     Intent,
@@ -90,12 +91,12 @@ def verification_penalty_reasons(
     return reasons
 
 
-def best_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any] | None:
+def best_attempt(attempts: list[AttemptRecord]) -> AttemptRecord | None:
     """Return the highest-scoring attempt so far."""
 
     if not attempts:
         return None
-    return max(attempts, key=lambda attempt: float(attempt["score"]))
+    return max(attempts, key=lambda attempt: attempt.score)
 
 
 _attempt_score_breakdown = attempt_score_breakdown

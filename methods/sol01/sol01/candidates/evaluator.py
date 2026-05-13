@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from time import perf_counter
-from typing import Any
 
 from sol01.candidates.scoring import attempt_score_breakdown, verification_penalty_reasons
 from sol01.candidates.verification import (
@@ -16,6 +15,7 @@ from sol01.execution.snowflake_runner import dataframe_records, fetch_query_data
 from sol01.execution.validation import validate_sql
 from sol01.infra.logging import get_logger
 from sol01.models import (
+    AttemptRecord,
     ExecutionResult,
     Intent,
     SchemaSelection,
@@ -37,7 +37,7 @@ def evaluate_candidate(
     schema: SchemaSelection,
     table_schemas: dict[str, TableSchema] | None = None,
     stage: str,
-) -> dict[str, Any]:
+) -> AttemptRecord:
     """Validate and execute one candidate, then return a trace-ready attempt record."""
 
     started_at = perf_counter()
@@ -109,46 +109,43 @@ def evaluate_candidate(
         row_count=execution.row_count,
         error=execution.error,
     )
-    attempt: dict[str, Any] = {
-        "stage": stage,
-        "sql": candidate.sql,
-        "explanation": candidate.explanation,
-        "assumptions": candidate.assumptions,
-        "constraint_ledger": candidate.constraint_ledger,
-        "unsupported_assumptions": candidate.unsupported_assumptions,
-        "candidate_confidence": candidate.confidence,
-        "validation": validation.model_dump(mode="json"),
-        "execution_result": execution.model_dump(mode="json"),
-        "filter_grounding_report": (
-            filter_grounding_report.model_dump(mode="json")
-            if filter_grounding_report is not None
-            else None
-        ),
-        "shape_report": shape_report.model_dump(mode="json") if shape_report is not None else None,
-        "score_breakdown": attempt_score_breakdown(
-            intent=intent,
-            candidate=candidate,
-            validation=validation,
+
+    score_breakdown = attempt_score_breakdown(
+        intent=intent,
+        candidate=candidate,
+        validation=validation,
+        execution=execution,
+        aggregate_grain=aggregate_grain,
+        result_profile=result_profile,
+        shape_report=shape_report,
+        filter_grounding_report=filter_grounding_report,
+    )
+    score = sum(score_breakdown.values())
+
+    record = AttemptRecord(
+        stage=stage,
+        sql=candidate.sql,
+        explanation=candidate.explanation,
+        assumptions=candidate.assumptions,
+        constraint_ledger=candidate.constraint_ledger,
+        unsupported_assumptions=candidate.unsupported_assumptions,
+        candidate_confidence=candidate.confidence,
+        validation=validation,
+        execution_result=execution,
+        filter_grounding_report=filter_grounding_report,
+        shape_report=shape_report,
+        score_breakdown=score_breakdown,
+        verification_penalty_reasons=verification_penalty_reasons(
             execution=execution,
-            aggregate_grain=aggregate_grain,
-            result_profile=result_profile,
             shape_report=shape_report,
             filter_grounding_report=filter_grounding_report,
-        ),
-        "verification_penalty_reasons": verification_penalty_reasons(
-            execution=execution,
-            shape_report=shape_report,
-            filter_grounding_report=filter_grounding_report,
             aggregate_grain=aggregate_grain,
         ),
-    }
-    attempt["score"] = sum(attempt["score_breakdown"].values())
-
-    if result_profile is not None:
-        attempt["result_profile"] = result_profile
-        attempt["_dataframe"] = dataframe
-    if aggregate_grain is not None:
-        attempt["aggregate_grain"] = aggregate_grain.model_dump(mode="json")
-    attempt["elapsed_seconds"] = round(perf_counter() - started_at, 3)
-
-    return attempt
+        score=score,
+        result_profile=result_profile,
+        aggregate_grain=aggregate_grain,
+        elapsed_seconds=round(perf_counter() - started_at, 3),
+    )
+    if dataframe is not None:
+        record._dataframe = dataframe
+    return record

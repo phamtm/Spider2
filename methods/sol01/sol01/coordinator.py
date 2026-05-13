@@ -16,6 +16,7 @@ from sol01.infra.config import (
 from sol01.infra.logging import get_logger
 from sol01.llm.llm_logging import LLMCallLogger
 from sol01.models import (
+    AttemptRecord,
     FinalAnswer,
     Task,
 )
@@ -325,7 +326,7 @@ def run_task(
         return skipped
 
     prompt_hashes: dict[str, str] = {}
-    attempts: list[dict[str, Any]] = []
+    attempts: list[AttemptRecord] = []
 
     ctx = build_context(
         task,

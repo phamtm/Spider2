@@ -31,6 +31,7 @@ from sol01.llm.prompt_builders import (
     sql_reference_context as build_sql_reference_context,
 )
 from sol01.models import (
+    AttemptRecord,
     CandidateReviewReport,
     ConfidenceReport,
     ExecutionResult,
@@ -377,28 +378,28 @@ def prompt_budget_diagnostics(
     return diagnostics
 
 
-def log_candidate(instance_id: str, attempt: dict[str, Any]) -> None:
+def log_candidate(instance_id: str, attempt: AttemptRecord) -> None:
     """Log a standard candidate-evaluated event."""
 
     logger.info(
         "candidate evaluated",
         instance_id=instance_id,
-        stage=attempt["stage"],
-        validation_ok=attempt["validation"]["ok"],
-        execution_ok=attempt["execution_result"]["ok"],
-        score=attempt["score"],
-        elapsed_seconds=attempt["elapsed_seconds"],
-        row_count=attempt["execution_result"]["row_count"],
+        stage=attempt.stage,
+        validation_ok=attempt.validation.ok,
+        execution_ok=attempt.execution_result.ok,
+        score=attempt.score,
+        elapsed_seconds=attempt.elapsed_seconds,
+        row_count=attempt.execution_result.row_count,
     )
 
 
 def generate_initial_candidates(
     ctx: TaskContext,
-    attempts: list[dict[str, Any]],
+    attempts: list[AttemptRecord],
     *,
     initial_candidates: int,
     max_attempts: int,
-) -> dict[str, Any] | None:
+) -> AttemptRecord | None:
     """Generate up to initial_candidates SQL candidates; appends to attempts in place."""
 
     logger.info(
@@ -441,25 +442,25 @@ def generate_initial_candidates(
 
 def repair_failed_execution(
     ctx: TaskContext,
-    attempts: list[dict[str, Any]],
-    best_attempt: dict[str, Any] | None,
+    attempts: list[AttemptRecord],
+    current_best: AttemptRecord | None,
     *,
     max_attempts: int,
-) -> dict[str, Any] | None:
+) -> AttemptRecord | None:
     """Repair the best attempt if it failed execution; appends to attempts in place."""
 
     if (
-        best_attempt is None
-        or best_attempt["execution_result"]["ok"]
+        current_best is None
+        or current_best.execution_result.ok
         or len(attempts) >= max_attempts
     ):
-        return best_attempt
+        return current_best
 
     logger.info(
         "repair requested",
         instance_id=ctx.task.instance_id,
         stage="repair",
-        best_stage=best_attempt["stage"],
+        best_stage=current_best.stage,
     )
     repaired_candidate = run_prompt(
         ctx.client,
@@ -469,7 +470,7 @@ def repair_failed_execution(
         user_prompt=sql_repair_prompt(
             ctx.task,
             ctx.intent,
-            best_attempt,
+            current_best,
             ctx.sql_reference_context,
             ctx.docs_context,
         ),
@@ -489,24 +490,24 @@ def repair_failed_execution(
 
 def review_and_repair(
     ctx: TaskContext,
-    attempts: list[dict[str, Any]],
-    best_attempt: dict[str, Any] | None,
+    attempts: list[AttemptRecord],
+    current_best: AttemptRecord | None,
     *,
     max_attempts: int,
     semantic_repairs: int,
-) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+) -> tuple[AttemptRecord | None, dict[str, Any] | None]:
     """Ask the model to adjudicate executable attempts using local observations."""
 
-    if best_attempt is None or not best_attempt["execution_result"]["ok"]:
-        return best_attempt, None
+    if current_best is None or not current_best.execution_result.ok:
+        return current_best, None
 
-    executable_attempts = [attempt for attempt in attempts if attempt["execution_result"]["ok"]]
+    executable_attempts = [attempt for attempt in attempts if attempt.execution_result.ok]
     review_reason = candidate_review_reason(executable_attempts)
 
     logger.info(
         "candidate review requested",
         instance_id=ctx.task.instance_id,
-        best_stage=best_attempt["stage"],
+        best_stage=current_best.stage,
         executable_attempts=len(executable_attempts),
         reason=review_reason,
     )
@@ -521,7 +522,7 @@ def review_and_repair(
             executable_attempts,
             ctx.sql_reference_context,
             ctx.docs_context,
-            baseline_stage=best_attempt["stage"],
+            baseline_stage=current_best.stage,
             review_reason=review_reason,
         ),
     )
@@ -534,20 +535,20 @@ def review_and_repair(
             (
                 attempt
                 for attempt in executable_attempts
-                if attempt["stage"] == review.preferred_stage
+                if attempt.stage == review.preferred_stage
             ),
             None,
         )
         if preferred_attempt is not None:
-            best_attempt = preferred_attempt
+            current_best = preferred_attempt
 
-    best_attempt["critic"] = {
+    current_best.critic = {
         "confidence": review.confidence,
         "issues": review.issues,
         "should_repair": review.should_repair,
         "repair_focus": review.repair_focus,
     }
-    best_attempt["candidate_review"] = review_payload
+    current_best.candidate_review = review_payload
     logger.info(
         "candidate review complete",
         instance_id=ctx.task.instance_id,
@@ -558,17 +559,17 @@ def review_and_repair(
     )
 
     if not review.should_repair or semantic_repairs < 1:
-        return best_attempt, review_payload
+        return current_best, review_payload
 
     budget_exhausted = len(attempts) >= max_attempts
     if budget_exhausted:
-        best_attempt["repair_skipped_reason"] = "attempt budget exhausted"
+        current_best.repair_skipped_reason = "attempt budget exhausted"
         logger.info(
             "critic repair skipped",
             instance_id=ctx.task.instance_id,
             reason="attempt budget exhausted",
         )
-        return best_attempt, review_payload
+        return current_best, review_payload
 
     logger.info(
         "semantic repair requested",
@@ -584,7 +585,7 @@ def review_and_repair(
         user_prompt=semantic_repair_prompt(
             ctx.task,
             ctx.intent,
-            best_attempt,
+            current_best,
             ConfidenceReport(
                 confidence=review.confidence,
                 issues=review.issues,
@@ -606,11 +607,11 @@ def review_and_repair(
     attempts.append(attempt)
     log_candidate(ctx.task.instance_id, attempt)
 
-    new_best = attempt if attempt["execution_result"]["ok"] else best_attempt(attempts)
+    new_best = attempt if attempt.execution_result.ok else best_attempt(attempts)
     return new_best, review_payload
 
 
-def candidate_review_reason(executable_attempts: list[dict[str, Any]]) -> str:
+def candidate_review_reason(executable_attempts: list[AttemptRecord]) -> str:
     """Return the trace reason for model-led final candidate adjudication."""
 
     if len(executable_attempts) == 1:
@@ -658,8 +659,8 @@ def rebuild_context_for_expansion(
 
 def write_task_output(
     ctx: TaskContext,
-    attempts: list[dict[str, Any]],
-    best_attempt: dict[str, Any] | None,
+    attempts: list[AttemptRecord],
+    current_best: AttemptRecord | None,
     run_paths: RunPaths,
     task_trace_path: Path,
     task_llm_log_path: Path,
@@ -692,10 +693,10 @@ def write_task_output(
     if live_logging_enabled:
         trace_payload["llm_call_log_path"] = str(task_llm_log_path)
 
-    if best_attempt is not None and best_attempt["execution_result"]["ok"]:
-        sql_path = write_sql(run_paths, instance_id=task.instance_id, sql=best_attempt["sql"])
+    if current_best is not None and current_best.execution_result.ok:
+        sql_path = write_sql(run_paths, instance_id=task.instance_id, sql=current_best.sql)
         csv_path = csv_path_for(run_paths, instance_id=task.instance_id)
-        best_dataframe = best_attempt["_dataframe"]
+        best_dataframe = current_best._dataframe
         csv_path.parent.mkdir(parents=True, exist_ok=True)
         best_dataframe.to_csv(csv_path, index=False)
         final_execution = ExecutionResult(
@@ -709,7 +710,7 @@ def write_task_output(
         trace_payload.update(
             {
                 "status": "success",
-                "final_sql": best_attempt["sql"],
+                "final_sql": current_best.sql,
                 "sql_path": str(sql_path),
                 "csv_path": str(csv_path),
                 "final_execution": final_execution.model_dump(mode="json"),
@@ -724,8 +725,8 @@ def write_task_output(
             status="success",
             run_root=str(run_paths.root),
             attempts=len(attempts),
-            best_stage=best_attempt["stage"],
-            best_score=best_attempt["score"],
+            best_stage=current_best.stage,
+            best_score=current_best.score,
             row_count=len(best_dataframe),
             columns=[str(column) for column in best_dataframe.columns],
             elapsed_seconds=elapsed_seconds,
@@ -735,7 +736,7 @@ def write_task_output(
         return FinalAnswer(
             instance_id=task.instance_id,
             status="success",
-            sql=best_attempt["sql"],
+            sql=current_best.sql,
             csv_path=str(csv_path),
             trace_path=str(task_trace_path),
         )
@@ -743,7 +744,7 @@ def write_task_output(
     trace_payload.update(
         {
             "status": "failed",
-            "final_sql": best_attempt["sql"] if best_attempt is not None else None,
+            "final_sql": current_best.sql if current_best is not None else None,
             "csv_path": None,
         }
     )
@@ -756,15 +757,15 @@ def write_task_output(
         status="failed",
         run_root=str(run_paths.root),
         attempts=len(attempts),
-        best_stage=best_attempt["stage"] if best_attempt is not None else None,
-        best_score=best_attempt["score"] if best_attempt is not None else None,
-        row_count=best_attempt["execution_result"]["row_count"] if best_attempt is not None else 0,
+        best_stage=current_best.stage if current_best is not None else None,
+        best_score=current_best.score if current_best is not None else None,
+        row_count=current_best.execution_result.row_count if current_best is not None else 0,
         elapsed_seconds=elapsed_seconds,
     )
     return FinalAnswer(
         instance_id=task.instance_id,
         status="failed",
-        sql=best_attempt["sql"] if best_attempt is not None else None,
+        sql=current_best.sql if current_best is not None else None,
         csv_path=None,
         trace_path=str(task_trace_path),
     )
@@ -789,10 +790,10 @@ def run_prompt(
     )
 
 
-def trace_attempt(attempt: dict[str, Any]) -> dict[str, Any]:
+def trace_attempt(attempt: AttemptRecord) -> dict[str, Any]:
     """Drop non-serializable internal fields before writing the trace."""
 
-    return {key: value for key, value in attempt.items() if not key.startswith("_")}
+    return attempt.model_dump(mode="json")
 
 
 _TaskCtx = TaskContext
