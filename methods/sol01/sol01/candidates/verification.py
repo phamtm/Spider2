@@ -15,7 +15,7 @@ from sol01.candidates.scoring import (
 )
 from sol01.execution.snowflake_runner import fetch_query_dataframe as _fetch_query_dataframe
 from sol01.infra.logging import get_logger
-from sol01.llm.prompt_builders import _infer_native_value_terms
+from sol01.llm.prompt_builders import infer_native_value_terms
 from sol01.models import (
     AggregateGrainReport,
     ExecutionResult,
@@ -34,7 +34,7 @@ from sol01.schema.index import CACHE_PATH
 logger = get_logger(__name__)
 
 
-def _infer_aggregate_grain(
+def infer_aggregate_grain(
     *,
     task: Task,
     candidate: SQLCandidate,
@@ -205,7 +205,7 @@ def _is_identifier_like_column_name(column_name: str) -> bool:
     )
 
 
-def _infer_output_shape_report(
+def infer_output_shape_report(
     *,
     intent: Intent,
     candidate: SQLCandidate,
@@ -263,7 +263,7 @@ def _infer_output_shape_report(
     )
 
 
-def _infer_filter_grounding_report(
+def infer_filter_grounding_report(
     *,
     task: Task,
     candidate: SQLCandidate,
@@ -661,7 +661,7 @@ def _looks_aggregate_query(sql: str) -> bool:
     )
 
 
-def _augment_intent_with_value_groundings(
+def augment_intent_with_value_groundings(
     intent: Intent,
     *,
     task: Task,
@@ -670,7 +670,7 @@ def _augment_intent_with_value_groundings(
 ) -> Intent:
     """Attach native value matches from selected schemas to the answer contract."""
 
-    native_value_terms = _infer_native_value_terms(task, schema, table_schemas)
+    native_value_terms = infer_native_value_terms(task, schema, table_schemas)
     if not native_value_terms:
         return intent
 
@@ -678,7 +678,7 @@ def _augment_intent_with_value_groundings(
     return intent.model_copy(update={"native_value_terms": merged_terms})
 
 
-def _table_schemas_for_selection(
+def table_schemas_for_selection(
     schema: SchemaSelection,
     *,
     cache_path: Path = CACHE_PATH,
@@ -697,3 +697,10 @@ def _table_schemas_for_selection(
         if table is not None:
             selected[table_name] = table
     return selected
+
+
+_infer_aggregate_grain = infer_aggregate_grain
+_infer_output_shape_report = infer_output_shape_report
+_infer_filter_grounding_report = infer_filter_grounding_report
+_augment_intent_with_value_groundings = augment_intent_with_value_groundings
+_table_schemas_for_selection = table_schemas_for_selection

@@ -138,6 +138,7 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
         ),
     }
     monkeypatch.setattr("sol01.coordinator.load_db_index", lambda *args, **kwargs: schema)
+    monkeypatch.setattr("sol01.pipeline.load_db_index", lambda *args, **kwargs: schema)
     monkeypatch.setattr("sol01.schema.expansion.load_db_index", lambda *args, **kwargs: schema)
     monkeypatch.setattr(
         "sol01.candidates.verification.load_db_index", lambda *args, **kwargs: schema
@@ -171,11 +172,15 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
         lambda *args, **kwargs: schema_context_cache,
     )
     monkeypatch.setattr(
+        "sol01.pipeline.build_schema_context_cache",
+        lambda *args, **kwargs: schema_context_cache,
+    )
+    monkeypatch.setattr(
         "sol01.schema.expansion.build_schema_context_cache",
         lambda *args, **kwargs: schema_context_cache,
     )
     monkeypatch.setattr(
-        "sol01.coordinator.select_schema_context_objects",
+        "sol01.pipeline.select_schema_context_objects",
         lambda *args, **kwargs: (
             [
                 SchemaContextObject(schema_object=schema_objects[0], rank=1, score=0.9),

@@ -5,14 +5,14 @@ from __future__ import annotations
 from time import perf_counter
 from typing import Any
 
-from sol01.candidates.scoring import _attempt_score_breakdown, _verification_penalty_reasons
+from sol01.candidates.scoring import attempt_score_breakdown, verification_penalty_reasons
 from sol01.candidates.verification import (
-    _infer_aggregate_grain,
-    _infer_filter_grounding_report,
-    _infer_output_shape_report,
+    infer_aggregate_grain,
+    infer_filter_grounding_report,
+    infer_output_shape_report,
 )
 from sol01.execution.profiling import profile_dataframe
-from sol01.execution.snowflake_runner import _dataframe_records, fetch_query_dataframe
+from sol01.execution.snowflake_runner import dataframe_records, fetch_query_dataframe
 from sol01.execution.validation import validate_sql
 from sol01.infra.logging import get_logger
 from sol01.models import (
@@ -53,7 +53,7 @@ def evaluate_candidate(
                 ok=True,
                 row_count=len(dataframe),
                 columns=[str(column) for column in dataframe.columns],
-                sample_rows=_dataframe_records(dataframe.head(3)),
+                sample_rows=dataframe_records(dataframe.head(3)),
                 csv_path=None,
                 error=None,
             )
@@ -78,7 +78,7 @@ def evaluate_candidate(
             error="Validation failed before execution.",
         )
 
-    aggregate_grain = _infer_aggregate_grain(
+    aggregate_grain = infer_aggregate_grain(
         task=task,
         candidate=candidate,
         schema=schema,
@@ -87,13 +87,13 @@ def evaluate_candidate(
         execution=execution,
     )
     result_profile = profile_dataframe(dataframe) if execution.ok else None
-    shape_report = _infer_output_shape_report(
+    shape_report = infer_output_shape_report(
         intent=intent,
         candidate=candidate,
         execution=execution,
         result_profile=result_profile,
     )
-    filter_grounding_report = _infer_filter_grounding_report(
+    filter_grounding_report = infer_filter_grounding_report(
         task=task,
         candidate=candidate,
         schema=schema,
@@ -125,7 +125,7 @@ def evaluate_candidate(
             else None
         ),
         "shape_report": shape_report.model_dump(mode="json") if shape_report is not None else None,
-        "score_breakdown": _attempt_score_breakdown(
+        "score_breakdown": attempt_score_breakdown(
             intent=intent,
             candidate=candidate,
             validation=validation,
@@ -135,7 +135,7 @@ def evaluate_candidate(
             shape_report=shape_report,
             filter_grounding_report=filter_grounding_report,
         ),
-        "verification_penalty_reasons": _verification_penalty_reasons(
+        "verification_penalty_reasons": verification_penalty_reasons(
             execution=execution,
             shape_report=shape_report,
             filter_grounding_report=filter_grounding_report,

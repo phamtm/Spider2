@@ -67,7 +67,7 @@ def _comparison_attempt_summary(attempt: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _infer_native_value_terms(
+def infer_native_value_terms(
     task: Task,
     schema: SchemaSelection,
     table_schemas: dict[str, TableSchema],
@@ -128,7 +128,7 @@ def _column_looks_string_like(column_type: str | None) -> bool:
     return any(token in lowered for token in ("char", "text", "string", "varchar", "variant"))
 
 
-def _sql_reference_context(
+def sql_reference_context(
     schema: SchemaSelection,
     table_schemas: dict[str, TableSchema],
 ) -> str:
@@ -141,7 +141,7 @@ def _sql_reference_context(
     )
 
 
-def _question_preview(question: str, *, max_length: int = 120) -> str:
+def question_preview(question: str, *, max_length: int = 120) -> str:
     """Shorten long questions so task logs stay readable."""
 
     normalized = " ".join(question.split())
@@ -150,7 +150,7 @@ def _question_preview(question: str, *, max_length: int = 120) -> str:
     return normalized[: max_length - 1].rstrip() + "…"
 
 
-def _schema_context_planning_user_prompt(
+def schema_context_planning_user_prompt(
     task: Task,
     db: str,
     docs_context: str,
@@ -389,7 +389,7 @@ def _grounded_literal_context_from_intent(intent: Intent) -> str | None:
     return "\n".join(lines)
 
 
-def _sql_generation_prompt(
+def sql_generation_prompt(
     task: Task,
     intent: Intent,
     sql_reference_context: str,
@@ -409,7 +409,7 @@ def _sql_generation_prompt(
     )
 
 
-def _sql_generation_batch_prompt(
+def sql_generation_batch_prompt(
     task: Task,
     intent: Intent,
     sql_reference_context: str,
@@ -419,7 +419,7 @@ def _sql_generation_batch_prompt(
 ) -> str:
     """Build one prompt that asks for multiple candidate SQL queries."""
 
-    base_prompt = _sql_generation_prompt(
+    base_prompt = sql_generation_prompt(
         task,
         intent,
         sql_reference_context,
@@ -432,7 +432,7 @@ def _sql_generation_batch_prompt(
     )
 
 
-def _sql_repair_prompt(
+def sql_repair_prompt(
     task: Task,
     intent: Intent | None,
     attempt: dict[str, Any],
@@ -457,7 +457,7 @@ def _sql_repair_prompt(
     )
 
 
-def _candidate_review_prompt(
+def candidate_review_prompt(
     task: Task,
     intent: Intent,
     attempts: list[dict[str, Any]],
@@ -491,7 +491,7 @@ def _candidate_review_prompt(
     )
 
 
-def _semantic_repair_prompt(
+def semantic_repair_prompt(
     task: Task,
     intent: Intent,
     attempt: dict[str, Any],
@@ -556,3 +556,14 @@ def schema_expansion_trigger(attempt: dict[str, Any]) -> str | None:
             return f"critic_issue: {issue}"
 
     return None
+
+
+_infer_native_value_terms = infer_native_value_terms
+_sql_reference_context = sql_reference_context
+_question_preview = question_preview
+_schema_context_planning_user_prompt = schema_context_planning_user_prompt
+_sql_generation_prompt = sql_generation_prompt
+_sql_generation_batch_prompt = sql_generation_batch_prompt
+_sql_repair_prompt = sql_repair_prompt
+_candidate_review_prompt = candidate_review_prompt
+_semantic_repair_prompt = semantic_repair_prompt

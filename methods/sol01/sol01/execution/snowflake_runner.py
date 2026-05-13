@@ -109,7 +109,7 @@ def execute_sql(
         ok=True,
         row_count=len(dataframe),
         columns=[str(column) for column in dataframe.columns],
-        sample_rows=_dataframe_records(dataframe.head(sample_limit)),
+        sample_rows=dataframe_records(dataframe.head(sample_limit)),
         csv_path=str(csv_path) if csv_path is not None else None,
         error=None,
     )
@@ -142,26 +142,21 @@ def _credential_path(credential_path: Path | None) -> Path:
     return DEFAULT_CREDENTIAL_PATH
 
 
-def _dataframe_records(dataframe: pd.DataFrame) -> list[dict[str, object]]:
+def dataframe_records(dataframe: pd.DataFrame) -> list[dict[str, object]]:
     """Convert a DataFrame slice into JSON-friendly row dictionaries.
 
     Result sets can repeat column names after joins, so duplicate columns are
     suffixed in summaries instead of silently dropping values.
     """
 
-    record_keys = _record_keys(dataframe.columns)
+    keys = record_keys(dataframe.columns)
     records: list[dict[str, object]] = []
     for row in dataframe.itertuples(index=False, name=None):
-        records.append(
-            {
-                record_key: _clean_value(value)
-                for record_key, value in zip(record_keys, row, strict=True)
-            }
-        )
+        records.append({key: clean_value(value) for key, value in zip(keys, row, strict=True)})
     return records
 
 
-def _clean_value(value: object) -> object:
+def clean_value(value: object) -> object:
     """Convert pandas and NumPy scalars into plain Python values."""
 
     if pd.isna(value):
@@ -180,7 +175,7 @@ def _clean_value(value: object) -> object:
     return value
 
 
-def _record_keys(columns: pd.Index) -> list[str]:
+def record_keys(columns: pd.Index) -> list[str]:
     """Build stable summary keys even when SQL returns duplicate column names."""
 
     seen_counts: dict[str, int] = {}
@@ -194,3 +189,8 @@ def _record_keys(columns: pd.Index) -> list[str]:
         else:
             keys.append(f"{base_name}__{count}")
     return keys
+
+
+_dataframe_records = dataframe_records
+_clean_value = clean_value
+_record_keys = record_keys

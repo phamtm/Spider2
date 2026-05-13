@@ -7,12 +7,12 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from sol01.candidates.evaluator import evaluate_candidate
-from sol01.candidates.scoring import _best_attempt
+from sol01.candidates.scoring import best_attempt as choose_best_attempt
 from sol01.infra.config import SchemaContextConfig
 from sol01.llm.prompt_builders import (
-    _sql_generation_batch_prompt,
     sanitize_schema_planning_decision,
     schema_expansion_trigger,
+    sql_generation_batch_prompt,
 )
 from sol01.models import (
     SchemaPlanningDecision,
@@ -159,7 +159,7 @@ def attempt_schema_expansion(
         prompt_hashes=expanded_ctx.prompt_hashes,
         prompt_name="sql_generation_batch",
         output_type=SQLCandidateBatch,
-        user_prompt=_sql_generation_batch_prompt(
+        user_prompt=sql_generation_batch_prompt(
             expanded_ctx.task,
             expanded_ctx.intent,
             expanded_ctx.sql_reference_context,
@@ -173,7 +173,7 @@ def attempt_schema_expansion(
             ctx.schema_context,
             expansion_payload,
         )
-        return _best_attempt(attempts), expansion_payload, expanded_ctx
+        return choose_best_attempt(attempts), expansion_payload, expanded_ctx
 
     expansion_attempt = evaluate_candidate(
         task=expanded_ctx.task,
@@ -193,7 +193,7 @@ def attempt_schema_expansion(
         ctx.schema_context,
         expansion_payload,
     )
-    return _best_attempt(attempts), expansion_payload, expanded_ctx
+    return choose_best_attempt(attempts), expansion_payload, expanded_ctx
 
 
 def _select_expansion_objects(

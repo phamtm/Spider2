@@ -16,7 +16,7 @@ from sol01.models import (
 )
 
 
-def _attempt_score_breakdown(
+def attempt_score_breakdown(
     *,
     intent: Intent | None,
     candidate: SQLCandidate,
@@ -42,7 +42,7 @@ def _attempt_score_breakdown(
         "aggregate_grain": _aggregate_grain_adjustment(aggregate_grain),
         "cardinality": _cardinality_plausibility_adjustment(execution, result_profile),
         "verification_penalty": sum(
-            _verification_penalty_reasons(
+            verification_penalty_reasons(
                 execution=execution,
                 shape_report=shape_report,
                 filter_grounding_report=filter_grounding_report,
@@ -53,7 +53,7 @@ def _attempt_score_breakdown(
     }
 
 
-def _verification_penalty_reasons(
+def verification_penalty_reasons(
     *,
     execution: ExecutionResult,
     shape_report: OutputShapeReport | None = None,
@@ -90,12 +90,17 @@ def _verification_penalty_reasons(
     return reasons
 
 
-def _best_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any] | None:
+def best_attempt(attempts: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Return the highest-scoring attempt so far."""
 
     if not attempts:
         return None
     return max(attempts, key=lambda attempt: float(attempt["score"]))
+
+
+_attempt_score_breakdown = attempt_score_breakdown
+_verification_penalty_reasons = verification_penalty_reasons
+_best_attempt = best_attempt
 
 
 def _aggregate_grain_adjustment(report: AggregateGrainReport | None) -> float:

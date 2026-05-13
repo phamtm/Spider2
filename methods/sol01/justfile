@@ -6,15 +6,15 @@ default:
 
 # Format Python files with Ruff.
 fmt:
-    uv run --group dev ruff format .
+    uv run --no-sync --group dev ruff format .
 
 # Lint Python files with Ruff.
 lint:
-    uv run --group dev ruff check .
+    uv run --no-sync --group dev ruff check .
 
 # Run the current sol01 test suite.
 test:
-    uv run pytest tests -q
+    uv run --no-sync pytest tests -q
 
 # Run the sol01 solver CLI with its current defaults.
 run:

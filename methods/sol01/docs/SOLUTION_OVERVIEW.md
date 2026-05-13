@@ -530,7 +530,10 @@ trace races.
 - `sol01/loading/tasks.py`: loads and filters Spider2-Snow tasks.
 - `sol01/loading/docs.py`: loads linked markdown documents.
 - `sol01/schema/index.py`: builds the Snowflake metadata cache.
-- `sol01/schema/objects.py`: builds canonical logical schema objects.
+- `sol01/schema/objects.py`: assembles canonical logical schema objects.
+- `sol01/schema/object_families.py`: builds repeated-table family objects.
+- `sol01/schema/object_joins.py`: builds inferred join-candidate objects.
+- `sol01/schema/object_sample_values.py`: builds bounded sample-value objects.
 - `sol01/schema/chunks.py`: renders schema-context chunks from schema objects.
 - `sol01/schema/schema_context_cache.py`: builds versioned schema-context caches.
 - `sol01/schema/schema_context.py`: selects deterministic schema context.
@@ -539,7 +542,8 @@ trace races.
 - `sol01/llm/client.py`: runs structured LLM calls and logs raw call data.
 - `sol01/llm/prompt_builders.py`: builds the prompts for each pipeline stage.
 - `sol01/llm/llm_call_logs.py`: reads persisted LLM call logs for CLI/UI inspection.
-- `sol01/coordinator.py`: runs the per-task solver pipeline.
+- `sol01/coordinator.py`: runs batches and keeps `run_task()` as the workflow shell.
+- `sol01/pipeline.py`: owns per-task planning, candidate, repair, and output stages.
 - `sol01/candidates/evaluator.py`: validates, executes, profiles, and scores a candidate.
 - `sol01/candidates/scoring.py`: produces local score breakdowns for review evidence.
 - `sol01/candidates/verification.py`: adds shape, filter, aggregate, and metric-source checks.
