@@ -13,6 +13,25 @@ def _write_jsonl(path: Path, rows: list[dict[str, object]]) -> None:
     )
 
 
+def _setup_category_dataset(
+    tmp_path: Path,
+    instance_ids: list[str],
+    batch_rows: list[dict[str, object]],
+) -> tuple[Path, Path]:
+    dataset = tmp_path / "spider2-snow.jsonl"
+    _write_jsonl(
+        dataset,
+        [
+            {"instance_id": iid, "instruction": "q", "db_id": "DB", "external_knowledge": None}
+            for iid in instance_ids
+        ],
+    )
+    batch_dir = tmp_path / "batches"
+    batch_dir.mkdir()
+    _write_jsonl(batch_dir / "batch_01.jsonl", batch_rows)
+    return dataset, batch_dir
+
+
 def test_default_dataset_path_exists():
     assert SPIDER2_SNOW_PATH.exists()
 
@@ -89,28 +108,17 @@ def test_zero_match_selectors_are_rejected():
         select_tasks(["sf_does_not_exist*"])
 
 
+FOUR_TASK_IDS = ["sf_a", "sf_b", "sf_c", "sf_d"]
+FOUR_TASK_BATCH = [
+    {"instance_id": "sf_a", "primary_tier": 1, "tags": ["aggregation"]},
+    {"instance_id": "sf_b", "primary_tier": 3, "tags": ["aggregation", "temporal"]},
+    {"instance_id": "sf_c", "primary_tier": 5, "tags": ["comparison"]},
+    {"instance_id": "sf_d", "primary_tier": 4, "tags": ["aggregation", "comparison"]},
+]
+
+
 def test_category_selectors_can_filter_by_tier_and_tags(tmp_path: Path):
-    dataset = tmp_path / "spider2-snow.jsonl"
-    _write_jsonl(
-        dataset,
-        [
-            {"instance_id": "sf_a", "instruction": "q", "db_id": "DB", "external_knowledge": None},
-            {"instance_id": "sf_b", "instruction": "q", "db_id": "DB", "external_knowledge": None},
-            {"instance_id": "sf_c", "instruction": "q", "db_id": "DB", "external_knowledge": None},
-            {"instance_id": "sf_d", "instruction": "q", "db_id": "DB", "external_knowledge": None},
-        ],
-    )
-    batch_dir = tmp_path / "batches"
-    batch_dir.mkdir()
-    _write_jsonl(
-        batch_dir / "batch_01.jsonl",
-        [
-            {"instance_id": "sf_a", "primary_tier": 1, "tags": ["aggregation"]},
-            {"instance_id": "sf_b", "primary_tier": 3, "tags": ["aggregation", "temporal"]},
-            {"instance_id": "sf_c", "primary_tier": 5, "tags": ["comparison"]},
-            {"instance_id": "sf_d", "primary_tier": 4, "tags": ["aggregation", "comparison"]},
-        ],
-    )
+    dataset, batch_dir = _setup_category_dataset(tmp_path, FOUR_TASK_IDS, FOUR_TASK_BATCH)
 
     assert [
         task.instance_id
@@ -143,19 +151,9 @@ def test_category_selectors_can_filter_by_tier_and_tags(tmp_path: Path):
 
 
 def test_category_selectors_skip_tasks_missing_metadata(tmp_path: Path):
-    dataset = tmp_path / "spider2-snow.jsonl"
-    _write_jsonl(
-        dataset,
-        [
-            {"instance_id": "sf_a", "instruction": "q", "db_id": "DB", "external_knowledge": None},
-            {"instance_id": "sf_b", "instruction": "q", "db_id": "DB", "external_knowledge": None},
-            {"instance_id": "sf_c", "instruction": "q", "db_id": "DB", "external_knowledge": None},
-        ],
-    )
-    batch_dir = tmp_path / "batches"
-    batch_dir.mkdir()
-    _write_jsonl(
-        batch_dir / "batch_01.jsonl",
+    dataset, batch_dir = _setup_category_dataset(
+        tmp_path,
+        ["sf_a", "sf_b", "sf_c"],
         [
             {"instance_id": "sf_a", "primary_tier": 1, "tags": ["aggregation"]},
             {"instance_id": "sf_c", "primary_tier": 3, "tags": ["temporal"]},
@@ -172,17 +170,9 @@ def test_category_selectors_skip_tasks_missing_metadata(tmp_path: Path):
 
 
 def test_category_selectors_reject_bad_ranges_and_tags(tmp_path: Path):
-    dataset = tmp_path / "spider2-snow.jsonl"
-    _write_jsonl(
-        dataset,
-        [
-            {"instance_id": "sf_a", "instruction": "q", "db_id": "DB", "external_knowledge": None},
-        ],
-    )
-    batch_dir = tmp_path / "batches"
-    batch_dir.mkdir()
-    _write_jsonl(
-        batch_dir / "batch_01.jsonl",
+    dataset, batch_dir = _setup_category_dataset(
+        tmp_path,
+        ["sf_a"],
         [{"instance_id": "sf_a", "primary_tier": 1, "tags": ["aggregation"]}],
     )
 

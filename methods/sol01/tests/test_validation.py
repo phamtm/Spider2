@@ -1,5 +1,7 @@
 """Tests for the read-only SQL validator."""
 
+import pytest
+
 from sol01.execution.validation import validate_sql
 from sol01.models import ColumnSchema, TableSchema
 
@@ -46,53 +48,6 @@ def test_validate_sql_allows_valid_cte_query():
     assert set(report.referenced_tables) == {"orders", "customers"}
 
 
-def test_validate_sql_rejects_unknown_table():
-    report = validate_sql(
-        "SELECT * FROM payments",
-        allowed_tables=ALLOWED_TABLES,
-    )
-
-    assert report.ok is False
-    assert report.errors == ["Unknown table referenced: payments."]
-
-
-def test_validate_sql_does_not_skip_outer_table_shadowed_by_nested_cte():
-    report = validate_sql(
-        """
-        SELECT *
-        FROM customers
-        WHERE EXISTS (
-            WITH customers AS (SELECT 1)
-            SELECT 1
-        )
-        """,
-        allowed_tables=set(),
-    )
-
-    assert report.ok is False
-    assert report.errors == ["Unknown table referenced: customers."]
-
-
-def test_validate_sql_does_not_skip_qualified_base_table_with_same_cte_name():
-    report = validate_sql(
-        """
-        WITH customers AS (
-            SELECT customer_id
-            FROM customers
-        )
-        SELECT *
-        FROM E_COMMERCE.E_COMMERCE.CUSTOMERS
-        """,
-        allowed_tables=set(),
-    )
-
-    assert report.ok is False
-    assert report.errors == [
-        "Unknown table referenced: customers.",
-        "Unknown table referenced: E_COMMERCE.E_COMMERCE.CUSTOMERS.",
-    ]
-
-
 def test_validate_sql_allows_snowflake_fully_qualified_tables():
     report = validate_sql(
         """
@@ -122,85 +77,126 @@ def test_validate_sql_allows_unique_short_reference_to_selected_snowflake_table(
     assert report.referenced_tables == ["E_COMMERCE.E_COMMERCE.CUSTOMERS"]
 
 
-def test_validate_sql_rejects_drop_table():
-    report = validate_sql(
-        "DROP TABLE customers",
-        allowed_tables=ALLOWED_TABLES,
-    )
-
+@pytest.mark.parametrize(
+    "sql, allowed_tables, expected_errors",
+    [
+        pytest.param(
+            "SELECT * FROM payments",
+            ALLOWED_TABLES,
+            ["Unknown table referenced: payments."],
+            id="unknown-table",
+        ),
+        pytest.param(
+            """
+            SELECT *
+            FROM customers
+            WHERE EXISTS (
+                WITH customers AS (SELECT 1)
+                SELECT 1
+            )
+            """,
+            set(),
+            ["Unknown table referenced: customers."],
+            id="nested-cte-shadows-outer-table",
+        ),
+        pytest.param(
+            """
+            WITH customers AS (
+                SELECT customer_id
+                FROM customers
+            )
+            SELECT *
+            FROM E_COMMERCE.E_COMMERCE.CUSTOMERS
+            """,
+            set(),
+            [
+                "Unknown table referenced: customers.",
+                "Unknown table referenced: E_COMMERCE.E_COMMERCE.CUSTOMERS.",
+            ],
+            id="qualified-base-table-with-same-cte-name",
+        ),
+        pytest.param(
+            "SELECT * FROM OTHER_DB.PUBLIC.CUSTOMERS",
+            SNOW_ALLOWED_TABLES,
+            ["Unknown table referenced: OTHER_DB.PUBLIC.CUSTOMERS."],
+            id="unselected-qualified-table",
+        ),
+    ],
+)
+def test_validate_sql_rejects_unknown_or_unselected_tables(sql, allowed_tables, expected_errors):
+    report = validate_sql(sql, allowed_tables=allowed_tables)
     assert report.ok is False
-    assert report.errors == ["Disallowed statement type: DROP."]
+    assert report.errors == expected_errors
 
 
-def test_validate_sql_rejects_session_commands():
-    report = validate_sql(
-        "USE DATABASE E_COMMERCE",
-        allowed_tables=ALLOWED_TABLES,
-    )
-
+@pytest.mark.parametrize(
+    "sql, expected_errors",
+    [
+        pytest.param(
+            "DROP TABLE customers",
+            ["Disallowed statement type: DROP."],
+            id="drop-table",
+        ),
+        pytest.param(
+            "USE DATABASE E_COMMERCE",
+            ["Disallowed statement type: USE."],
+            id="session-command",
+        ),
+        pytest.param(
+            """
+            WITH created AS (
+                INSERT INTO customers VALUES ('c1')
+                RETURNING customer_id
+            )
+            SELECT *
+            FROM created
+            """,
+            ["Disallowed statement type: INSERT."],
+            id="mutation-in-cte",
+        ),
+        pytest.param(
+            "SELECT load_extension('unsafe')",
+            ["Extension loading is not allowed."],
+            id="extension-loading",
+        ),
+        pytest.param(
+            "SELECT 1; SELECT 2",
+            ["SQL must contain exactly one statement."],
+            id="chained-statements",
+        ),
+    ],
+)
+def test_validate_sql_rejects_disallowed_patterns(sql, expected_errors):
+    report = validate_sql(sql, allowed_tables=ALLOWED_TABLES)
     assert report.ok is False
-    assert report.errors == ["Disallowed statement type: USE."]
+    assert report.errors == expected_errors
 
 
-def test_validate_sql_rejects_unselected_qualified_table():
-    report = validate_sql(
-        "SELECT * FROM OTHER_DB.PUBLIC.CUSTOMERS",
-        allowed_tables=SNOW_ALLOWED_TABLES,
-    )
-
-    assert report.ok is False
-    assert report.errors == ["Unknown table referenced: OTHER_DB.PUBLIC.CUSTOMERS."]
-
-
-def test_validate_sql_rejects_mutation_hidden_inside_cte():
-    report = validate_sql(
-        """
-        WITH created AS (
-            INSERT INTO customers VALUES ('c1')
-            RETURNING customer_id
-        )
-        SELECT *
-        FROM created
-        """,
-        allowed_tables=ALLOWED_TABLES,
-    )
-
-    assert report.ok is False
-    assert report.errors == ["Disallowed statement type: INSERT."]
-
-
-def test_validate_sql_rejects_extension_loading():
-    report = validate_sql(
-        "SELECT load_extension('unsafe')",
-        allowed_tables=ALLOWED_TABLES,
-    )
-
-    assert report.ok is False
-    assert report.errors == ["Extension loading is not allowed."]
-
-
-def test_validate_sql_rejects_chained_statements():
-    report = validate_sql(
-        "SELECT 1; SELECT 2",
-        allowed_tables=ALLOWED_TABLES,
-    )
-
-    assert report.ok is False
-    assert report.errors == ["SQL must contain exactly one statement."]
-
-
-def test_validate_sql_rejects_bare_mixed_case_snowflake_columns():
-    report = validate_sql(
+def test_validate_sql_rejects_bare_snowflake_columns_and_accepts_quoted():
+    bare_report = validate_sql(
         f"SELECT COUNT(DISTINCT StudyInstanceUID) FROM {DICOM_PIVOT}",
         allowed_tables={DICOM_PIVOT},
         table_schemas={DICOM_PIVOT: DICOM_PIVOT_SCHEMA},
     )
-
-    assert report.ok is False
-    assert report.errors == [
+    assert bare_report.ok is False
+    assert bare_report.errors == [
         'Use "StudyInstanceUID" instead of StudyInstanceUID; '
         "Snowflake uppercases unquoted identifiers to STUDYINSTANCEUID."
     ]
+
+    quoted_report = validate_sql(
+        f"""
+        SELECT COUNT(DISTINCT "StudyInstanceUID") AS unique_count
+        FROM {DICOM_PIVOT}
+        WHERE LOWER("SegmentedPropertyTypeCodeSequence") = '15825003'
+          AND "collection_id" IN ('Community', 'nsclc_radiomics')
+        """,
+        allowed_tables={DICOM_PIVOT},
+        table_schemas={DICOM_PIVOT: DICOM_PIVOT_SCHEMA},
+    )
+    assert quoted_report.ok is True
+    assert quoted_report.errors == []
+    assert quoted_report.warnings == []
 
 
 def test_validate_sql_rejects_bare_lower_case_snowflake_columns():
@@ -223,23 +219,6 @@ def test_validate_sql_rejects_bare_lower_case_snowflake_columns():
         'Use "collection_id" instead of collection_id; '
         "Snowflake uppercases unquoted identifiers to COLLECTION_ID.",
     ]
-
-
-def test_validate_sql_accepts_quoted_snowflake_columns():
-    report = validate_sql(
-        f"""
-        SELECT COUNT(DISTINCT "StudyInstanceUID") AS unique_count
-        FROM {DICOM_PIVOT}
-        WHERE LOWER("SegmentedPropertyTypeCodeSequence") = '15825003'
-          AND "collection_id" IN ('Community', 'nsclc_radiomics')
-        """,
-        allowed_tables={DICOM_PIVOT},
-        table_schemas={DICOM_PIVOT: DICOM_PIVOT_SCHEMA},
-    )
-
-    assert report.ok is True
-    assert report.errors == []
-    assert report.warnings == []
 
 
 def test_validate_sql_reports_scope_resolution_errors():

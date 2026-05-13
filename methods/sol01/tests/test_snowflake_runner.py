@@ -136,53 +136,45 @@ def test_profile_dataframe_handles_duplicate_column_names():
     assert profile["top_values"]["name__2"][0] == {"value": "Sydney", "count": 2}
 
 
-def test_profile_dataframe_serializes_decimal_values():
-    dataframe = pd.DataFrame(
-        [
-            {"percentage": Decimal("78.15")},
-            {"percentage": Decimal("80.00")},
-            {"percentage": Decimal("78.15")},
-        ]
-    )
-
+@pytest.mark.parametrize(
+    "dataframe, expected_sample, expected_min, expected_max",
+    [
+        pytest.param(
+            pd.DataFrame(
+                [
+                    {"percentage": Decimal("78.15")},
+                    {"percentage": Decimal("80.00")},
+                    {"percentage": Decimal("78.15")},
+                ]
+            ),
+            [{"percentage": "78.15"}, {"percentage": "80.00"}, {"percentage": "78.15"}],
+            {"percentage": "78.15"},
+            {"percentage": "80.00"},
+            id="decimal-serialization",
+        ),
+        pytest.param(
+            pd.DataFrame(
+                [
+                    {"day": date(2023, 6, 1), "seen_at": datetime(2023, 6, 1, 12, 30, 5)},
+                    {"day": date(2023, 6, 2), "seen_at": datetime(2023, 6, 2, 8, 15, 0)},
+                ]
+            ),
+            [
+                {"day": "2023-06-01", "seen_at": "2023-06-01T12:30:05"},
+                {"day": "2023-06-02", "seen_at": "2023-06-02T08:15:00"},
+            ],
+            {"day": "2023-06-01", "seen_at": "2023-06-01T12:30:05"},
+            {"day": "2023-06-02", "seen_at": "2023-06-02T08:15:00"},
+            id="date-serialization",
+        ),
+    ],
+)
+def test_profile_dataframe_serializes_special_types(dataframe, expected_sample, expected_min, expected_max):
     profile = profile_dataframe(dataframe, top_k=2)
 
-    assert profile["sample_rows"] == [
-        {"percentage": "78.15"},
-        {"percentage": "80.00"},
-        {"percentage": "78.15"},
-    ]
-    assert profile["min_values"] == {"percentage": "78.15"}
-    assert profile["max_values"] == {"percentage": "80.00"}
-    assert profile["top_values"]["percentage"] == [
-        {"value": "78.15", "count": 2},
-        {"value": "80.00", "count": 1},
-    ]
-    json.dumps(profile, sort_keys=True)
-
-
-def test_profile_dataframe_serializes_python_dates():
-    dataframe = pd.DataFrame(
-        [
-            {"day": date(2023, 6, 1), "seen_at": datetime(2023, 6, 1, 12, 30, 5)},
-            {"day": date(2023, 6, 2), "seen_at": datetime(2023, 6, 2, 8, 15, 0)},
-        ]
-    )
-
-    profile = profile_dataframe(dataframe)
-
-    assert profile["sample_rows"] == [
-        {"day": "2023-06-01", "seen_at": "2023-06-01T12:30:05"},
-        {"day": "2023-06-02", "seen_at": "2023-06-02T08:15:00"},
-    ]
-    assert profile["min_values"] == {
-        "day": "2023-06-01",
-        "seen_at": "2023-06-01T12:30:05",
-    }
-    assert profile["max_values"] == {
-        "day": "2023-06-02",
-        "seen_at": "2023-06-02T08:15:00",
-    }
+    assert profile["sample_rows"] == expected_sample
+    assert profile["min_values"] == expected_min
+    assert profile["max_values"] == expected_max
     json.dumps(profile, sort_keys=True)
 
 
@@ -200,7 +192,6 @@ def _write_credentials(path: Path, **extra: Any) -> Path:
 
 
 class FakeConnector:
-    """Small fake of the Snowflake connector module."""
 
     def __init__(self, dataframe: pd.DataFrame) -> None:
         self.dataframe = dataframe
@@ -213,7 +204,6 @@ class FakeConnector:
 
 
 class FailingConnector(FakeConnector):
-    """Fake connector that raises during query execution."""
 
     def __init__(self, error: str) -> None:
         super().__init__(pd.DataFrame())
@@ -221,7 +211,6 @@ class FailingConnector(FakeConnector):
 
 
 class FakeConnection:
-    """Small fake Snowflake connection."""
 
     def __init__(self, connector: FakeConnector) -> None:
         self.connector = connector
@@ -235,7 +224,6 @@ class FakeConnection:
 
 
 class FakeCursor:
-    """Small fake Snowflake cursor."""
 
     def __init__(self, connector: FakeConnector) -> None:
         self.connector = connector
