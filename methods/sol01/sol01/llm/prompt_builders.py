@@ -7,6 +7,7 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
+from sol01.infra.strings import column_looks_string_like
 from sol01.models import (
     AttemptRecord,
     ConfidenceReport,
@@ -91,7 +92,7 @@ def infer_native_value_terms(
             continue
         table_identity = table.full_name or table.name
         for column in table.columns:
-            if not _column_looks_string_like(column.type):
+            if not column_looks_string_like(column.type):
                 continue
             for sample_value in column.sample_values:
                 if not _question_mentions_literal(question_text, sample_value):
@@ -128,15 +129,6 @@ def _question_mentions_literal(question_text: str, literal: str) -> bool:
     return all(token in question_tokens for token in literal_tokens)
 
 
-def _column_looks_string_like(column_type: str | None) -> bool:
-    """Return True when a schema column looks like a text field."""
-
-    if column_type is None:
-        return True
-    lowered = column_type.lower()
-    return any(token in lowered for token in ("char", "text", "string", "varchar", "variant"))
-
-
 def sql_reference_context(
     schema: SchemaSelection,
     table_schemas: dict[str, TableSchema],
@@ -150,19 +142,10 @@ def sql_reference_context(
     )
 
 
-def question_preview(question: str, *, max_length: int = 120) -> str:
-    """Shorten long questions so task logs stay readable."""
-
-    normalized = " ".join(question.split())
-    if len(normalized) <= max_length:
-        return normalized
-    return normalized[: max_length - 1].rstrip() + "…"
-
-
 def schema_context_planning_user_prompt(
     task: Task,
     db: str,
-    docs_context: str,
+    docs_context: str | None,
     schema_context_objects: Sequence[SchemaContextObject],
     *,
     max_docs_chars: int = _SCHEMA_CONTEXT_PLANNING_DOCS_CHAR_LIMIT,
@@ -210,7 +193,7 @@ def schema_context_planning_user_prompt(
 def _format_schema_context_planning_user_prompt(
     task: Task,
     db: str,
-    docs_context: str,
+    docs_context: str | None,
     schema_context_objects: Sequence[SchemaContextObject],
     *,
     max_docs_chars: int,
@@ -223,10 +206,11 @@ def _format_schema_context_planning_user_prompt(
         schema_context_objects,
         max_chars=max_evidence_chars,
     )
+    effective_docs = docs_context or "No task-linked document context."
     return (
         f"Question: {task.question}\n\n"
         f"Database: {db}\n\n"
-        f"Document context:\n{_clip_context(docs_context, max_docs_chars)}\n\n"
+        f"Document context:\n{_clip_context(effective_docs, max_docs_chars)}\n\n"
         "Available schema metadata evidence:\n"
         f"{evidence}\n\n"
         "Available object ids:\n"
@@ -402,7 +386,7 @@ def sql_generation_prompt(
     task: Task,
     intent: Intent,
     sql_reference_context: str,
-    docs_context: str,
+    docs_context: str | None,
 ) -> str:
     """Build the SQL-generation prompt body."""
 
@@ -410,7 +394,7 @@ def sql_generation_prompt(
     grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
     return (
         f"{sql_reference_context}\n\n"
-        f"Document context:\n{docs_context}\n\n"
+        f"Document context:\n{docs_context or 'No task-linked document context.'}\n\n"
         f"Question: {task.question}\n\n"
         f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
         f"{grounded_literal_block}"
@@ -422,7 +406,7 @@ def sql_generation_batch_prompt(
     task: Task,
     intent: Intent,
     sql_reference_context: str,
-    docs_context: str,
+    docs_context: str | None,
     *,
     candidate_count: int,
 ) -> str:
@@ -446,7 +430,7 @@ def sql_repair_prompt(
     intent: Intent | None,
     attempt: AttemptRecord,
     sql_reference_context: str,
-    docs_context: str,
+    docs_context: str | None,
 ) -> str:
     """Build a repair prompt using validation or execution feedback."""
 
@@ -457,7 +441,7 @@ def sql_repair_prompt(
 
     return (
         f"{sql_reference_context}\n\n"
-        f"Document context:\n{docs_context}\n\n"
+        f"Document context:\n{docs_context or 'No task-linked document context.'}\n\n"
         f"Question: {task.question}\n\n"
         f"Failed SQL:\n{attempt.sql}\n\n"
         f"Validation:\n"
@@ -475,7 +459,7 @@ def candidate_review_prompt(
     intent: Intent,
     attempts: list[AttemptRecord],
     sql_reference_context: str,
-    docs_context: str,
+    docs_context: str | None,
     *,
     baseline_stage: str | None,
     review_reason: str,
@@ -487,7 +471,7 @@ def candidate_review_prompt(
     grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
     return (
         f"{sql_reference_context}\n\n"
-        f"Document context:\n{docs_context}\n\n"
+        f"Document context:\n{docs_context or 'No task-linked document context.'}\n\n"
         f"Question: {task.question}\n\n"
         f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
         f"{grounded_literal_block}"
@@ -510,7 +494,7 @@ def semantic_repair_prompt(
     attempt: AttemptRecord,
     critic: ConfidenceReport,
     sql_reference_context: str,
-    docs_context: str,
+    docs_context: str | None,
 ) -> str:
     """Build the repair prompt for one critic-triggered retry."""
 
@@ -518,7 +502,7 @@ def semantic_repair_prompt(
     grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
     return (
         f"{sql_reference_context}\n\n"
-        f"Document context:\n{docs_context}\n\n"
+        f"Document context:\n{docs_context or 'No task-linked document context.'}\n\n"
         f"Question: {task.question}\n\n"
         f"Current answer contract:\n{intent.model_dump_json(indent=2)}\n\n"
         f"{grounded_literal_block}"
@@ -572,7 +556,6 @@ def schema_expansion_trigger(attempt: AttemptRecord) -> str | None:
 
 _infer_native_value_terms = infer_native_value_terms
 _sql_reference_context = sql_reference_context
-_question_preview = question_preview
 _schema_context_planning_user_prompt = schema_context_planning_user_prompt
 _sql_generation_prompt = sql_generation_prompt
 _sql_generation_batch_prompt = sql_generation_batch_prompt

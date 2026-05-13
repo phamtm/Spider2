@@ -12,6 +12,7 @@ from sol01.schema.large_schema_summaries import (
     LargeSchemaSummary,
     load_large_schema_summary_registry,
 )
+from sol01.schema.utils import _metadata_text, _string_list
 
 MAX_COLUMNS_IN_CHUNK = 30
 MAX_SAMPLE_LITERAL_CHARS = 80
@@ -576,17 +577,6 @@ def _suffix_dimension_summary(raw_dimensions: object) -> str:
 
 def _mapping(value: object) -> dict[str, object]:
     return value if isinstance(value, dict) else {}
-
-
-def _metadata_text(obj: SchemaObject, key: str) -> str:
-    value = obj.metadata.get(key)
-    return "" if value is None else str(value).strip()
-
-
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def _normalized_tokens(values: Iterable[str]) -> list[str]:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from functools import cache
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -181,7 +182,7 @@ def test_llm_client_uses_prompted_output_for_structured_calls(monkeypatch):
         def run_sync(self, user_prompt):
             return FakeResult()
 
-    monkeypatch.setattr("sol01.llm.client.Agent", FakeAgent)
+    monkeypatch.setattr("sol01.llm.client._agent_class", cache(lambda: FakeAgent))
 
     output = client.run_structured(
         "Say hi.",
@@ -212,7 +213,7 @@ def test_llm_client_logs_successful_structured_call(monkeypatch, tmp_path):
         def run_sync(self, user_prompt):
             return FakeResult()
 
-    monkeypatch.setattr("sol01.llm.client.Agent", FakeAgent)
+    monkeypatch.setattr("sol01.llm.client._agent_class", cache(lambda: FakeAgent))
 
     output = client.run_structured(
         "Say hi.",
@@ -264,7 +265,7 @@ def test_llm_client_retries_transient_model_http_errors(monkeypatch):
                 )
             return FakeResult()
 
-    monkeypatch.setattr("sol01.llm.client.Agent", FakeAgent)
+    monkeypatch.setattr("sol01.llm.client._agent_class", cache(lambda: FakeAgent))
     monkeypatch.setattr("sol01.llm.client.time.sleep", lambda seconds: None)
 
     output = client.run_structured(
@@ -304,7 +305,7 @@ def test_llm_client_logs_retry_attempts(monkeypatch, tmp_path):
                 )
             return FakeResult()
 
-    monkeypatch.setattr("sol01.llm.client.Agent", FakeAgent)
+    monkeypatch.setattr("sol01.llm.client._agent_class", cache(lambda: FakeAgent))
     monkeypatch.setattr("sol01.llm.client.time.sleep", lambda seconds: None)
 
     output = client.run_structured(
@@ -341,7 +342,7 @@ def test_llm_client_does_not_retry_non_transient_model_http_errors(monkeypatch):
                 body={"message": "bad request"},
             )
 
-    monkeypatch.setattr("sol01.llm.client.Agent", FakeAgent)
+    monkeypatch.setattr("sol01.llm.client._agent_class", cache(lambda: FakeAgent))
     monkeypatch.setattr("sol01.llm.client.time.sleep", lambda seconds: None)
 
     try:
@@ -378,7 +379,7 @@ def test_llm_client_logs_non_transient_model_http_error(monkeypatch, tmp_path):
                 body={"message": "bad request"},
             )
 
-    monkeypatch.setattr("sol01.llm.client.Agent", FakeAgent)
+    monkeypatch.setattr("sol01.llm.client._agent_class", cache(lambda: FakeAgent))
     monkeypatch.setattr("sol01.llm.client.time.sleep", lambda seconds: None)
 
     try:

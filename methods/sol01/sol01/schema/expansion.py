@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any
+
+from pydantic import BaseModel
 
 from sol01.candidates.evaluator import evaluate_candidate
 from sol01.candidates.scoring import best_attempt as choose_best_attempt
-from sol01.infra.config import SchemaContextConfig
+from sol01.llm.client import LLMClient
 from sol01.llm.prompt_builders import (
     sanitize_schema_planning_decision,
     schema_expansion_trigger,
@@ -21,36 +23,21 @@ from sol01.models import (
     SelectedSchemaObject,
     SQLCandidateBatch,
 )
+from sol01.pipeline import TaskContext
 from sol01.schema.db_index import load_db_index
 from sol01.schema.resolver import resolve_schema_context
 from sol01.schema.schema_context import select_schema_context_objects
 from sol01.schema.schema_context_cache import build_schema_context_cache
 
-
-class ExpansionContext(Protocol):
-    """Pipeline context fields used by schema expansion."""
-
-    task: Any
-    client: Any
-    intent: Any
-    schema: SchemaSelection
-    table_schemas: dict[str, Any]
-    sql_reference_context: str
-    docs_context: str
-    prompt_hashes: dict[str, str]
-    schema_context_config: SchemaContextConfig
-    schema_context: dict[str, Any]
-
-
-RunPrompt = Callable[..., Any]
+RunPrompt = Callable[[LLMClient, str, str, type[BaseModel], str], BaseModel]
 BuildPlanningPrompt = Callable[..., str]
 PromptBudgetDiagnostics = Callable[..., dict[str, object]]
 LogCandidate = Callable[[str, AttemptRecord], None]
-RebuildContext = Callable[..., ExpansionContext]
+RebuildContext = Callable[..., TaskContext]
 
 
 def attempt_schema_expansion(
-    ctx: ExpansionContext,
+    ctx: TaskContext,
     attempts: list[AttemptRecord],
     current_best: AttemptRecord | None,
     *,
@@ -59,7 +46,7 @@ def attempt_schema_expansion(
     prompt_budget_diagnostics: PromptBudgetDiagnostics,
     rebuild_context: RebuildContext,
     log_candidate: LogCandidate,
-) -> tuple[AttemptRecord | None, dict[str, Any] | None, ExpansionContext | None]:
+) -> tuple[AttemptRecord | None, dict[str, Any] | None, TaskContext | None]:
     """Run one schema-expansion recovery attempt when evidence warrants it."""
 
     if current_best is None:
@@ -198,7 +185,7 @@ def attempt_schema_expansion(
 
 
 def _select_expansion_objects(
-    ctx: ExpansionContext,
+    ctx: TaskContext,
     attempt: AttemptRecord,
     trigger: str,
     *,
@@ -210,9 +197,7 @@ def _select_expansion_objects(
 ) -> tuple[list[SelectedSchemaObject], list[Any], dict[str, object]]:
     """Select and sanitize schema objects for one expansion attempt."""
 
-    linked_docs = (
-        [] if ctx.docs_context == "No task-linked document context." else [ctx.docs_context]
-    )
+    linked_docs = [] if ctx.docs_context is None else [ctx.docs_context]
     schema_context_objects, context_diagnostics = select_schema_context_objects(
         schema_context_cache,
         expansion_query,
@@ -265,7 +250,7 @@ def _select_expansion_objects(
 
 
 def _resolve_expanded_schema(
-    ctx: ExpansionContext,
+    ctx: TaskContext,
     selected_additions: list[SelectedSchemaObject],
     *,
     schema_context_cache: Any,
@@ -320,7 +305,7 @@ def _resolve_expanded_schema(
 
 
 def _schema_expansion_query(
-    ctx: ExpansionContext,
+    ctx: TaskContext,
     attempt: AttemptRecord,
     trigger: str,
 ) -> str:
@@ -364,7 +349,7 @@ def _table_names_from_schema_errors(attempt: AttemptRecord) -> list[str]:
     for error in attempt.validation.errors:
         match = re.search(r"Unknown table referenced:\s*([A-Za-z0-9_.$\"]+)", error)
         if match:
-            names.append(match.group(1).strip('".')  )
+            names.append(match.group(1).strip('".'))
 
     execution_error = attempt.execution_result.error or ""
     if execution_error:

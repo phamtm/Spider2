@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
 
+from sol01.infra.fs_cache import path_signature
 from sol01.infra.logging import get_logger
 from sol01.infra.paths import REPO_ROOT
 from sol01.models import CategoryMetadata
@@ -306,7 +307,7 @@ def load_category_metadata(
 
     ordered_records = _load_category_metadata_cached(
         str(dataset_path.resolve()),
-        _path_signature(dataset_path),
+        path_signature(dataset_path),
         str(batch_dir.resolve()),
         _batch_dir_signature(batch_dir),
         tuple(sorted(allowed_tags)),
@@ -402,16 +403,6 @@ def _dataset_order(dataset_path: Path) -> dict[str, int]:
             instance_id = str(record["instance_id"])
             order[instance_id] = index
     return order
-
-
-def _path_signature(path: Path) -> tuple[int, int] | None:
-    """Return a cheap cache key for one file path, or None when it is missing."""
-
-    try:
-        stat_result = path.stat()
-    except FileNotFoundError:
-        return None
-    return stat_result.st_mtime_ns, stat_result.st_size
 
 
 def _batch_dir_signature(batch_dir: Path) -> tuple[tuple[str, int, int], ...] | None:

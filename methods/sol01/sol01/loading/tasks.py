@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from functools import cache
 from pathlib import Path
 
+from sol01.infra.fs_cache import path_signature
 from sol01.infra.logging import get_logger
 from sol01.infra.paths import REPO_ROOT
 from sol01.loading.category_metadata import (  # noqa: F401
@@ -140,7 +141,7 @@ def select_tasks(
 def _read_tasks(dataset_path: Path) -> list[Task]:
     """Read the JSONL dataset into typed task objects."""
 
-    signature = _path_signature(dataset_path)
+    signature = path_signature(dataset_path)
     if signature is None:
         with dataset_path.open(encoding="utf-8") as handle:
             return [_task_from_record(json.loads(line)) for line in handle if line.strip()]
@@ -170,16 +171,6 @@ def _task_from_record(record: dict[str, object]) -> Task:
         question=str(record["instruction"]),
         external_knowledge=str(external_knowledge) if external_knowledge is not None else None,
     )
-
-
-def _path_signature(path: Path) -> tuple[int, int] | None:
-    """Return a cheap cache key for one file path, or None when it is missing."""
-
-    try:
-        stat_result = path.stat()
-    except FileNotFoundError:
-        return None
-    return stat_result.st_mtime_ns, stat_result.st_size
 
 
 def _validate_selector(selector: str) -> None:

@@ -8,6 +8,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any
 
+from pydantic import BaseModel
+
 from sol01.candidates.evaluator import evaluate_candidate
 from sol01.candidates.scoring import best_attempt
 from sol01.candidates.verification import (
@@ -17,10 +19,11 @@ from sol01.candidates.verification import (
 from sol01.execution.snowflake_runner import dataframe_records
 from sol01.infra.config import DEFAULT_SCHEMA_CONTEXT_VERSION, SchemaContextConfig
 from sol01.infra.logging import get_logger
+from sol01.infra.strings import question_preview
+from sol01.llm.client import LLMClient
 from sol01.llm.prompt_builders import (
     candidate_review_prompt,
     enforce_prompt_budget,
-    question_preview,
     sanitize_schema_planning_decision,
     schema_context_planning_user_prompt,
     semantic_repair_prompt,
@@ -30,6 +33,7 @@ from sol01.llm.prompt_builders import (
 from sol01.llm.prompt_builders import (
     sql_reference_context as build_sql_reference_context,
 )
+from sol01.loading.docs import load_document_text
 from sol01.models import (
     AttemptRecord,
     CandidateReviewReport,
@@ -58,14 +62,6 @@ from sol01.schema.schema_context_cache import build_schema_context_cache
 logger = get_logger(__name__)
 
 
-def load_document_text(file_name: str) -> str:
-    """Load task-linked document text without importing the docs module at startup."""
-
-    from sol01.loading.docs import load_document_text as _load_document_text  # noqa: PLC0415
-
-    return _load_document_text(file_name)
-
-
 # ---------------------------------------------------------------------------
 # Per-task pipeline stages
 # ---------------------------------------------------------------------------
@@ -76,12 +72,12 @@ class TaskContext:
     """Shared context threaded through each pipeline stage of run_task."""
 
     task: Task
-    client: Any
+    client: LLMClient
     intent: Intent
     schema: SchemaSelection
     table_schemas: dict[str, Any]
     sql_reference_context: str
-    docs_context: str
+    docs_context: str | None
     prompt_hashes: dict[str, str]
     schema_context_version: str
     schema_context_config: SchemaContextConfig
@@ -132,7 +128,7 @@ def check_skip(
 
 def build_context(
     task: Task,
-    client: Any,
+    client: LLMClient,
     prompt_hashes: dict[str, str],
     run_paths: RunPaths,
     schema_context_config: SchemaContextConfig,
@@ -147,11 +143,7 @@ def build_context(
         question_length=len(task.question),
         run_root=str(run_paths.root),
     )
-    docs_context = (
-        load_document_text(task.external_knowledge)
-        if task.external_knowledge
-        else "No task-linked document context."
-    )
+    docs_context = load_document_text(task.external_knowledge) if task.external_knowledge else None
     schema, intent, table_schemas, sql_reference_context, schema_context = run_planning(
         task,
         client,
@@ -195,9 +187,9 @@ def build_context(
 
 def run_planning(
     task: Task,
-    client: Any,
+    client: LLMClient,
     prompt_hashes: dict[str, str],
-    docs_context: str,
+    docs_context: str | None,
     *,
     schema_context_config: SchemaContextConfig,
 ) -> tuple[SchemaSelection, Intent, dict[str, Any], str, dict[str, Any]]:
@@ -209,7 +201,7 @@ def run_planning(
         db_index=db_index,
         config=schema_context_config,
     )
-    linked_docs = [] if docs_context == "No task-linked document context." else [docs_context]
+    linked_docs = [] if docs_context is None else [docs_context]
     schema_context_objects, context_diagnostics = select_schema_context_objects(
         schema_context_cache,
         task.question,
@@ -313,7 +305,7 @@ def run_planning(
 
 def build_planning_prompt(
     task: Task,
-    docs_context: str,
+    docs_context: str | None,
     schema_context_objects: list[Any],
     *,
     schema_context_config: SchemaContextConfig,
@@ -449,11 +441,7 @@ def repair_failed_execution(
 ) -> AttemptRecord | None:
     """Repair the best attempt if it failed execution; appends to attempts in place."""
 
-    if (
-        current_best is None
-        or current_best.execution_result.ok
-        or len(attempts) >= max_attempts
-    ):
+    if current_best is None or current_best.execution_result.ok or len(attempts) >= max_attempts:
         return current_best
 
     logger.info(
@@ -532,11 +520,7 @@ def review_and_repair(
     }
     if review.preferred_stage:
         preferred_attempt = next(
-            (
-                attempt
-                for attempt in executable_attempts
-                if attempt.stage == review.preferred_stage
-            ),
+            (attempt for attempt in executable_attempts if attempt.stage == review.preferred_stage),
             None,
         )
         if preferred_attempt is not None:
@@ -772,13 +756,13 @@ def write_task_output(
 
 
 def run_prompt(
-    client: Any,
+    client: LLMClient,
     *,
     prompt_hashes: dict[str, str],
     prompt_name: str,
-    output_type: type[Any],
+    output_type: type[BaseModel],
     user_prompt: str,
-) -> Any:
+) -> BaseModel:
     """Load one prompt hash and run one structured LLM call."""
 
     prompt = client.load_prompt(prompt_name)

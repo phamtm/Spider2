@@ -29,7 +29,6 @@ OutputT = TypeVar("OutputT", bound=BaseModel)
 TRANSIENT_STATUS_CODES = {429, 500, 502, 503, 504}
 MAX_MODEL_ATTEMPTS = 3
 logger = get_logger(__name__)
-Agent: Any | None = None
 
 if TYPE_CHECKING:
     from pydantic_ai.models import Model
@@ -294,14 +293,12 @@ def _structured_output(output_type: type[OutputT]) -> Any:
     return PromptedOutput(output_type)
 
 
+@cache
 def _agent_class() -> Any:
-    """Return the live Agent class, importing it only when needed."""
+    """Return the live Agent class, importing it only when first needed."""
 
-    global Agent
-    if Agent is None:
-        from pydantic_ai import Agent as _Agent  # noqa: PLC0415
+    from pydantic_ai import Agent  # noqa: PLC0415
 
-        Agent = _Agent
     return Agent
 
 

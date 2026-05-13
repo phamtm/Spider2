@@ -7,6 +7,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Protocol
 
+from pydantic import BaseModel
+
 from sol01.infra.config import (
     DEFAULT_DOTENV_PATH,
     DEFAULT_SCHEMA_CONTEXT_VERSION,
@@ -14,6 +16,7 @@ from sol01.infra.config import (
     SchemaContextConfig,
 )
 from sol01.infra.logging import get_logger
+from sol01.llm.client import LLMClient, PromptSpec
 from sol01.llm.llm_logging import LLMCallLogger
 from sol01.models import (
     AttemptRecord,
@@ -48,52 +51,32 @@ from sol01.schema.index import CACHE_PATH
 from sol01.schema.schema_context_cache import build_schema_context_cache
 
 logger = get_logger(__name__)
-LLMClient: Any | None = None
 
 __all__ = ["run_task", "run_tasks"]
-
-
-def load_document_text(file_name: str) -> str:
-    """Load task-linked document text without importing the docs module at startup."""
-
-    from sol01.loading.docs import load_document_text as _load_document_text  # noqa: PLC0415
-
-    return _load_document_text(file_name)
-
-
-def _llm_client_class() -> Any:
-    """Return the live LLM client class, importing it only when needed."""
-
-    global LLMClient
-    if LLMClient is None:
-        from sol01.llm.client import LLMClient as _LLMClient  # noqa: PLC0415
-
-        LLMClient = _LLMClient
-    return LLMClient
 
 
 class StructuredLLM(Protocol):
     """Minimal LLM interface the coordinator needs for structured calls."""
 
-    def load_prompt(self, prompt_name: str) -> Any: ...
+    def load_prompt(self, prompt_name: str) -> PromptSpec: ...
 
     def run_structured(
         self,
         user_prompt: str,
         *,
         prompt_name: str,
-        output_type: type[Any],
+        output_type: type[BaseModel],
         model: Any = None,
-    ) -> Any: ...
+    ) -> BaseModel: ...
 
     def run_structured_with_prompt(
         self,
         user_prompt: str,
         *,
-        prompt: Any,
-        output_type: type[Any],
+        prompt: PromptSpec,
+        output_type: type[BaseModel],
         model: Any = None,
-    ) -> Any: ...
+    ) -> BaseModel: ...
 
 
 def run_tasks(
@@ -307,7 +290,7 @@ def run_task(
     started_at = perf_counter()
     live_logging_enabled = llm_client is None
     task_llm_log_path = llm_call_log_path_for(run_paths, instance_id=task.instance_id)
-    client = llm_client or _llm_client_class()(
+    client = llm_client or LLMClient(
         config,
         call_logger=LLMCallLogger(task_llm_log_path),
     )

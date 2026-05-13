@@ -16,6 +16,67 @@ from sol01.models import (
     ValidationReport,
 )
 
+# -- Execution status weights --
+EXECUTION_SUCCESS_BONUS = 1000.0
+EXECUTION_FAILURE_PENALTY = -1000.0
+
+# -- Validation weights --
+VALIDATION_CLEAN_BONUS = 120.0
+VALIDATION_FAILURE_PENALTY = -180.0
+VALIDATION_ERROR_PENALTY = -15.0
+VALIDATION_WARNING_PENALTY = -5.0
+
+# -- Output shape weights --
+SHAPE_COLUMN_MATCH_BONUS = 45.0
+SHAPE_COLUMN_NEAR_MATCH_BONUS = 10.0
+SHAPE_COLUMN_MISMATCH_PENALTY = -25.0
+SHAPE_SCALAR_EXACT_BONUS = 35.0
+SHAPE_SCALAR_PARTIAL_BONUS = 12.0
+SHAPE_SCALAR_MISS_PENALTY = -18.0
+SHAPE_TABULAR_FULL_BONUS = 18.0
+SHAPE_TABULAR_PARTIAL_BONUS = 6.0
+SHAPE_TABULAR_EMPTY_PENALTY = -12.0
+SHAPE_NONEMPTY_BONUS = 4.0
+SHAPE_EMPTY_PENALTY = -4.0
+
+# -- Shape report weights --
+REPORT_COLUMN_EXACT_BONUS = 30.0
+REPORT_COLUMN_NEAR_BONUS = 12.0
+REPORT_MISSING_COLUMN_PENALTY = -28.0
+REPORT_VIOLATION_PENALTY = -20.0
+REPORT_GROUPED_KEY_PENALTY = -15.0
+
+# -- Verification penalty weights --
+PENALTY_MISSING_GROUPED_KEY = -8.0
+PENALTY_MISSING_GROUPED_KEY_CAP = -16.0
+PENALTY_ZERO_LIKE_UNGROUNDED = -10.0
+PENALTY_AGGREGATE_GRAIN_MISMATCH = -5.0
+
+# -- Filter grounding weights --
+FILTER_UNEXECUTED_PENALTY = -30.0
+FILTER_GROUNDED_REWRITE_BONUS = 16.0
+FILTER_UNGROUNDED_ZERO_PENALTY = -22.0
+FILTER_BASE_SCORE = 14.0
+FILTER_VALIDATION_ERROR_PENALTY = -8.0
+FILTER_VALIDATION_WARNING_PENALTY = -3.0
+FILTER_VALUE_REWRITE_BONUS = 6.0
+
+# -- Cardinality plausibility weights --
+CARDINALITY_EMPTY_PENALTY = -16.0
+CARDINALITY_SINGLE_SMALL_PENALTY = -14.0
+CARDINALITY_FEW_SMALL_PENALTY = -8.0
+CARDINALITY_NONEMPTY_BONUS = 3.0
+
+# -- Aggregate grain weights --
+AGGREGATE_ROW_COUNT_DISTINCT_PENALTY = -6.0
+AGGREGATE_ROW_COUNT_BONUS = 2.0
+AGGREGATE_DISTINCT_ENTITY_BONUS = 2.0
+AGGREGATE_DISTINCT_ENTITY_MISS_PENALTY = -4.0
+AGGREGATE_VALUE_COUNT_BONUS = 0.5
+
+# -- Confidence tiebreaker --
+CONFIDENCE_TIEBREAKER_FACTOR = 0.01
+
 
 def attempt_score_breakdown(
     *,
@@ -50,7 +111,7 @@ def attempt_score_breakdown(
                 aggregate_grain=aggregate_grain,
             ).values()
         ),
-        "confidence_tiebreaker": candidate.confidence * 0.01,
+        "confidence_tiebreaker": candidate.confidence * CONFIDENCE_TIEBREAKER_FACTOR,
     }
 
 
@@ -74,11 +135,14 @@ def verification_penalty_reasons(
     if shape_report is not None:
         grouped_key_count = sum(1 for v in shape_report.violations if "grouped key" in v)
         if grouped_key_count:
-            reasons["missing_grouped_key"] = max(-8.0 * grouped_key_count, -16.0)
+            reasons["missing_grouped_key"] = max(
+                PENALTY_MISSING_GROUPED_KEY * grouped_key_count,
+                PENALTY_MISSING_GROUPED_KEY_CAP,
+            )
 
     if filter_grounding_report is not None:
         if filter_grounding_report.zero_like_result and not filter_grounding_report.value_rewrites:
-            reasons["zero_like_ungrounded_filter"] = -10.0
+            reasons["zero_like_ungrounded_filter"] = PENALTY_ZERO_LIKE_UNGROUNDED
 
     if aggregate_grain is not None:
         clear_mismatch = (
@@ -86,7 +150,7 @@ def verification_penalty_reasons(
             and not aggregate_grain.uses_distinct
         ) or (aggregate_grain.inferred_grain == "row_count" and aggregate_grain.uses_distinct)
         if clear_mismatch:
-            reasons["aggregate_grain_mismatch"] = -5.0
+            reasons["aggregate_grain_mismatch"] = PENALTY_AGGREGATE_GRAIN_MISMATCH
 
     return reasons
 
@@ -110,26 +174,30 @@ def _aggregate_grain_adjustment(report: AggregateGrainReport | None) -> float:
     if report is None:
         return 0.0
     if report.inferred_grain == "row_count":
-        return -6.0 if report.uses_distinct else 2.0
+        if report.uses_distinct:
+            return AGGREGATE_ROW_COUNT_DISTINCT_PENALTY
+        return AGGREGATE_ROW_COUNT_BONUS
     if report.inferred_grain == "distinct_entity_count":
-        return 2.0 if report.uses_distinct else -4.0
+        if report.uses_distinct:
+            return AGGREGATE_DISTINCT_ENTITY_BONUS
+        return AGGREGATE_DISTINCT_ENTITY_MISS_PENALTY
     if report.inferred_grain == "value_count":
-        return 0.5
+        return AGGREGATE_VALUE_COUNT_BONUS
     return 0.0
 
 
 def _execution_status_adjustment(execution: ExecutionResult) -> float:
     """Make execution success dominate every other signal."""
 
-    return 1000.0 if execution.ok else -1000.0
+    return EXECUTION_SUCCESS_BONUS if execution.ok else EXECUTION_FAILURE_PENALTY
 
 
 def _validation_adjustment(validation: ValidationReport) -> float:
     """Reward SQL that validates cleanly and penalize noisy validation."""
 
-    score = 120.0 if validation.ok else -180.0
-    score -= 15.0 * len(validation.errors)
-    score -= 5.0 * len(validation.warnings)
+    score = VALIDATION_CLEAN_BONUS if validation.ok else VALIDATION_FAILURE_PENALTY
+    score += VALIDATION_ERROR_PENALTY * len(validation.errors)
+    score += VALIDATION_WARNING_PENALTY * len(validation.warnings)
     return score
 
 
@@ -159,33 +227,33 @@ def _output_shape_adjustment(
     expected_columns = _expected_output_columns(expectation)
     if expected_columns is not None and shape_report is None:
         if column_count == expected_columns:
-            score += 45.0
+            score += SHAPE_COLUMN_MATCH_BONUS
         elif abs(column_count - expected_columns) == 1:
-            score += 10.0
+            score += SHAPE_COLUMN_NEAR_MATCH_BONUS
         else:
-            score -= 25.0
+            score += SHAPE_COLUMN_MISMATCH_PENALTY
 
     if shape_report is None:
         if _expects_scalar_output(expectation):
             if row_count == 1 and column_count == 1:
-                score += 35.0
+                score += SHAPE_SCALAR_EXACT_BONUS
             elif row_count == 1 or column_count == 1:
-                score += 12.0
+                score += SHAPE_SCALAR_PARTIAL_BONUS
             else:
-                score -= 18.0
+                score += SHAPE_SCALAR_MISS_PENALTY
 
         if _expects_tabular_output(expectation):
             if row_count > 0 and column_count >= 2:
-                score += 18.0
+                score += SHAPE_TABULAR_FULL_BONUS
             elif row_count > 0:
-                score += 6.0
+                score += SHAPE_TABULAR_PARTIAL_BONUS
             else:
-                score -= 12.0
+                score += SHAPE_TABULAR_EMPTY_PENALTY
 
         if row_count > 0 and column_count > 0:
-            score += 4.0
+            score += SHAPE_NONEMPTY_BONUS
         else:
-            score -= 4.0
+            score += SHAPE_EMPTY_PENALTY
 
     return score
 
@@ -199,16 +267,16 @@ def _shape_report_adjustment(report: OutputShapeReport | None) -> float:
     score = 0.0
     if report.expected_columns:
         if report.observed_columns == report.expected_columns:
-            score += 30.0
+            score += REPORT_COLUMN_EXACT_BONUS
         elif not report.missing_columns:
-            score += 12.0
+            score += REPORT_COLUMN_NEAR_BONUS
         else:
-            score -= 28.0 * len(report.missing_columns)
+            score += REPORT_MISSING_COLUMN_PENALTY * len(report.missing_columns)
 
     if report.violations:
-        score -= 20.0 * len(report.violations)
+        score += REPORT_VIOLATION_PENALTY * len(report.violations)
         if any("grouped key" in violation for violation in report.violations):
-            score -= 15.0
+            score += REPORT_GROUPED_KEY_PENALTY
     return score
 
 
@@ -223,18 +291,18 @@ def _filter_grounding_adjustment(
     if intent is None or not intent.filters:
         return 0.0
     if not execution.ok:
-        return -30.0
+        return FILTER_UNEXECUTED_PENALTY
     if report is not None and report.zero_like_result:
         if report.value_rewrites:
-            return 16.0
-        return -22.0
-    score = 14.0
+            return FILTER_GROUNDED_REWRITE_BONUS
+        return FILTER_UNGROUNDED_ZERO_PENALTY
+    score = FILTER_BASE_SCORE
     if validation.errors:
-        score -= 8.0
+        score += FILTER_VALIDATION_ERROR_PENALTY
     if validation.warnings:
-        score -= 3.0 * len(validation.warnings)
+        score += FILTER_VALIDATION_WARNING_PENALTY * len(validation.warnings)
     if report is not None and report.value_rewrites:
-        score += 6.0
+        score += FILTER_VALUE_REWRITE_BONUS
     return score
 
 
@@ -253,7 +321,7 @@ def _cardinality_plausibility_adjustment(
     }
     row_count = int(profile.get("row_count") or 0)
     if row_count == 0:
-        return -16.0
+        return CARDINALITY_EMPTY_PENALTY
 
     sample_rows = profile.get("sample_rows") or []
     numeric_values = [
@@ -266,11 +334,11 @@ def _cardinality_plausibility_adjustment(
 
     max_value = max(numeric_values)
     if row_count == 1 and max_value <= 1:
-        return -14.0
+        return CARDINALITY_SINGLE_SMALL_PENALTY
     if row_count <= 2 and max_value <= 2:
-        return -8.0
+        return CARDINALITY_FEW_SMALL_PENALTY
     if row_count > 0:
-        return 3.0
+        return CARDINALITY_NONEMPTY_BONUS
     return 0.0
 
 

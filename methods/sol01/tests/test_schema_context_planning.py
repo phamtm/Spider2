@@ -256,12 +256,8 @@ def test_sql_reference_and_repair_prompts_use_large_schema_summary_context():
             stage="test",
             explanation="test",
             candidate_confidence=0.5,
-            validation=ValidationReport(
-                ok=False, errors=["unknown column: bad_column"]
-            ),
-            execution_result=ExecutionResult(
-                ok=False, row_count=0, error="unknown column"
-            ),
+            validation=ValidationReport(ok=False, errors=["unknown column: bad_column"]),
+            execution_result=ExecutionResult(ok=False, row_count=0, error="unknown column"),
             score=0.0,
         ),
         reference_context,

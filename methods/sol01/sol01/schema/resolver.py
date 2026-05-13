@@ -17,6 +17,7 @@ from sol01.models import (
 )
 from sol01.schema.constants import MAX_FAMILY_MEMBERS_IN_PROMPT
 from sol01.schema.reference_context import render_table_reference
+from sol01.schema.utils import _metadata_text, _string_list
 
 MAX_FAMILY_MEMBERS_TO_EXPAND = 64
 MAX_VARIANT_COLUMNS_IN_PROMPT = 12
@@ -687,17 +688,6 @@ def _stable_sorted_tables(values: Iterable[str]) -> list[str]:
 
 def _stable_unique_int(values: Iterable[int]) -> list[int]:
     return sorted({value for value in values})
-
-
-def _string_list(value: object) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    return [str(item).strip() for item in value if str(item).strip()]
-
-
-def _metadata_text(schema_object: SchemaObject, key: str) -> str:
-    value = schema_object.metadata.get(key)
-    return "" if value is None else str(value).strip()
 
 
 def _normalize_constraint(value: object) -> str:

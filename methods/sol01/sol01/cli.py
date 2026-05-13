@@ -19,6 +19,7 @@ from sol01.coordinator import run_task, run_tasks
 from sol01.infra.config import DEFAULT_DOTENV_PATH, RuntimeConfig, SchemaContextConfig
 from sol01.infra.logging import configure_logging, get_logger
 from sol01.infra.observability import configure_logfire
+from sol01.infra.strings import question_preview
 from sol01.infra.time_utils import format_duration
 from sol01.llm.llm_call_logs import (
     build_llm_call_detail_sections,
@@ -834,7 +835,7 @@ def _run_eval_lines(
         eval_row = eval_by_id.get(task.instance_id, {})
         eval_label = "PASS" if eval_row.get("passed") else "FAIL"
         task_status = answer.status if answer is not None else "missing"
-        question = _question_preview(task.question, max_length=90)
+        question = question_preview(task.question, max_length=90)
         lines.append(f"- {task.instance_id}: {eval_label} | task {task_status} | {question}")
     return lines
 
@@ -852,15 +853,6 @@ def _slug(value: str) -> str:
     """Turn a short filter value into a filesystem-friendly label."""
 
     return "".join(char if char.isalnum() else "-" for char in value).strip("-") or "value"
-
-
-def _question_preview(question: str, *, max_length: int = 90) -> str:
-    """Shorten long questions so CLI summaries stay readable."""
-
-    normalized = " ".join(question.split())
-    if len(normalized) <= max_length:
-        return normalized
-    return normalized[: max_length - 1].rstrip() + "…"
 
 
 def _format_rate(value: float) -> str:

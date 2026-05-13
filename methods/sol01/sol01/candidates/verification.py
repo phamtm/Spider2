@@ -15,6 +15,7 @@ from sol01.candidates.scoring import (
 )
 from sol01.execution.snowflake_runner import fetch_query_dataframe as _fetch_query_dataframe
 from sol01.infra.logging import get_logger
+from sol01.infra.strings import column_looks_string_like
 from sol01.llm.prompt_builders import infer_native_value_terms
 from sol01.models import (
     AggregateGrainReport,
@@ -512,7 +513,7 @@ def _probe_columns_for_table(
     """Return likely string columns to probe within one table."""
 
     string_columns = [
-        column.name for column in table_schema.columns if _column_looks_string_like(column.type)
+        column.name for column in table_schema.columns if column_looks_string_like(column.type)
     ]
     if not string_columns:
         return []
@@ -561,15 +562,6 @@ def _string_filter_probe_sql(*, table_name: str, column_name: str, literal: str)
         f"WHERE LOWER(CAST(\"{column_name}\" AS VARCHAR)) LIKE LOWER('%{escaped}%') "
         "LIMIT 5"
     )
-
-
-def _column_looks_string_like(column_type: str | None) -> bool:
-    """Return True when a schema column looks like a text field."""
-
-    if column_type is None:
-        return True
-    lowered = column_type.lower()
-    return any(token in lowered for token in ("char", "text", "string", "varchar", "variant"))
 
 
 def _table_looks_like_lookup(table_schema: TableSchema) -> bool:

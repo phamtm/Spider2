@@ -6,6 +6,7 @@ import json
 from functools import cache
 from pathlib import Path
 
+from sol01.infra.fs_cache import path_signature
 from sol01.models import TableSchema
 from sol01.schema.index import CACHE_PATH, build_db_index, build_index_cache
 
@@ -28,7 +29,7 @@ def load_index_cache(
 ) -> dict[str, dict[str, TableSchema]]:
     """Load the cached schema index, or build it if the cache is missing."""
 
-    signature = _path_signature(cache_path)
+    signature = path_signature(cache_path)
     if signature is None:
         return build_index_cache(cache_path=cache_path)
 
@@ -71,13 +72,3 @@ def _write_index_cache(
         + "\n",
         encoding="utf-8",
     )
-
-
-def _path_signature(path: Path) -> tuple[int, int] | None:
-    """Return a cheap cache key for one file path, or None when it is missing."""
-
-    try:
-        stat_result = path.stat()
-    except FileNotFoundError:
-        return None
-    return stat_result.st_mtime_ns, stat_result.st_size
