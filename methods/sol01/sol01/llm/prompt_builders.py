@@ -554,11 +554,3 @@ def schema_expansion_trigger(attempt: AttemptRecord) -> str | None:
     return None
 
 
-_infer_native_value_terms = infer_native_value_terms
-_sql_reference_context = sql_reference_context
-_schema_context_planning_user_prompt = schema_context_planning_user_prompt
-_sql_generation_prompt = sql_generation_prompt
-_sql_generation_batch_prompt = sql_generation_batch_prompt
-_sql_repair_prompt = sql_repair_prompt
-_candidate_review_prompt = candidate_review_prompt
-_semantic_repair_prompt = semantic_repair_prompt

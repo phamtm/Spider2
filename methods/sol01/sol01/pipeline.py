@@ -780,19 +780,3 @@ def trace_attempt(attempt: AttemptRecord) -> dict[str, Any]:
     return attempt.model_dump(mode="json")
 
 
-_TaskCtx = TaskContext
-_check_skip = check_skip
-_build_context = build_context
-_run_planning = run_planning
-_build_planning_prompt = build_planning_prompt
-_checked_schema_prompt = checked_schema_prompt
-_prompt_budget_diagnostics = prompt_budget_diagnostics
-_log_candidate = log_candidate
-_generate_initial_candidates = generate_initial_candidates
-_repair_failed_execution = repair_failed_execution
-_review_and_repair = review_and_repair
-_candidate_review_reason = candidate_review_reason
-_rebuild_context_for_expansion = rebuild_context_for_expansion
-_write_task_output = write_task_output
-_run_prompt = run_prompt
-_trace_attempt = trace_attempt

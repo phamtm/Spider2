@@ -692,7 +692,3 @@ def table_schemas_for_selection(
 
 
 _infer_aggregate_grain = infer_aggregate_grain
-_infer_output_shape_report = infer_output_shape_report
-_infer_filter_grounding_report = infer_filter_grounding_report
-_augment_intent_with_value_groundings = augment_intent_with_value_groundings
-_table_schemas_for_selection = table_schemas_for_selection

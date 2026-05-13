@@ -5,11 +5,11 @@ import pytest
 from sol01.infra.config import DEFAULT_MAX_SCHEMA_PROMPT_CHARS
 from sol01.llm.prompt_builders import (
     PromptBudgetExceededError,
-    _schema_context_planning_user_prompt,
-    _sql_reference_context,
-    _sql_repair_prompt,
     enforce_prompt_budget,
     sanitize_schema_planning_decision,
+    schema_context_planning_user_prompt,
+    sql_reference_context,
+    sql_repair_prompt,
 )
 from sol01.models import (
     AttemptRecord,
@@ -33,7 +33,7 @@ from sol01.schema.objects import build_schema_objects
 
 
 def test_schema_context_planning_prompt_uses_schema_context_objects_without_full_schema_summary():
-    prompt = _schema_context_planning_user_prompt(
+    prompt = schema_context_planning_user_prompt(
         Task(instance_id="local001", db="DB", question="Revenue for closed orders in 2024"),
         "DB",
         "Closed means STATUS = 'closed'. " * 200,
@@ -55,7 +55,7 @@ def test_schema_context_planning_prompt_uses_schema_context_objects_without_full
 
 
 def test_schema_context_planning_prompt_fits_total_budget_without_dropping_object_ids():
-    minimal_prompt = _schema_context_planning_user_prompt(
+    minimal_prompt = schema_context_planning_user_prompt(
         Task(instance_id="local001", db="DB", question="Revenue for closed orders in 2024"),
         "DB",
         "Closed means STATUS = 'closed'. " * 200,
@@ -65,7 +65,7 @@ def test_schema_context_planning_prompt_fits_total_budget_without_dropping_objec
     )
     budget = len(minimal_prompt) + 40
 
-    prompt = _schema_context_planning_user_prompt(
+    prompt = schema_context_planning_user_prompt(
         Task(instance_id="local001", db="DB", question="Revenue for closed orders in 2024"),
         "DB",
         "Closed means STATUS = 'closed'. " * 200,
@@ -81,7 +81,7 @@ def test_schema_context_planning_prompt_fits_total_budget_without_dropping_objec
 
 def test_schema_context_planning_prompt_raises_when_required_shell_exceeds_budget():
     with pytest.raises(PromptBudgetExceededError, match="planning prompt"):
-        _schema_context_planning_user_prompt(
+        schema_context_planning_user_prompt(
             Task(instance_id="local001", db="DB", question="Revenue for closed orders in 2024"),
             "DB",
             "",
@@ -121,7 +121,7 @@ def test_schema_context_planning_prompt_uses_curated_summary_evidence_for_covere
     chunk = next(
         chunk for chunk in render_schema_chunks([schema_object]) if chunk.chunk_type == "table"
     )
-    prompt = _schema_context_planning_user_prompt(
+    prompt = schema_context_planning_user_prompt(
         Task(
             instance_id="sf_bq_test",
             db="GITHUB_REPOS_DATE",
@@ -247,8 +247,8 @@ def test_sql_reference_and_repair_prompts_use_large_schema_summary_context():
         confidence=0.9,
     )
 
-    reference_context = _sql_reference_context(schema, table_schemas)
-    repair_prompt = _sql_repair_prompt(
+    reference_context = sql_reference_context(schema, table_schemas)
+    repair_prompt = sql_repair_prompt(
         Task(instance_id="sf_bq_test", db="COVID19_USA", question="Show confirmed cases."),
         _intent(),
         AttemptRecord(
@@ -300,7 +300,7 @@ def test_sql_reference_budget_enforcement_preserves_large_schema_rules():
         confidence=0.9,
     )
 
-    reference_context = _sql_reference_context(schema, table_schemas)
+    reference_context = sql_reference_context(schema, table_schemas)
     enforced = enforce_prompt_budget(
         "sql_reference_context",
         reference_context,

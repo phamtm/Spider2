@@ -163,11 +163,6 @@ def best_attempt(attempts: list[AttemptRecord]) -> AttemptRecord | None:
     return max(attempts, key=lambda attempt: attempt.score)
 
 
-_attempt_score_breakdown = attempt_score_breakdown
-_verification_penalty_reasons = verification_penalty_reasons
-_best_attempt = best_attempt
-
-
 def _aggregate_grain_adjustment(report: AggregateGrainReport | None) -> float:
     """Score candidate aggregates according to the inferred grain."""
 
