@@ -30,9 +30,7 @@ from sol01.llm.prompt_builders import (
     sql_generation_batch_prompt,
     sql_repair_prompt,
 )
-from sol01.llm.prompt_builders import (
-    sql_reference_context as build_sql_reference_context,
-)
+from sol01.llm.prompt_builders import sql_reference_context
 from sol01.loading.docs import load_document_text
 from sol01.models import (
     AttemptRecord,
@@ -608,13 +606,13 @@ def rebuild_context_for_expansion(
     expanded_schema: SchemaSelection,
     *,
     table_schemas: dict[str, Any] | None = None,
-    sql_reference_context: str | None = None,
+    prebuilt_reference: str | None = None,
     schema_context: dict[str, Any] | None = None,
 ) -> TaskContext:
     """Rebuild selected-schema context while preserving the original answer contract."""
 
     new_table_schemas = table_schemas or table_schemas_for_selection(expanded_schema)
-    reference_context = sql_reference_context or build_sql_reference_context(
+    reference_context = prebuilt_reference or sql_reference_context(
         expanded_schema,
         new_table_schemas,
     )
