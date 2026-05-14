@@ -18,7 +18,6 @@ from sol01.infra.logging import get_logger
 from sol01.llm.client import LLMClient, PromptSpec
 from sol01.llm.llm_logging import LLMCallLogger
 from sol01.models import (
-    AttemptRecord,
     FinalAnswer,
     Task,
 )
@@ -32,10 +31,11 @@ from sol01.output.output import (
     write_trace,
 )
 from sol01.pipeline import (
+    TaskRun,
     attempt_schema_expansion,
-    build_context,
     check_skip,
     generate_initial_candidates,
+    plan_schema,
     repair_failed_execution,
     review_and_repair,
     write_task_output,
@@ -286,7 +286,7 @@ def run_task(
     max_attempts: int = 4,
     semantic_repairs: int = 1,
 ) -> FinalAnswer:
-    """Run one task from schema context through final trace writing."""
+    """Run one task through the explicit solver stage pipeline."""
 
     started_at = perf_counter()
     live_logging_enabled = llm_client is None
@@ -308,40 +308,17 @@ def run_task(
     if skipped is not None:
         return skipped
 
-    prompt_hashes: dict[str, str] = {}
-    attempts: list[AttemptRecord] = []
-
-    ctx = build_context(
-        task,
-        client,
-        prompt_hashes,
-        run_paths,
-        schema_context_config,
-    )
-
-    best_attempt = generate_initial_candidates(
-        ctx, attempts, initial_candidates=initial_candidates, max_attempts=max_attempts
-    )
-    best_attempt = repair_failed_execution(ctx, attempts, best_attempt, max_attempts=max_attempts)
-    best_attempt, candidate_review_payload = review_and_repair(
-        ctx, attempts, best_attempt, max_attempts=max_attempts, semantic_repairs=semantic_repairs
-    )
-    best_attempt, schema_expansion_payload, expanded_ctx = attempt_schema_expansion(
-        ctx,
-        attempts,
-        best_attempt,
-    )
-
+    run = TaskRun(task=task, client=client, schema_context_config=schema_context_config)
+    run = plan_schema(run, run_paths=run_paths)
+    run = generate_initial_candidates(run, count=initial_candidates, max_attempts=max_attempts)
+    run = repair_failed_execution(run, max_attempts=max_attempts)
+    run = review_and_repair(run, max_attempts=max_attempts, semantic_repairs=semantic_repairs)
+    run = attempt_schema_expansion(run)
     return write_task_output(
-        ctx,
-        attempts,
-        best_attempt,
-        run_paths,
-        task_trace_path,
-        task_llm_log_path,
-        candidate_review_payload=candidate_review_payload,
-        schema_expansion_payload=schema_expansion_payload,
-        expanded_ctx=expanded_ctx,
+        run,
+        run_paths=run_paths,
+        task_trace_path=task_trace_path,
+        task_llm_log_path=task_llm_log_path,
         live_logging_enabled=live_logging_enabled,
         started_at=started_at,
     )
