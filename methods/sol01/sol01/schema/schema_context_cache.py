@@ -30,8 +30,8 @@ from sol01.schema.large_schema_summaries import (
 )
 from sol01.schema.objects import build_schema_objects
 
-OBJECT_BUILDER_VERSION = "schema-objects-v2"
-CHUNK_RENDER_VERSION = "schema-chunks-v1"
+OBJECT_BUILDER_VERSION = "schema-objects-v3"
+CHUNK_RENDER_VERSION = "schema-chunks-v2"
 MANIFEST_VERSION = 2
 REQUIRED_CACHE_ARTIFACTS = frozenset({"objects.jsonl", "chunks.jsonl", "manifest.json"})
 REQUIRED_MANIFEST_FIELDS = frozenset(

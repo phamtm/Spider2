@@ -272,9 +272,6 @@ def should_skip_task(
     status = trace.get("status")
     csv_path = csv_path_for(run_paths, instance_id=instance_id)
 
-    if _trace_uses_removed_schema_selection_path(trace):
-        return False
-
     if status == "success":
         return csv_path.exists()
     if status == "skipped":
@@ -282,18 +279,6 @@ def should_skip_task(
     if status == "failed":
         return skip_failed
     return False
-
-
-def _trace_uses_removed_schema_selection_path(trace: dict[str, Any]) -> bool:
-    """Return True for traces produced by removed fixed schema-selection experiments."""
-
-    mode = trace.get("retrieval_mode")
-    if mode == "legacy_fixed":
-        return True
-
-    schema = trace.get("schema_selection") or {}
-    schema_mode = schema.get("retrieval_mode")
-    return schema_mode == "legacy_fixed"
 
 
 def _write_json(path: Path, payload: dict[str, Any]) -> Path:

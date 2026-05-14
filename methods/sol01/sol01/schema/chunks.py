@@ -77,7 +77,7 @@ def _table_chunk(obj: SchemaObject) -> SchemaContextChunk:
         chunk_id=f"{obj.object_id}::table",
         object_id=obj.object_id,
         chunk_type="table",
-        search_text=_join_text(search_terms),
+        evidence_text=_join_text(search_terms),
         prompt_text=prompt_text,
         source_definition=source_definition,
         source="schema",
@@ -114,7 +114,7 @@ def _column_chunk(obj: SchemaObject) -> SchemaContextChunk:
         object_id=obj.object_id,
         chunk_type="column",
         parent_object_ids=_table_parent_ids(obj),
-        search_text=_join_text(_identifier_terms(obj, extra=_sample_values(obj))),
+        evidence_text=_join_text(_identifier_terms(obj, extra=_sample_values(obj))),
         prompt_text=prompt_text,
         source_definition=source_definition,
         inferred_usage=inferred_usage,
@@ -138,7 +138,7 @@ def _column_group_chunk(obj: SchemaObject) -> SchemaContextChunk:
         object_id=obj.object_id,
         chunk_type="column_group",
         parent_object_ids=[*_table_parent_ids(obj), *_column_parent_ids(obj.table_name, columns)],
-        search_text=_join_text(
+        evidence_text=_join_text(
             _identifier_terms(obj, extra=[*columns, *_normalized_tokens(columns)])
         ),
         prompt_text=_join_sentences(
@@ -178,7 +178,7 @@ def _join_candidate_chunk(obj: SchemaObject) -> SchemaContextChunk:
         object_id=obj.object_id,
         chunk_type="join_candidate",
         parent_object_ids=_join_parent_ids(left, right),
-        search_text=_join_text(
+        evidence_text=_join_text(
             _identifier_terms(
                 obj,
                 extra=[
@@ -219,7 +219,7 @@ def _sample_value_chunk(obj: SchemaObject) -> SchemaContextChunk:
             *_table_parent_ids(obj),
             *_column_parent_ids(obj.table_name, [obj.column_name]),
         ],
-        search_text=_join_text(
+        evidence_text=_join_text(
             [
                 obj.object_id,
                 obj.db,
@@ -269,7 +269,7 @@ def _table_family_chunk(obj: SchemaObject) -> SchemaContextChunk:
         object_id=obj.object_id,
         chunk_type="table_family",
         parent_object_ids=_table_parent_ids_from_names(members),
-        search_text=_join_text(
+        evidence_text=_join_text(
             _identifier_terms(obj, extra=[*members, *common_columns, *_normalized_tokens(members)])
         ),
         prompt_text=_join_sentences(
@@ -298,7 +298,7 @@ def _summary_table_chunk(
         chunk_id=f"{obj.object_id}::table",
         object_id=obj.object_id,
         chunk_type="table",
-        search_text=_join_text(
+        evidence_text=_join_text(
             [
                 *_identifier_terms(obj),
                 table_ref,
@@ -336,7 +336,7 @@ def _summary_table_family_chunk(
         object_id=obj.object_id,
         chunk_type="table_family",
         parent_object_ids=_table_parent_ids_from_names(members),
-        search_text=_join_text(
+        evidence_text=_join_text(
             [
                 *_identifier_terms(obj, extra=[canonical, *common_columns]),
                 *_summary_search_terms(summaries),

@@ -161,13 +161,6 @@ class SchemaObject(BaseModel):
     searchable_text: str = ""
     metadata: dict[str, object] = Field(default_factory=dict)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _migrate_legacy_search_text(cls, data: object) -> object:
-        if isinstance(data, dict) and not data.get("search_text") and data.get("bm25_text"):
-            data = {**data, "search_text": data["bm25_text"]}
-        return data
-
     @field_validator("object_id")
     @classmethod
     def _validate_object_id(cls, object_id: str) -> str:
@@ -189,7 +182,7 @@ class SchemaContextChunk(BaseModel):
     text: str = ""
     chunk_type: SchemaContextChunkType = "schema_object"
     parent_object_ids: list[str] = Field(default_factory=list)
-    search_text: str = ""
+    evidence_text: str = ""
     prompt_text: str = ""
     source_definition: str = ""
     inferred_usage: str = ""
@@ -208,13 +201,13 @@ class SchemaContextChunk(BaseModel):
         return [validate_schema_object_id(object_id) for object_id in object_ids]
 
     @model_validator(mode="after")
-    def _default_legacy_text(self) -> SchemaContextChunk:
+    def _derive_text(self) -> SchemaContextChunk:
         if not self.text:
             self.text = (
                 self.prompt_text
                 or self.source_definition
                 or self.inferred_usage
-                or self.search_text
+                or self.evidence_text
             )
         return self
 
