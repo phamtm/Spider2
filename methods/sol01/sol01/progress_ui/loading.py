@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import streamlit as st
 
 from sol01.infra.logging import get_logger
 from sol01.loading.category_metadata import (
@@ -19,10 +18,23 @@ from sol01.progress_ui.parsing import (
     read_jsonl,
 )
 
+try:
+    import streamlit as st
+
+    _cache = st.cache_data
+except ImportError:
+
+    def _cache(**_kw):  # type: ignore[misc]
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+
 logger = get_logger(__name__)
 
 
-@st.cache_data(ttl=3600)
+@_cache(ttl=3600)
 def read_dataset(path: str) -> pd.DataFrame:
     path_obj = Path(path)
     if not path_obj.exists():
@@ -139,7 +151,7 @@ def discover_result_files(path: Path) -> list[Path]:
     return sorted(set(files))
 
 
-@st.cache_data(ttl=5)
+@_cache(ttl=5)
 def load_records(source_str: str) -> list[Record]:
     source = Path(source_str)
     if not source.exists():
@@ -152,7 +164,7 @@ def load_records(source_str: str) -> list[Record]:
     return records_from_file(source)
 
 
-@st.cache_data(ttl=3600)
+@_cache(ttl=3600)
 def load_category_metadata_rows(dataset_path: str) -> dict[str, dict[str, Any]]:
     path = Path(dataset_path)
     if not path.exists():
