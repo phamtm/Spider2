@@ -9,6 +9,7 @@ from typing import Any
 from typer.testing import CliRunner
 
 from sol01 import cli
+from sol01.cli import schema_context as cli_schema_context
 from sol01.infra.config import SchemaContextConfig
 from sol01.models import ColumnSchema, SchemaContextChunk, SchemaObject, TableSchema, Task
 from sol01.schema.schema_context_cache import SchemaContextCache
@@ -212,7 +213,11 @@ def test_schema_context_eval_cli_command_dispatches(monkeypatch, tmp_path: Path)
         called.update(kwargs)
         return DummyReport()
 
-    monkeypatch.setattr(cli, "handle_schema_context_eval", fake_handle_schema_context_eval)
+    monkeypatch.setattr(
+        cli_schema_context,
+        "handle_schema_context_eval",
+        fake_handle_schema_context_eval,
+    )
 
     result = runner.invoke(
         cli.app,

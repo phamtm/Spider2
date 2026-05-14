@@ -11,6 +11,10 @@ import typer
 from typer.testing import CliRunner
 
 from sol01 import cli
+from sol01.cli import ask as cli_ask
+from sol01.cli import eval as cli_eval
+from sol01.cli import inspect as cli_inspect
+from sol01.cli import run as cli_run
 from sol01.infra.config import RuntimeConfig, SchemaContextConfig
 from sol01.models import FinalAnswer, Task
 from sol01.output.output import AskPaths, ensure_run_paths, eval_input_csv_dir_for
@@ -44,7 +48,7 @@ def test_run_command_dispatches_positional_selectors(monkeypatch):
             },
         }
 
-    monkeypatch.setattr(cli, "handle_run", fake_handle_run)
+    monkeypatch.setattr(cli_run, "handle_run", fake_handle_run)
 
     result = runner.invoke(
         cli.app,
@@ -63,8 +67,8 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch, tmp_path: Path):
     called: dict[str, Any] = {}
 
     monkeypatch.setattr(
-        cli,
-        "_load_filtered_tasks",
+        cli_run,
+        "load_filtered_tasks",
         lambda **kwargs: [Task(instance_id="local003", db="db", question="q")],
     )
 
@@ -91,9 +95,9 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch, tmp_path: Path):
             )
         ]
 
-    monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
-    monkeypatch.setattr(cli.SchemaContextConfig, "from_env", classmethod(fake_schema_from_env))
-    monkeypatch.setattr(cli, "run_tasks", fake_run_tasks)
+    monkeypatch.setattr(cli_run.RuntimeConfig, "from_env", classmethod(fake_from_env))
+    monkeypatch.setattr(cli_run.SchemaContextConfig, "from_env", classmethod(fake_schema_from_env))
+    monkeypatch.setattr(cli_run, "run_tasks", fake_run_tasks)
 
     def fake_run_persisted_eval(run_id, *, expected_instance_ids=None, **kwargs):
         called["eval_run_id"] = run_id
@@ -114,9 +118,9 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch, tmp_path: Path):
             ],
         }
 
-    monkeypatch.setattr(cli, "run_persisted_eval", fake_run_persisted_eval)
+    monkeypatch.setattr(cli_run, "run_persisted_eval", fake_run_persisted_eval)
 
-    result = cli.handle_run(
+    result = cli_run.handle_run(
         concurrency=None,
         run_id="smoke-local003",
         selectors=None,
@@ -130,8 +134,8 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch, tmp_path: Path):
     )
 
     assert called["require_api_key"] is True
-    assert called["dotenv_path"] == cli.DEFAULT_DOTENV_PATH
-    assert called["schema_dotenv_path"] == cli.DEFAULT_DOTENV_PATH
+    assert called["dotenv_path"] == cli_run.DEFAULT_DOTENV_PATH
+    assert called["schema_dotenv_path"] == cli_run.DEFAULT_DOTENV_PATH
     assert called["concurrency"] is None
     assert called["task_ids"] == ["local003"]
     assert called["run_id"] == "smoke-local003"
@@ -146,8 +150,8 @@ def test_handle_run_leaves_schema_prewarm_to_batch_coordinator(monkeypatch, tmp_
     events: list[tuple[str, Any]] = []
 
     monkeypatch.setattr(
-        cli,
-        "_load_run_tasks",
+        cli_run,
+        "load_run_tasks",
         lambda **kwargs: [
             Task(instance_id="one", db="DB_A", question="q1"),
             Task(instance_id="two", db="DB_A", question="q2"),
@@ -163,10 +167,10 @@ def test_handle_run_leaves_schema_prewarm_to_batch_coordinator(monkeypatch, tmp_
         events.append(("run_tasks", [task.instance_id for task in tasks]))
         return []
 
-    monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
-    monkeypatch.setattr(cli, "run_tasks", fake_run_tasks)
+    monkeypatch.setattr(cli_run.RuntimeConfig, "from_env", classmethod(fake_from_env))
+    monkeypatch.setattr(cli_run, "run_tasks", fake_run_tasks)
     monkeypatch.setattr(
-        cli,
+        cli_run,
         "run_persisted_eval",
         lambda *args, **kwargs: {
             "correct_tasks": 0,
@@ -176,7 +180,7 @@ def test_handle_run_leaves_schema_prewarm_to_batch_coordinator(monkeypatch, tmp_
         },
     )
 
-    cli.handle_run(
+    cli_run.handle_run(
         concurrency=None,
         run_id="prewarm",
         selectors=None,
@@ -198,15 +202,15 @@ def test_handle_run_forwards_all_expected_ids_to_persisted_eval(monkeypatch, tmp
     called: dict[str, Any] = {}
 
     monkeypatch.setattr(
-        cli,
-        "_load_filtered_tasks",
+        cli_run,
+        "load_filtered_tasks",
         lambda **kwargs: [
             Task(instance_id="local003", db="db", question="q1"),
             Task(instance_id="local004", db="db", question="q2"),
         ],
     )
     monkeypatch.setattr(
-        cli.RuntimeConfig,
+        cli_run.RuntimeConfig,
         "from_env",
         classmethod(
             lambda cls, require_api_key=False, dotenv_path=None, concurrency=None: RuntimeConfig(
@@ -215,7 +219,7 @@ def test_handle_run_forwards_all_expected_ids_to_persisted_eval(monkeypatch, tmp
         ),
     )
     monkeypatch.setattr(
-        cli,
+        cli_run,
         "run_tasks",
         lambda *args, **kwargs: [
             FinalAnswer(
@@ -244,9 +248,9 @@ def test_handle_run_forwards_all_expected_ids_to_persisted_eval(monkeypatch, tmp
             "per_instance": [],
         }
 
-    monkeypatch.setattr(cli, "run_persisted_eval", fake_run_persisted_eval)
+    monkeypatch.setattr(cli_run, "run_persisted_eval", fake_run_persisted_eval)
 
-    cli.handle_run(
+    cli_run.handle_run(
         concurrency=None,
         run_id="smoke-local003",
         selectors=None,
@@ -268,7 +272,7 @@ def test_handle_run_uses_positional_selectors(monkeypatch, tmp_path: Path):
     called: dict[str, Any] = {}
 
     monkeypatch.setattr(
-        cli,
+        cli_run,
         "select_tasks",
         lambda selectors: [
             Task(instance_id="sf035", db="db", question="q1"),
@@ -276,7 +280,7 @@ def test_handle_run_uses_positional_selectors(monkeypatch, tmp_path: Path):
         ],
     )
     monkeypatch.setattr(
-        cli.RuntimeConfig,
+        cli_run.RuntimeConfig,
         "from_env",
         classmethod(
             lambda cls, require_api_key=False, dotenv_path=None, concurrency=None: RuntimeConfig(
@@ -298,10 +302,10 @@ def test_handle_run_uses_positional_selectors(monkeypatch, tmp_path: Path):
             "per_instance": [],
         }
 
-    monkeypatch.setattr(cli, "run_tasks", fake_run_tasks)
-    monkeypatch.setattr(cli, "run_persisted_eval", fake_run_persisted_eval)
+    monkeypatch.setattr(cli_run, "run_tasks", fake_run_tasks)
+    monkeypatch.setattr(cli_run, "run_persisted_eval", fake_run_persisted_eval)
 
-    cli.handle_run(
+    cli_run.handle_run(
         concurrency=None,
         run_id="selected-bugs",
         selectors=["sf035", "sf_bq135"],
@@ -322,15 +326,15 @@ def test_handle_run_writes_registry_records_for_default_ui_source(monkeypatch, t
     """Production handle_run should populate the registry the progress UI defaults to."""
 
     monkeypatch.setattr(
-        cli,
-        "_load_filtered_tasks",
+        cli_run,
+        "load_filtered_tasks",
         lambda **kwargs: [
             Task(instance_id="local003", db="DB_A", question="q1"),
             Task(instance_id="local004", db="DB_B", question="q2"),
         ],
     )
     monkeypatch.setattr(
-        cli.RuntimeConfig,
+        cli_run.RuntimeConfig,
         "from_env",
         classmethod(
             lambda cls, require_api_key=False, dotenv_path=None, concurrency=None: RuntimeConfig(
@@ -339,7 +343,7 @@ def test_handle_run_writes_registry_records_for_default_ui_source(monkeypatch, t
         ),
     )
     monkeypatch.setattr(
-        cli,
+        cli_run,
         "run_tasks",
         lambda *args, **kwargs: [
             FinalAnswer(
@@ -359,7 +363,7 @@ def test_handle_run_writes_registry_records_for_default_ui_source(monkeypatch, t
         ],
     )
     monkeypatch.setattr(
-        cli,
+        cli_run,
         "run_persisted_eval",
         lambda *args, **kwargs: {
             "correct_tasks": 1,
@@ -384,7 +388,7 @@ def test_handle_run_writes_registry_records_for_default_ui_source(monkeypatch, t
         },
     )
 
-    cli.handle_run(
+    cli_run.handle_run(
         concurrency=None,
         run_id="ui-default",
         selectors=None,
@@ -407,7 +411,7 @@ def test_handle_run_writes_registry_records_for_default_ui_source(monkeypatch, t
 
 def test_selector_run_rejects_instance_id_filter_combo():
     with pytest.raises(typer.BadParameter, match="--instance-id"):
-        cli._load_run_tasks(
+        cli_run.load_run_tasks(
             selectors=["sf035"],
             instance_id="sf_bq135",
             db=None,
@@ -427,11 +431,11 @@ def test_handle_eval_passes_filtered_ids_without_rewriting_manifest(monkeypatch,
     )
 
     monkeypatch.setattr(
-        cli,
-        "_load_filtered_tasks",
+        cli_eval,
+        "load_filtered_tasks",
         lambda **kwargs: [Task(instance_id="local003", db="db", question="q")],
     )
-    monkeypatch.setattr(cli, "ensure_run_paths", lambda run_id: run_paths)
+    monkeypatch.setattr(cli_eval, "ensure_run_paths", lambda run_id: run_paths)
     (run_paths.csv_dir / "local003.csv").write_text("answer\n1\n", encoding="utf-8")
     (run_paths.csv_dir / "local004.csv").write_text("answer\n2\n", encoding="utf-8")
 
@@ -452,9 +456,9 @@ def test_handle_eval_passes_filtered_ids_without_rewriting_manifest(monkeypatch,
             "missing_csv_count": 0,
         }
 
-    monkeypatch.setattr(cli, "run_official_eval", fake_run_official_eval)
+    monkeypatch.setattr(cli_eval, "run_official_eval", fake_run_official_eval)
 
-    summary = cli.handle_eval(
+    summary = cli_eval.handle_eval(
         run_id="smoke-local003",
         instance_id="local003",
         db=None,
@@ -464,7 +468,7 @@ def test_handle_eval_passes_filtered_ids_without_rewriting_manifest(monkeypatch,
 
     assert summary["correct_tasks"] == 1
     assert called["result_dir_files"] == ["local003.csv"]
-    artifact_tag = cli._filtered_eval_tag(
+    artifact_tag = cli_eval.filtered_eval_tag(
         instance_id="local003",
         db=None,
         question_contains=None,
@@ -490,15 +494,15 @@ def test_handle_eval_rejects_missing_filtered_csv(monkeypatch, tmp_path: Path):
     """Filtered eval should fail fast when a requested CSV is missing."""
 
     run_paths = ensure_run_paths("smoke-local003", outputs_root=tmp_path)
-    monkeypatch.setattr(cli, "ensure_run_paths", lambda run_id: run_paths)
+    monkeypatch.setattr(cli_eval, "ensure_run_paths", lambda run_id: run_paths)
     monkeypatch.setattr(
-        cli,
-        "_load_filtered_tasks",
+        cli_eval,
+        "load_filtered_tasks",
         lambda **kwargs: [Task(instance_id="local003", db="db", question="q")],
     )
 
     with pytest.raises(typer.BadParameter) as exc_info:
-        cli.handle_eval(
+        cli_eval.handle_eval(
             run_id="smoke-local003",
             instance_id="local003",
             db=None,
@@ -512,13 +516,13 @@ def test_handle_eval_rejects_missing_filtered_csv(monkeypatch, tmp_path: Path):
 def test_filtered_eval_tag_adds_a_disambiguating_hash():
     """Different raw filters should not collapse to the same artifact tag."""
 
-    first = cli._filtered_eval_tag(
+    first = cli_eval.filtered_eval_tag(
         instance_id=None,
         db=None,
         question_contains="A B",
         limit=None,
     )
-    second = cli._filtered_eval_tag(
+    second = cli_eval.filtered_eval_tag(
         instance_id=None,
         db=None,
         question_contains="A-B",
@@ -531,7 +535,7 @@ def test_filtered_eval_tag_adds_a_disambiguating_hash():
 def test_llm_calls_command_summarizes_rows(monkeypatch, tmp_path: Path):
     """The llm-calls command should print a compact summary by default."""
 
-    monkeypatch.setattr(cli, "OUTPUTS_ROOT", tmp_path)
+    monkeypatch.setattr(cli_inspect, "OUTPUTS_ROOT", tmp_path)
     log_path = tmp_path / "smoke-local003" / "llm_calls" / "local003.jsonl"
     _write_jsonl(
         log_path,
@@ -585,7 +589,7 @@ def test_llm_calls_command_summarizes_rows(monkeypatch, tmp_path: Path):
 def test_llm_calls_command_prints_full_selected_call(monkeypatch, tmp_path: Path):
     """The llm-calls command should print the full payload for one selected call."""
 
-    monkeypatch.setattr(cli, "OUTPUTS_ROOT", tmp_path)
+    monkeypatch.setattr(cli_inspect, "OUTPUTS_ROOT", tmp_path)
     log_path = tmp_path / "smoke-local003" / "llm_calls" / "local003.jsonl"
     _write_jsonl(
         log_path,
@@ -654,7 +658,7 @@ def test_llm_calls_command_prints_full_selected_call(monkeypatch, tmp_path: Path
 def test_llm_calls_command_exits_cleanly_when_log_is_missing(monkeypatch, tmp_path: Path):
     """The llm-calls command should fail with a useful message when no log exists."""
 
-    monkeypatch.setattr(cli, "OUTPUTS_ROOT", tmp_path)
+    monkeypatch.setattr(cli_inspect, "OUTPUTS_ROOT", tmp_path)
 
     result = runner.invoke(
         cli.app,
@@ -689,8 +693,8 @@ def test_handle_ask_uses_ask_layout(monkeypatch, tmp_path: Path):
         called["concurrency"] = concurrency
         return object()
 
-    monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
-    monkeypatch.setattr(cli, "ensure_ask_paths", lambda outputs_root: ask_paths)
+    monkeypatch.setattr(cli_ask.RuntimeConfig, "from_env", classmethod(fake_from_env))
+    monkeypatch.setattr(cli_ask, "ensure_ask_paths", lambda outputs_root: ask_paths)
 
     def fake_run_task(task: Task, *, run_paths, config, schema_context_config, force: bool):
         (run_paths.sql_dir / "ask.sql").parent.mkdir(parents=True, exist_ok=True)
@@ -707,12 +711,12 @@ def test_handle_ask_uses_ask_layout(monkeypatch, tmp_path: Path):
             trace_path=str(run_paths.traces_dir / "ask.json"),
         )
 
-    monkeypatch.setattr(cli, "run_task", fake_run_task)
+    monkeypatch.setattr(cli_ask, "run_task", fake_run_task)
 
-    answer = cli.handle_ask(db="E_commerce", question="Which customers have the highest AOV?")
+    answer = cli_ask.handle_ask(db="E_commerce", question="Which customers have the highest AOV?")
 
     assert called["require_api_key"] is True
-    assert called["dotenv_path"] == cli.DEFAULT_DOTENV_PATH
+    assert called["dotenv_path"] == cli_ask.DEFAULT_DOTENV_PATH
     assert called["concurrency"] is None
     assert answer.status == "success"
     assert answer.csv_path == str(ask_paths.csv_path)
@@ -740,23 +744,23 @@ def test_handle_ask_cleans_up_internal_dir_on_failure(monkeypatch, tmp_path: Pat
         called["concurrency"] = concurrency
         return object()
 
-    monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
-    monkeypatch.setattr(cli, "ensure_ask_paths", lambda outputs_root: ask_paths)
+    monkeypatch.setattr(cli_ask.RuntimeConfig, "from_env", classmethod(fake_from_env))
+    monkeypatch.setattr(cli_ask, "ensure_ask_paths", lambda outputs_root: ask_paths)
 
     def failing_run_task(task: Task, *, run_paths, config, schema_context_config, force: bool):
         run_paths.root.mkdir(parents=True, exist_ok=True)
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(cli, "run_task", failing_run_task)
+    monkeypatch.setattr(cli_ask, "run_task", failing_run_task)
 
     try:
-        cli.handle_ask(db="E_commerce", question="Which customers have the highest AOV?")
+        cli_ask.handle_ask(db="E_commerce", question="Which customers have the highest AOV?")
     except RuntimeError as exc:
         assert str(exc) == "boom"
     else:
         raise AssertionError("Expected RuntimeError")
 
     assert called["require_api_key"] is True
-    assert called["dotenv_path"] == cli.DEFAULT_DOTENV_PATH
+    assert called["dotenv_path"] == cli_ask.DEFAULT_DOTENV_PATH
     assert called["concurrency"] is None
     assert not (ask_paths.root / "_internal").exists()
