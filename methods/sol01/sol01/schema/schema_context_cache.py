@@ -210,7 +210,7 @@ def build_schema_context_cache(
             family_similarity_threshold=config.family_similarity_threshold,
             covered_table_keys=covered_table_keys,
         )
-        chunks = render_schema_chunks(objects)
+        chunks = render_schema_chunks(objects, large_schema_summary_registry=registry)
         logger.info(
             "schema context cache objects rendered",
             db=db,

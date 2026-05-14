@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -63,6 +64,34 @@ def _build(tmp_path: Path, **kwargs):
         lock_poll_seconds=0.01,
         **kwargs,
     )
+
+
+def _write_custom_summary_registry(path: Path) -> Path:
+    path.write_text(
+        json.dumps(
+            {
+                "summaries": [
+                    {
+                        "summary_id": "orders_custom_summary",
+                        "schema_copies": [
+                            {"database": "DB", "schema_name": "PUBLIC"},
+                        ],
+                        "match": {"table_names": ["ORDERS"]},
+                        "purpose": "Custom order lifecycle fact table.",
+                        "grain": "One row per order in the custom registry.",
+                        "stable_columns": ["ORDER_ID", "CUSTOMER_ID", "STATUS"],
+                        "repeated_column_rules": ["No repeated physical table family."],
+                        "quote_spelling_rules": ["Use ORDERS exactly as spelled."],
+                        "examples": ["ORDERS", "ORDERS", "ORDERS"],
+                        "aliases": ["custom order registry", "order lifecycle"],
+                    }
+                ]
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def test_builds_loads_and_validates_schema_context_cache_for_one_database(tmp_path):
@@ -184,6 +213,22 @@ def test_changed_summary_registry_version_publishes_separate_version_directory(t
     assert second.manifest["curated_summary_registry_version"] == "summaries-v2"
     assert _version_dir(cache_root, "DB", first.cache_key).exists()
     assert _version_dir(cache_root, "DB", second.cache_key).exists()
+
+
+def test_custom_summary_registry_drives_coverage_and_chunk_rendering(tmp_path):
+    registry_path = _write_custom_summary_registry(tmp_path / "custom_summaries.json")
+    cache = _build(tmp_path / "cache", curated_summary_registry_path=registry_path)
+
+    object_ids = {obj.object_id for obj in cache.objects}
+    orders_chunk = next(
+        chunk for chunk in cache.chunks if chunk.object_id == "table:DB.PUBLIC.ORDERS"
+    )
+
+    assert "column:DB.PUBLIC.ORDERS#STATUS" not in object_ids
+    assert "column:DB.PUBLIC.CUSTOMERS#CUSTOMER_ID" in object_ids
+    assert "Large-schema summary: orders_custom_summary." in orders_chunk.prompt_text
+    assert "Custom order lifecycle fact table." in orders_chunk.prompt_text
+    assert orders_chunk.metadata["summary_ids"] == ["orders_custom_summary"]
 
 
 def test_covered_tables_skip_child_objects_while_uncovered_tables_keep_them(tmp_path):

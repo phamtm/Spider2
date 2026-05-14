@@ -7,15 +7,24 @@ from collections.abc import Iterable
 from sol01.models import ColumnSchema, TableSchema
 from sol01.schema.large_schema_summaries import (
     LargeSchemaSummary,
+    LargeSchemaSummaryRegistry,
     load_large_schema_summary_registry,
 )
 from sol01.schema.summary_rendering import render_summary_lines
 
 
-def render_table_reference(table: TableSchema, *, header: str | None = None) -> list[str]:
+def render_table_reference(
+    table: TableSchema,
+    *,
+    header: str | None = None,
+    large_schema_summary_registry: LargeSchemaSummaryRegistry | None = None,
+) -> list[str]:
     """Render one table with curated summaries when a large-schema rule covers it."""
 
-    summary = _large_schema_summary_for_table(table)
+    summary = _large_schema_summary_for_table(
+        table,
+        registry=large_schema_summary_registry,
+    )
     if summary is not None:
         table_name = table.full_name or table.name
         return [f"{header or 'Table'}: {table_name}", *render_summary_lines(summary)]
@@ -27,6 +36,7 @@ def render_sql_reference_context(
     db: str,
     expanded_tables: Iterable[str],
     table_schemas: dict[str, TableSchema],
+    large_schema_summary_registry: LargeSchemaSummaryRegistry | None = None,
 ) -> str:
     """Render deterministic selected-table context for cache-friendly SQL prompts."""
 
@@ -44,7 +54,12 @@ def render_sql_reference_context(
     lines.append("")
     lines.append("Selected table details:")
     for table_name in sorted(table_schemas):
-        lines.extend(render_table_reference(table_schemas[table_name]))
+        lines.extend(
+            render_table_reference(
+                table_schemas[table_name],
+                large_schema_summary_registry=large_schema_summary_registry,
+            )
+        )
         lines.append("")
     return "\n".join(lines).rstrip()
 
@@ -63,8 +78,12 @@ def _render_full_table_reference(table: TableSchema, *, header: str | None = Non
     return lines
 
 
-def _large_schema_summary_for_table(table: TableSchema) -> LargeSchemaSummary | None:
-    registry = load_large_schema_summary_registry()
+def _large_schema_summary_for_table(
+    table: TableSchema,
+    *,
+    registry: LargeSchemaSummaryRegistry | None = None,
+) -> LargeSchemaSummary | None:
+    registry = registry or load_large_schema_summary_registry()
     database, schema_name, table_name = _table_identity_parts(table)
     if schema_name and table_name:
         matches = registry.match_table(

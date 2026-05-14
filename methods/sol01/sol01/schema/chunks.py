@@ -10,6 +10,7 @@ from sol01.models import SchemaContextChunk, SchemaObject, is_schema_object_id
 from sol01.schema.constants import MAX_FAMILY_MEMBERS_IN_PROMPT
 from sol01.schema.large_schema_summaries import (
     LargeSchemaSummary,
+    LargeSchemaSummaryRegistry,
     load_large_schema_summary_registry,
 )
 from sol01.schema.summary_rendering import (
@@ -25,17 +26,26 @@ MAX_SAMPLE_LITERAL_CHARS = 80
 _TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 
 
-def render_schema_chunks(schema_objects: Iterable[SchemaObject]) -> list[SchemaContextChunk]:
+def render_schema_chunks(
+    schema_objects: Iterable[SchemaObject],
+    *,
+    large_schema_summary_registry: LargeSchemaSummaryRegistry | None = None,
+) -> list[SchemaContextChunk]:
     """Render one compact schema-context chunk per canonical schema object."""
 
     return [
-        _render_schema_chunk(obj) for obj in sorted(schema_objects, key=lambda item: item.object_id)
+        _render_schema_chunk(obj, large_schema_summary_registry=large_schema_summary_registry)
+        for obj in sorted(schema_objects, key=lambda item: item.object_id)
     ]
 
 
-def _render_schema_chunk(obj: SchemaObject) -> SchemaContextChunk:
+def _render_schema_chunk(
+    obj: SchemaObject,
+    *,
+    large_schema_summary_registry: LargeSchemaSummaryRegistry | None,
+) -> SchemaContextChunk:
     if obj.object_type == "table":
-        return _table_chunk(obj)
+        return _table_chunk(obj, large_schema_summary_registry=large_schema_summary_registry)
     if obj.object_type == "column":
         return _column_chunk(obj)
     if obj.object_type == "column_group":
@@ -44,11 +54,21 @@ def _render_schema_chunk(obj: SchemaObject) -> SchemaContextChunk:
         return _join_candidate_chunk(obj)
     if obj.object_type == "sample_value":
         return _sample_value_chunk(obj)
-    return _table_family_chunk(obj)
+    return _table_family_chunk(
+        obj,
+        large_schema_summary_registry=large_schema_summary_registry,
+    )
 
 
-def _table_chunk(obj: SchemaObject) -> SchemaContextChunk:
-    summaries = _large_schema_summaries_for_obj(obj)
+def _table_chunk(
+    obj: SchemaObject,
+    *,
+    large_schema_summary_registry: LargeSchemaSummaryRegistry | None,
+) -> SchemaContextChunk:
+    summaries = _large_schema_summaries_for_obj(
+        obj,
+        registry=large_schema_summary_registry,
+    )
     if summaries:
         return _summary_table_chunk(obj, summaries)
 
@@ -243,8 +263,15 @@ def _sample_value_chunk(obj: SchemaObject) -> SchemaContextChunk:
     )
 
 
-def _table_family_chunk(obj: SchemaObject) -> SchemaContextChunk:
-    summaries = _large_schema_summaries_for_obj(obj)
+def _table_family_chunk(
+    obj: SchemaObject,
+    *,
+    large_schema_summary_registry: LargeSchemaSummaryRegistry | None,
+) -> SchemaContextChunk:
+    summaries = _large_schema_summaries_for_obj(
+        obj,
+        registry=large_schema_summary_registry,
+    )
     if summaries:
         return _summary_table_family_chunk(obj, summaries)
 
@@ -382,7 +409,11 @@ def _base_metadata(obj: SchemaObject) -> dict[str, object]:
     }
 
 
-def _large_schema_summaries_for_obj(obj: SchemaObject) -> list[LargeSchemaSummary]:
+def _large_schema_summaries_for_obj(
+    obj: SchemaObject,
+    *,
+    registry: LargeSchemaSummaryRegistry | None = None,
+) -> list[LargeSchemaSummary]:
     if obj.object_type == "table":
         refs = _table_ref_candidates(obj)
     elif obj.object_type == "family":
@@ -392,11 +423,15 @@ def _large_schema_summaries_for_obj(obj: SchemaObject) -> list[LargeSchemaSummar
             refs = [canonical, *refs]
     else:
         return []
-    return _large_schema_summaries_for_refs(refs)
+    return _large_schema_summaries_for_refs(refs, registry=registry)
 
 
-def _large_schema_summaries_for_refs(refs: Iterable[str]) -> list[LargeSchemaSummary]:
-    registry = load_large_schema_summary_registry()
+def _large_schema_summaries_for_refs(
+    refs: Iterable[str],
+    *,
+    registry: LargeSchemaSummaryRegistry | None = None,
+) -> list[LargeSchemaSummary]:
+    registry = registry or load_large_schema_summary_registry()
     by_id: dict[str, LargeSchemaSummary] = {}
     for ref in refs:
         if ref.count(".") not in {1, 2}:
