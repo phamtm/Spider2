@@ -43,7 +43,7 @@ Pydantic Logfire is enabled by default for CLI runs.
 
 `sol01` keeps the main default policy in one place:
 
-- runtime profile defaults: base URL, model, provider routing, concurrency
+- runtime profile defaults: base URL, model, fixed OpenRouter routing, concurrency
 - solver budgets: initial candidates, max attempts, semantic repairs
 - schema prompt defaults: family threshold, linked-doc budget, total prompt budget
 - prompt shrink strategy: what gets cut first when planning prompts are too large

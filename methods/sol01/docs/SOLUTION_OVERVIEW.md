@@ -53,7 +53,7 @@ Spider2-Snow task
 ## Main Moving Parts
 
 - `sol01/infra/policy.py`: default runtime profile and heuristic caps
-- `sol01/infra/config.py`: env loading and validation
+- `sol01/infra/config.py`: env loading and the fixed runtime contract
 - `sol01/pipeline.py`: high-level per-task stage flow
 - `sol01/pipeline_recovery.py`: recovery orchestration
 - `sol01/pipeline_output.py`: final SQL / CSV / trace writing
@@ -97,6 +97,8 @@ just gold sf_bq320
 Runtime secrets stay local:
 
 - LLM config comes from shell variables or `methods/sol01/.env`.
+  The public runtime knobs are the API key, base URL, model, and concurrency.
+  Provider routing stays pinned to DeepSeek on OpenRouter by design.
 - Snowflake credentials come from `methods/sol01/snowflake_credential.json`.
 
 ## Schema Indexing

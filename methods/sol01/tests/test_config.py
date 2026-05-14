@@ -15,8 +15,6 @@ LLM_ENV_VARS = [
     "OPENROUTER_API_KEY",
     "OPENROUTER_BASE_URL",
     "OPENROUTER_MODEL",
-    "OPENROUTER_PROVIDER_ONLY",
-    "OPENROUTER_ALLOW_FALLBACKS",
     "LLM_API_KEY",
     "LLM_BASE_URL",
     "LLM_MODEL",
@@ -45,8 +43,6 @@ def test_default_config_uses_deepseek_openrouter_policy(monkeypatch):
     assert config.api_key is None
     assert config.base_url == DEFAULT_RUNTIME_PROFILE.base_url
     assert config.model == DEFAULT_RUNTIME_PROFILE.model
-    assert config.provider_only == DEFAULT_RUNTIME_PROFILE.provider_only
-    assert config.allow_fallbacks == DEFAULT_RUNTIME_PROFILE.allow_fallbacks
     assert config.concurrency == DEFAULT_RUNTIME_PROFILE.concurrency
     assert config.provider_routing == {
         "provider": {
@@ -67,8 +63,6 @@ def test_default_config_uses_deepseek_openrouter_policy(monkeypatch):
                 "OPENROUTER_API_KEY": "openrouter-key",
                 "OPENROUTER_BASE_URL": "https://openrouter.example/v1",
                 "OPENROUTER_MODEL": "deepseek/custom",
-                "OPENROUTER_PROVIDER_ONLY": "deepseek",
-                "OPENROUTER_ALLOW_FALLBACKS": "false",
             },
             "openrouter-key",
             "https://openrouter.example/v1",
@@ -106,13 +100,6 @@ def test_required_api_key_fails_fast_for_live_runs(monkeypatch):
 
     with pytest.raises(ValueError, match="API key"):
         RuntimeConfig.from_env(require_api_key=True)
-
-
-def test_fallbacks_remain_disabled_by_default_even_with_truthy_env(monkeypatch):
-    monkeypatch.setenv("OPENROUTER_ALLOW_FALLBACKS", "true")
-
-    with pytest.raises(ValueError, match="fallback"):
-        RuntimeConfig.from_env()
 
 
 @pytest.mark.parametrize(

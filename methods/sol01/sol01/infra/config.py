@@ -2,10 +2,9 @@
 
 import os
 from pathlib import Path
-from typing import Any
 
 from dotenv import dotenv_values
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 from sol01.infra.policy import (
     DEFAULT_RUNTIME_PROFILE,
@@ -22,8 +21,6 @@ class RuntimeConfig(BaseModel):
     api_key: str | None = None
     base_url: str = DEFAULT_RUNTIME_PROFILE.base_url
     model: str = DEFAULT_RUNTIME_PROFILE.model
-    provider_only: str = DEFAULT_RUNTIME_PROFILE.provider_only
-    allow_fallbacks: bool = DEFAULT_RUNTIME_PROFILE.allow_fallbacks
     concurrency: int = Field(default=DEFAULT_RUNTIME_PROFILE.concurrency, ge=1)
 
     @classmethod
@@ -43,12 +40,6 @@ class RuntimeConfig(BaseModel):
             base_url=_env_first("OPENROUTER_BASE_URL", "LLM_BASE_URL")
             or DEFAULT_RUNTIME_PROFILE.base_url,
             model=_env_first("OPENROUTER_MODEL", "LLM_MODEL") or DEFAULT_RUNTIME_PROFILE.model,
-            provider_only=_env_first("OPENROUTER_PROVIDER_ONLY")
-            or DEFAULT_RUNTIME_PROFILE.provider_only,
-            allow_fallbacks=_env_bool(
-                "OPENROUTER_ALLOW_FALLBACKS",
-                default=DEFAULT_RUNTIME_PROFILE.allow_fallbacks,
-            ),
             concurrency=(
                 concurrency
                 if concurrency is not None
@@ -63,25 +54,15 @@ class RuntimeConfig(BaseModel):
         return config
 
     @property
-    def provider_routing(self) -> dict[str, Any]:
-        """Return the OpenRouter provider payload used on every LLM request."""
+    def provider_routing(self) -> dict[str, object]:
+        """Return the fixed provider policy used on every OpenRouter request."""
 
         return {
             "provider": {
-                "only": [self.provider_only],
-                "allow_fallbacks": self.allow_fallbacks,
+                "only": [DEFAULT_RUNTIME_PROFILE.provider_only],
+                "allow_fallbacks": DEFAULT_RUNTIME_PROFILE.allow_fallbacks,
             }
         }
-
-    @model_validator(mode="after")
-    def enforce_openrouter_policy(self) -> "RuntimeConfig":
-        """Keep runs pinned to DeepSeek and fail instead of falling back silently."""
-
-        if self.provider_only != DEFAULT_RUNTIME_PROFILE.provider_only:
-            raise ValueError(f"provider_only must be {DEFAULT_RUNTIME_PROFILE.provider_only}")
-        if self.allow_fallbacks:
-            raise ValueError("provider fallback is disabled for sol01")
-        return self
 
 
 class SchemaContextConfig(BaseModel):
@@ -150,21 +131,6 @@ def _load_local_dotenv(dotenv_path: Path | None) -> None:
         current = os.environ.get(name)
         if current is None or not current.strip():
             os.environ[name] = value
-
-
-def _env_bool(name: str, *, default: bool) -> bool:
-    """Parse a boolean environment variable with clear accepted values."""
-
-    value = os.environ.get(name)
-    if value is None or not value.strip():
-        return default
-
-    normalized = value.strip().lower()
-    if normalized in {"0", "false", "f", "no", "n", "off"}:
-        return False
-    if normalized in {"1", "true", "t", "yes", "y", "on"}:
-        return True
-    raise ValueError(f"{name} must be a boolean value")
 
 
 def _env_positive_int(name: str, *, default: int) -> int:
