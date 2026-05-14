@@ -11,7 +11,7 @@ import typer
 from sol01.analysis.eval_runner import run_official_eval
 from sol01.cli.common import slug
 from sol01.infra.logging import get_logger
-from sol01.loading.tasks import load_tasks
+from sol01.loading.tasks import select_tasks
 from sol01.output.output import ensure_run_paths, eval_input_csv_dir_for
 
 logger = get_logger(__name__)
@@ -93,10 +93,11 @@ def handle_eval(
             question_contains=question_contains,
             limit=limit,
         )
+        selectors = [instance_id] if instance_id is not None else None
         task_ids = [
             task.instance_id
-            for task in load_tasks(
-                instance_id=instance_id,
+            for task in select_tasks(
+                selectors,
                 db=db,
                 question_contains=question_contains,
                 limit=limit,

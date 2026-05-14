@@ -16,7 +16,7 @@ from uuid import uuid4
 from sol01.analysis.eval_runner import GOLD_DIR, run_official_eval
 from sol01.execution.snowflake_runner import execute_sql
 from sol01.infra.time_utils import format_duration
-from sol01.loading.tasks import load_tasks
+from sol01.loading.tasks import select_tasks
 from sol01.models import ExecutionResult, Task
 from sol01.output.output import (
     OUTPUTS_ROOT,
@@ -230,7 +230,10 @@ def run_question(
 def _load_question(question_id: str) -> Task:
     """Load one exact Spider2-snow task."""
 
-    matches = load_tasks(instance_id=question_id)
+    try:
+        matches = select_tasks([question_id])
+    except ValueError as exc:
+        raise GoldRunInputError(f"Unknown Spider2-snow question: {question_id}") from exc
     if not matches:
         raise GoldRunInputError(f"Unknown Spider2-snow question: {question_id}")
     return matches[0]

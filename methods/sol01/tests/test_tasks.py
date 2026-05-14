@@ -44,7 +44,7 @@ def test_snow_task_count_is_547():
 
 
 def test_can_select_sf_local003_by_instance_id():
-    tasks = load_tasks(instance_id="sf_local003")
+    tasks = select_tasks(["sf_local003"])
 
     assert len(tasks) == 1
     assert tasks[0].instance_id == "sf_local003"
@@ -76,7 +76,8 @@ def test_all_selector_returns_full_dataset():
 
 
 def test_db_question_and_limit_filters_can_be_combined():
-    tasks = load_tasks(
+    tasks = select_tasks(
+        None,
         db="E_COMMERCE",
         question_contains="average payment per order",
         limit=1,
@@ -87,14 +88,14 @@ def test_db_question_and_limit_filters_can_be_combined():
 
 
 def test_question_filter_is_case_insensitive():
-    tasks = load_tasks(question_contains="AVERAGE SINGLE CAREER SPAN")
+    tasks = select_tasks(None, question_contains="AVERAGE SINGLE CAREER SPAN")
 
     assert any(task.instance_id == "sf_local007" for task in tasks)
 
 
 def test_negative_limit_is_rejected():
     with pytest.raises(ValueError, match="limit"):
-        load_tasks(limit=-1)
+        select_tasks(None, limit=-1)
 
 
 @pytest.mark.parametrize("selectors", [["*"], ["sf_local003/extra"], ["sf_local003..bad"]])

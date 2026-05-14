@@ -17,7 +17,7 @@ from sol01.infra.config import DEFAULT_DOTENV_PATH, RuntimeConfig, SchemaContext
 from sol01.infra.logging import get_logger
 from sol01.infra.strings import question_preview
 from sol01.infra.time_utils import format_duration
-from sol01.loading.tasks import load_tasks, select_tasks
+from sol01.loading.tasks import select_tasks
 from sol01.models import FinalAnswer, Task
 from sol01.output.output import OUTPUTS_ROOT, RunPaths, ensure_run_paths
 from sol01.output.registry import RegistryTaskRecord, record_registry_batch
@@ -242,7 +242,7 @@ def load_run_tasks(
     question_contains: str | None,
     limit: int | None,
 ) -> list[Task]:
-    """Load tasks via selectors, with optional narrowing filters.
+    """Load tasks via the shared selector/filter path.
 
     When selectors are provided they are the canonical task source.  An
     instance_id (used by schema-context commands) is treated as a single
@@ -256,19 +256,12 @@ def load_run_tasks(
             raise typer.BadParameter("positional selectors cannot be combined with --instance-id")
         normalized_selectors = [instance_id]
 
-    if normalized_selectors:
-        tasks = select_tasks(normalized_selectors)
-    else:
-        tasks = load_tasks()
-
-    if db is not None:
-        tasks = [task for task in tasks if task.db == db]
-    if question_contains:
-        needle = question_contains.casefold()
-        tasks = [task for task in tasks if needle in task.question.casefold()]
-    if limit is not None:
-        tasks = tasks[:limit]
-    return tasks
+    return select_tasks(
+        normalized_selectors or None,
+        db=db,
+        question_contains=question_contains,
+        limit=limit,
+    )
 
 
 def run_eval_lines(

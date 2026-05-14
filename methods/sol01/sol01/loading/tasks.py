@@ -25,73 +25,54 @@ logger = get_logger(__name__)
 _TAG_SELECTOR_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
 
 
-def load_tasks(
-    *,
-    dataset_path: Path = SPIDER2_SNOW_PATH,
-    instance_id: str | None = None,
-    db: str | None = None,
-    question_contains: str | None = None,
-    limit: int | None = None,
-) -> list[Task]:
-    """Return Spider2-snow tasks after applying the requested filters."""
+def load_tasks(*, dataset_path: Path = SPIDER2_SNOW_PATH) -> list[Task]:
+    """Return the full Spider2-snow dataset as typed task objects."""
 
     tasks = _read_tasks(dataset_path)
-
-    if instance_id is not None:
-        tasks = [task for task in tasks if task.instance_id == instance_id]
-
-    if db is not None:
-        tasks = [task for task in tasks if task.db == db]
-
-    if question_contains:
-        needle = question_contains.casefold()
-        tasks = [task for task in tasks if needle in task.question.casefold()]
-
-    if limit is not None:
-        if limit < 0:
-            raise ValueError("limit must be non-negative")
-        tasks = tasks[:limit]
-
     logger.info(
         "tasks loaded",
         dataset_path=str(dataset_path),
         task_count=len(tasks),
-        instance_id=instance_id,
-        db=db,
-        question_contains=question_contains,
-        limit=limit,
     )
     return tasks
 
 
 def select_tasks(
-    selectors: Sequence[str] | str,
+    selectors: Sequence[str] | str | None = None,
     *,
     dataset_path: Path = SPIDER2_SNOW_PATH,
     batch_dir: Path = CATEGORY_BATCHES_DIR,
+    db: str | None = None,
+    question_contains: str | None = None,
+    limit: int | None = None,
 ) -> list[Task]:
-    """Resolve exact IDs, globs, and category filters against dataset order."""
+    """Resolve selectors and narrowing filters against dataset order."""
 
+    if limit is not None and limit < 0:
+        raise ValueError("limit must be non-negative")
+
+    explicit_selectors = selectors is not None
     if isinstance(selectors, str):
-        selectors = [selectors]
-    normalized_selectors = [selector.strip() for selector in selectors]
-    if not normalized_selectors:
+        selector_tokens = [selectors]
+    elif selectors is None:
+        selector_tokens = []
+    else:
+        selector_tokens = list(selectors)
+
+    normalized_selectors = [selector.strip() for selector in selector_tokens if selector.strip()]
+    if explicit_selectors and not normalized_selectors:
         raise ValueError("selectors must not be empty")
-    if ALL_TASK_SELECTOR in normalized_selectors:
+
+    use_all_selector = ALL_TASK_SELECTOR in normalized_selectors
+    if use_all_selector:
         if len(normalized_selectors) != 1:
             raise ValueError("all selector cannot be combined with other selectors")
-        tasks = _read_tasks(dataset_path)
-        logger.info(
-            "tasks selected",
-            dataset_path=str(dataset_path),
-            selector=ALL_TASK_SELECTOR,
-            task_count=len(tasks),
-        )
-        return tasks
+        normalized_selectors = []
 
     task_selectors, primary_tiers, tags = _split_selector_filters(normalized_selectors)
-    for selector in task_selectors:
-        _validate_selector(selector)
+    if task_selectors:
+        for selector in task_selectors:
+            _validate_selector(selector)
 
     tasks = _read_tasks(dataset_path)
     metadata_map = None
@@ -100,6 +81,7 @@ def select_tasks(
     missing_metadata_ids: list[str] = []
     selected: list[Task] = []
     seen: set[str] = set()
+    question_needle = question_contains.casefold() if question_contains else None
     for task in tasks:
         if task_selectors and not any(
             fnmatch.fnmatchcase(task.instance_id, selector) for selector in task_selectors
@@ -114,10 +96,16 @@ def select_tasks(
                 continue
             if tags and any(tag not in metadata.tags for tag in tags):
                 continue
+        if db is not None and task.db != db:
+            continue
+        if question_needle is not None and question_needle not in task.question.casefold():
+            continue
         if task.instance_id in seen:
             continue
         seen.add(task.instance_id)
         selected.append(task)
+        if limit is not None and len(selected) >= limit:
+            break
 
     if missing_metadata_ids:
         logger.warning(
@@ -126,13 +114,16 @@ def select_tasks(
             sample_instance_ids=missing_metadata_ids[:5],
         )
 
-    if not selected:
+    if explicit_selectors and not selected:
         raise ValueError(f"No tasks matched selectors: {', '.join(normalized_selectors)}")
 
     logger.info(
         "tasks selected",
         dataset_path=str(dataset_path),
-        selectors=normalized_selectors,
+        selectors=normalized_selectors or ([ALL_TASK_SELECTOR] if use_all_selector else []),
+        db=db,
+        question_contains=question_contains,
+        limit=limit,
         task_count=len(selected),
     )
     return selected
