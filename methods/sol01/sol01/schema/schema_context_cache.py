@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-import os
-import re
 import shutil
 import tempfile
 import time
@@ -13,9 +9,21 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from sol01.infra.config import SchemaContextConfig
+from sol01.infra.fs_cache import (
+    acquire_build_lock_or_wait,
+    atomic_write_json,
+    publish_version_directory,
+    quarantine_invalid_directory,
+    read_json,
+    read_jsonl,
+    release_build_lock,
+    safe_path_segment,
+    stable_hash,
+    write_json,
+    write_jsonl,
+)
 from sol01.infra.logging import get_logger
 from sol01.infra.paths import REPO_ROOT
 from sol01.models import SchemaContextChunk, SchemaObject, TableSchema
@@ -136,13 +144,28 @@ def build_schema_context_cache(
         return existing
 
     logger.info("schema context cache lock wait", db=db, cache_key=cache_key)
-    lock_token = _acquire_build_lock_or_wait(
+
+    def _is_done() -> bool:
+        return (
+            _load_valid_cache(
+                db=db,
+                cache_key=cache_key,
+                cache_dir=version_dir,
+                expected_source_hash=source_hash,
+            )
+            is not None
+            or _load_current_if_matching(
+                db=db,
+                current_path=current_path,
+                cache_key=cache_key,
+                expected_source_hash=source_hash,
+            )
+            is not None
+        )
+
+    lock_token = acquire_build_lock_or_wait(
         lock_path,
-        db=db,
-        cache_key=cache_key,
-        current_path=current_path,
-        version_dir=version_dir,
-        expected_source_hash=source_hash,
+        is_done=_is_done,
         timeout_seconds=lock_timeout_seconds,
         poll_seconds=lock_poll_seconds,
     )
@@ -201,7 +224,7 @@ def build_schema_context_cache(
             return existing
 
         if version_dir.exists():
-            _quarantine_invalid_version_directory(version_dir)
+            quarantine_invalid_directory(version_dir)
 
         registry = load_large_schema_summary_registry(curated_summary_registry_path)
         covered_table_keys = _covered_table_keys(db_index, registry)
@@ -245,7 +268,7 @@ def build_schema_context_cache(
                 raise SchemaContextCacheError(
                     "new schema context cache failed validation before publish"
                 )
-            published = _publish_version_directory(temp_dir, version_dir)
+            published = publish_version_directory(temp_dir, version_dir)
             if not published:
                 loaded = _load_valid_cache(
                     db=db,
@@ -295,7 +318,7 @@ def build_schema_context_cache(
         )
         return loaded
     finally:
-        _release_build_lock(lock_path, lock_token)
+        release_build_lock(lock_path, lock_token)
 
 
 def load_current_schema_context_cache(
@@ -353,7 +376,7 @@ def schema_source_hash(db_index: Mapping[str, TableSchema]) -> str:
     payload = {
         table_name: db_index[table_name].model_dump(mode="json") for table_name in sorted(db_index)
     }
-    return _stable_hash(payload)
+    return stable_hash(payload)
 
 
 def schema_context_cache_key(
@@ -368,7 +391,7 @@ def schema_context_cache_key(
 ) -> str:
     """Return a deterministic cache key for all inputs that affect schema context artifacts."""
 
-    return _stable_hash(
+    return stable_hash(
         {
             "cache_schema": MANIFEST_VERSION,
             "chunk_render_version": chunk_render_version,
@@ -396,8 +419,6 @@ def _write_cache_artifacts(
     objects: Sequence[SchemaObject],
     chunks: Sequence[SchemaContextChunk],
 ) -> None:
-    """Write one complete version directory before it is published."""
-
     cache_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
         "manifest_version": MANIFEST_VERSION,
@@ -413,9 +434,9 @@ def _write_cache_artifacts(
         "chunk_count": len(chunks),
     }
 
-    _write_jsonl(cache_dir / "objects.jsonl", [obj.model_dump(mode="json") for obj in objects])
-    _write_jsonl(cache_dir / "chunks.jsonl", [chunk.model_dump(mode="json") for chunk in chunks])
-    _write_json(cache_dir / "manifest.json", manifest)
+    write_jsonl(cache_dir / "objects.jsonl", [obj.model_dump(mode="json") for obj in objects])
+    write_jsonl(cache_dir / "chunks.jsonl", [chunk.model_dump(mode="json") for chunk in chunks])
+    write_json(cache_dir / "manifest.json", manifest)
     logger.info(
         "schema context artifacts written",
         db=db,
@@ -433,12 +454,10 @@ def _load_valid_cache(
     cache_dir: Path,
     expected_source_hash: str | None = None,
 ) -> SchemaContextCache | None:
-    """Load one version directory, returning None when validation fails."""
-
     try:
         if _artifact_names(cache_dir) != REQUIRED_CACHE_ARTIFACTS:
             return None
-        manifest = _read_json(cache_dir / "manifest.json")
+        manifest = read_json(cache_dir / "manifest.json")
         if not REQUIRED_MANIFEST_FIELDS.issubset(manifest):
             return None
         if manifest.get("manifest_version") != MANIFEST_VERSION:
@@ -451,13 +470,12 @@ def _load_valid_cache(
         ):
             return None
         objects = [
-            SchemaObject.model_validate(row) for row in _read_jsonl(cache_dir / "objects.jsonl")
+            SchemaObject.model_validate(row) for row in read_jsonl(cache_dir / "objects.jsonl")
         ]
         chunks = [
-            SchemaContextChunk.model_validate(row)
-            for row in _read_jsonl(cache_dir / "chunks.jsonl")
+            SchemaContextChunk.model_validate(row) for row in read_jsonl(cache_dir / "chunks.jsonl")
         ]
-    except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError):
+    except (FileNotFoundError, ImportError, OSError, ValueError):
         return None
 
     if manifest.get("object_count") != len(objects) or manifest.get("chunk_count") != len(chunks):
@@ -474,63 +492,6 @@ def _load_valid_cache(
         objects=objects,
         chunks=chunks,
     )
-
-
-def _acquire_build_lock_or_wait(
-    lock_path: Path,
-    *,
-    db: str,
-    cache_key: str,
-    current_path: Path,
-    version_dir: Path,
-    expected_source_hash: str,
-    timeout_seconds: float,
-    poll_seconds: float,
-) -> str | None:
-    """Acquire the build lock or wait for another worker's published cache."""
-
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    token = uuid4().hex
-    deadline = time.monotonic() + timeout_seconds
-    payload = json.dumps(
-        {
-            "cache_key": cache_key,
-            "created_at": time.time(),
-            "pid": os.getpid(),
-            "token": token,
-        },
-        sort_keys=True,
-    )
-
-    while True:
-        try:
-            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
-        except FileExistsError:
-            loaded = _load_valid_cache(
-                db=db,
-                cache_key=cache_key,
-                cache_dir=version_dir,
-                expected_source_hash=expected_source_hash,
-            )
-            if loaded is not None:
-                return None
-            current = _load_current_if_matching(
-                db=db,
-                current_path=current_path,
-                cache_key=cache_key,
-                expected_source_hash=expected_source_hash,
-            )
-            if current is not None:
-                return None
-            if time.monotonic() >= deadline:
-                return None
-            time.sleep(min(poll_seconds, max(deadline - time.monotonic(), 0.0)))
-            continue
-
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.write("\n")
-        return token
 
 
 def _load_current_if_matching(
@@ -557,70 +518,24 @@ def _load_current_if_matching(
     )
 
 
-def _release_build_lock(lock_path: Path, token: str) -> None:
-    """Remove only the lock file created by this process."""
-
-    try:
-        payload = json.loads(lock_path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return
-    if payload.get("token") == token:
-        lock_path.unlink(missing_ok=True)
-
-
-def _publish_version_directory(temp_dir: Path, final_dir: Path) -> bool:
-    """Publish a built version directory without overwriting an existing one."""
-
-    final_dir.parent.mkdir(parents=True, exist_ok=True)
-    if final_dir.exists():
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        return False
-    try:
-        temp_dir.rename(final_dir)
-    except FileExistsError:
-        shutil.rmtree(temp_dir, ignore_errors=True)
-        return False
-    return True
-
-
-def _quarantine_invalid_version_directory(version_dir: Path) -> None:
-    """Move an invalid version directory aside without overwriting it."""
-
-    quarantine = version_dir.with_name(f".{version_dir.name}.invalid.{uuid4().hex}")
-    try:
-        version_dir.rename(quarantine)
-    except FileNotFoundError:
-        return
-
-
 def _write_current_pointer(current_path: Path, *, db: str, cache_key: str, cache_dir: Path) -> None:
-    """Atomically point a database cache root at the current version."""
-
-    current_path.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = current_path.with_name(f".current.{os.getpid()}.{uuid4().hex}.json.tmp")
-    _write_json(
-        temp_path,
-        {
-            "db": db,
-            "cache_key": cache_key,
-            "cache_dir": str(cache_dir),
-        },
+    atomic_write_json(
+        current_path,
+        {"db": db, "cache_key": cache_key, "cache_dir": str(cache_dir)},
     )
-    os.replace(temp_path, current_path)
 
 
 def _read_current_pointer(current_path: Path) -> dict[str, Any]:
     try:
-        pointer = _read_json(current_path)
+        return read_json(current_path)
     except FileNotFoundError as exc:
         raise SchemaContextCacheError(
             f"missing current schema context cache pointer: {current_path}"
         ) from exc
-    if not isinstance(pointer, dict):
+    except (ValueError, OSError) as exc:
         raise SchemaContextCacheError(
             f"invalid current schema context cache pointer: {current_path}"
-        )
-    return pointer
+        ) from exc
 
 
 def _artifact_names(cache_dir: Path) -> frozenset[str]:
@@ -648,19 +563,19 @@ def _load_db_index(db: str) -> dict[str, TableSchema]:
 
 
 def _version_dir(cache_root: Path, db: str, cache_key: str) -> Path:
-    return cache_root / _safe_path_segment(db) / "versions" / cache_key
+    return cache_root / safe_path_segment(db) / "versions" / cache_key
 
 
 def _current_pointer_path(cache_root: Path, db: str) -> Path:
-    return cache_root / _safe_path_segment(db) / "current.json"
+    return cache_root / safe_path_segment(db) / "current.json"
 
 
 def _build_lock_path(cache_root: Path, db: str) -> Path:
-    return cache_root / _safe_path_segment(db) / "build.lock"
+    return cache_root / safe_path_segment(db) / "build.lock"
 
 
 def _new_temp_version_dir(cache_root: Path, db: str, cache_key: str) -> Path:
-    versions_dir = cache_root / _safe_path_segment(db) / "versions"
+    versions_dir = cache_root / safe_path_segment(db) / "versions"
     versions_dir.mkdir(parents=True, exist_ok=True)
     return Path(
         tempfile.mkdtemp(
@@ -669,58 +584,3 @@ def _new_temp_version_dir(cache_root: Path, db: str, cache_key: str) -> Path:
             dir=versions_dir,
         )
     )
-
-
-def _safe_path_segment(value: str) -> str:
-    segment = re.sub(r"[^A-Za-z0-9_.-]+", "_", value.strip())
-    return segment or "default"
-
-
-def _stable_hash(payload: object) -> str:
-    encoded = json.dumps(
-        _json_safe(payload),
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
-
-
-def _json_safe(value: object) -> object:
-    if isinstance(value, Mapping):
-        return {str(key): _json_safe(item) for key, item in sorted(value.items())}
-    if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
-
-
-def _write_json(path: Path, payload: object) -> None:
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-
-def _read_json(path: Path) -> dict[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, dict):
-        raise ValueError("JSON payload must be an object")
-    return payload
-
-
-def _write_jsonl(path: Path, rows: Iterable[Mapping[str, object]]) -> None:
-    with path.open("w", encoding="utf-8") as handle:
-        for row in rows:
-            handle.write(json.dumps(row, sort_keys=True))
-            handle.write("\n")
-
-
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    with path.open(encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            payload = json.loads(line)
-            if not isinstance(payload, dict):
-                raise ValueError("JSONL row must be an object")
-            rows.append(payload)
-    return rows
