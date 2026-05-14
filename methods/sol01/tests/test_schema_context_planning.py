@@ -179,14 +179,13 @@ def test_schema_planning_decision_constraints_have_defaults_and_parse_values():
     assert constrained.constraints.include_all is True
 
 
-def test_sanitize_schema_planning_rejects_hallucinated_ids_and_normalizes_exact_tables():
+def test_sanitize_schema_planning_rejects_hallucinated_ids_and_deduplicates():
     decision = SchemaPlanningDecision(
         selected_objects=[
             SelectedSchemaObject(object_id="column:DB.PUBLIC.ORDERS#AMOUNT", role="metric"),
             SelectedSchemaObject(object_id="table:DB.PUBLIC.MISSING", role="primary"),
             SelectedSchemaObject(object_id="column:DB.PUBLIC.ORDERS#AMOUNT", role="metric"),
         ],
-        selected_tables=["DB.PUBLIC.ORDERS", "DB.PUBLIC.MISSING"],
         rationale="Use orders and amount.",
         confidence=0.7,
         intent=_intent(),
@@ -196,20 +195,15 @@ def test_sanitize_schema_planning_rejects_hallucinated_ids_and_normalizes_exact_
 
     assert [item.object_id for item in sanitized.selected_objects] == [
         "column:DB.PUBLIC.ORDERS#AMOUNT",
-        "table:DB.PUBLIC.ORDERS",
     ]
-    assert sanitized.selected_objects[1].role == "unknown"
-    assert sanitized.selected_tables == []
     assert diagnostics["rejected_object_ids"] == ["table:DB.PUBLIC.MISSING"]
-    assert diagnostics["rejected_table_names"] == ["DB.PUBLIC.MISSING"]
-    assert diagnostics["normalized_table_names"] == ["DB.PUBLIC.ORDERS"]
+    assert diagnostics["duplicate_object_ids"] == ["column:DB.PUBLIC.ORDERS#AMOUNT"]
     assert "outside available schema metadata" in sanitized.rationale
 
 
 def test_sanitize_schema_planning_sets_zero_confidence_when_nothing_valid_remains():
     decision = SchemaPlanningDecision(
         selected_objects=[SelectedSchemaObject(object_id="table:DB.PUBLIC.MISSING")],
-        selected_tables=["DB.PUBLIC.MISSING"],
         rationale="Use missing table.",
         confidence=0.9,
         intent=_intent(),
@@ -240,9 +234,7 @@ def test_sql_reference_and_repair_prompts_use_large_schema_summary_context():
     schema = SchemaSelection(
         db="COVID19_USA",
         selected_object_ids=[f"table:{table_name}"],
-        selected_tables=[table_name],
         expanded_tables=[table_name],
-        allowed_tables=[table_name],
         rationale="selected covered table",
         confidence=0.9,
     )
@@ -293,9 +285,7 @@ def test_sql_reference_budget_enforcement_preserves_large_schema_rules():
     schema = SchemaSelection(
         db="COVID19_USA",
         selected_object_ids=[f"table:{table_name}"],
-        selected_tables=[table_name],
         expanded_tables=[table_name],
-        allowed_tables=[table_name],
         rationale="selected covered table",
         confidence=0.9,
     )

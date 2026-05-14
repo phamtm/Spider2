@@ -210,7 +210,6 @@ def _planning(
             SelectedSchemaObject(object_id=object_id)
             for object_id in (object_ids or [f"table:{SALES_TABLE}"])
         ],
-        selected_tables=[],
         rationale="selected needed tables",
         confidence=0.9,
         intent=Intent(
@@ -287,7 +286,7 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
         "sql_generation_batch": "hash-sql_generation_batch",
         "candidate_review": "hash-candidate_review",
     }
-    assert trace["schema_selection"]["selected_tables"] == [SALES_TABLE]
+    assert trace["schema_selection"]["expanded_tables"] == [SALES_TABLE]
     assert trace["schema_context_version"] == "schema_context_v1"
     assert trace["schema_context"]["cache"]["cache_key"] == "test-cache-key"
     prompt_budget = trace["schema_selection"]["diagnostics"]["prompt_budget"]

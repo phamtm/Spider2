@@ -262,7 +262,6 @@ class ResolvedSchemaContext(BaseModel):
     selected_objects: list[SelectedSchemaObject] = Field(default_factory=list)
     schema_context_objects: list[SchemaContextObject] = Field(default_factory=list)
     resolved_tables: list[str] = Field(default_factory=list)
-    allowed_tables: list[str] = Field(default_factory=list)
     table_schemas: dict[str, TableSchema] = Field(default_factory=dict)
     prompt_context: str = ""
     diagnostics: dict[str, object] = Field(default_factory=dict)
@@ -273,9 +272,7 @@ class SchemaSelection(BaseModel):
 
     db: str
     selected_object_ids: list[str] = Field(default_factory=list)
-    selected_tables: list[str] = Field(default_factory=list)
     expanded_tables: list[str] = Field(default_factory=list)
-    allowed_tables: list[str] = Field(default_factory=list)
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)
     diagnostics: dict[str, object] = Field(default_factory=dict)
@@ -290,7 +287,6 @@ class SchemaPlanningDecision(BaseModel):
     """Future planner output that combines intent with selected schema objects."""
 
     selected_objects: list[SelectedSchemaObject] = Field(default_factory=list)
-    selected_tables: list[str] = Field(default_factory=list)
     constraints: SchemaPlanningConstraints = Field(default_factory=SchemaPlanningConstraints)
     rationale: str
     confidence: float = Field(ge=0.0, le=1.0)

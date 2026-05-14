@@ -155,9 +155,7 @@ def build_context(
     logger.info(
         "schema selected",
         instance_id=task.instance_id,
-        selected_count=len(schema.selected_tables),
         expanded_count=len(schema.expanded_tables),
-        selected_tables=schema.selected_tables,
         expanded_tables=schema.expanded_tables,
         confidence=schema.confidence,
     )
@@ -248,9 +246,7 @@ def run_planning(
         selected_object_ids=[
             selected.object_id for selected in sanitized_decision.selected_objects
         ],
-        selected_tables=list(resolved.resolved_tables),
-        expanded_tables=list(resolved.allowed_tables),
-        allowed_tables=list(resolved.allowed_tables),
+        expanded_tables=list(resolved.resolved_tables),
         rationale=sanitized_decision.rationale,
         confidence=sanitized_decision.confidence,
         diagnostics={
@@ -264,7 +260,6 @@ def run_planning(
                 selected.model_dump(mode="json") for selected in sanitized_decision.selected_objects
             ],
             "resolved_tables": list(resolved.resolved_tables),
-            "allowed_tables": list(resolved.allowed_tables),
             "planner": planner_diagnostics,
             "resolver": resolved.diagnostics,
         },

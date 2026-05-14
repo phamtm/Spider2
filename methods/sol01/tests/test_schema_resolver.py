@@ -31,7 +31,7 @@ def test_resolver_maps_exact_table_selection_to_allowed_table_context():
         question="Show order revenue.",
     )
 
-    assert context.allowed_tables == ["DB.PUBLIC.ORDERS"]
+    assert context.resolved_tables == ["DB.PUBLIC.ORDERS"]
     assert context.resolved_tables == ["DB.PUBLIC.ORDERS"]
     assert list(context.table_schemas) == ["DB.PUBLIC.ORDERS"]
     assert "Table: DB.PUBLIC.ORDERS" in context.prompt_context
@@ -75,12 +75,12 @@ def test_resolver_applies_explicit_year_date_suffix_and_version_constraints():
         constraints=SchemaPlanningConstraints(version="v2", suffixes=["_v2"]),
     )
 
-    assert sales_context.allowed_tables == ["DB.PUBLIC.SALES_2024"]
-    assert daily_context.allowed_tables == [
+    assert sales_context.resolved_tables == ["DB.PUBLIC.SALES_2024"]
+    assert daily_context.resolved_tables == [
         "DB.PUBLIC.DAILY_20240101",
         "DB.PUBLIC.DAILY_20240102",
     ]
-    assert model_context.allowed_tables == ["DB.PUBLIC.MODEL_v2"]
+    assert model_context.resolved_tables == ["DB.PUBLIC.MODEL_v2"]
 
 
 def test_resolver_include_all_and_broad_questions_select_all_family_members():
@@ -94,13 +94,13 @@ def test_resolver_include_all_and_broad_questions_select_all_family_members():
     broad_question = _resolve_family(index, question="Show every historical sales table.")
     year_span = _resolve_family(index, question="Show sales from 2022 to 2024.")
 
-    assert include_all.allowed_tables == [
+    assert include_all.resolved_tables == [
         "DB.PUBLIC.SALES_2022",
         "DB.PUBLIC.SALES_2023",
         "DB.PUBLIC.SALES_2024",
     ]
-    assert broad_question.allowed_tables == include_all.allowed_tables
-    assert year_span.allowed_tables == include_all.allowed_tables
+    assert broad_question.resolved_tables == include_all.resolved_tables
+    assert year_span.resolved_tables == include_all.resolved_tables
 
 
 def test_resolver_defaults_ambiguous_family_to_canonical_member_with_warning():
@@ -108,7 +108,7 @@ def test_resolver_defaults_ambiguous_family_to_canonical_member_with_warning():
 
     context = _resolve_family(index, question="Show sales amount.")
 
-    assert context.allowed_tables == ["DB.PUBLIC.SALES_2022"]
+    assert context.resolved_tables == ["DB.PUBLIC.SALES_2022"]
     assert context.diagnostics["warnings"] == [
         "No family member constraint was provided for "
         f"{context.selected_objects[0].object_id}; using canonical member DB.PUBLIC.SALES_2022."
@@ -124,7 +124,7 @@ def test_resolver_uses_canonical_member_when_constraints_match_no_family_member(
         constraints=SchemaPlanningConstraints(years=[2030]),
     )
 
-    assert context.allowed_tables == ["DB.PUBLIC.SALES_2022"]
+    assert context.resolved_tables == ["DB.PUBLIC.SALES_2022"]
     assert "No family members matched constraints" in context.diagnostics["warnings"][0]
     assert context.diagnostics["resolution_entries"][0]["reason"] == "constraints_no_match"
 
@@ -151,7 +151,7 @@ def test_resolver_has_deterministic_table_order_and_compact_family_prompt():
         schema_context_evidence=[_schema_context_join_evidence()],
     )
 
-    assert context.allowed_tables == [
+    assert context.resolved_tables == [
         "DB.PUBLIC.SALES_2022",
         "DB.PUBLIC.SALES_2023",
         "DB.PUBLIC.SALES_2024",
@@ -185,7 +185,7 @@ def test_resolver_expands_large_date_family_only_to_matching_member():
         ),
     )
 
-    assert context.allowed_tables == [matched_table]
+    assert context.resolved_tables == [matched_table]
     assert context.diagnostics["resolution_entries"][0]["reason"] == ("explicit_constraints")
     assert f"Physical members: {matched_table}" in context.prompt_context
     assert "GITHUB_REPOS_DATE.DAY._20240104" not in context.prompt_context
@@ -215,8 +215,8 @@ def test_resolver_keeps_large_broad_github_family_symbolic_and_budgeted():
     include_all_entry = include_all_context.diagnostics["resolution_entries"][0]
     prompt = broad_context.prompt_context
 
-    assert broad_context.allowed_tables == []
-    assert include_all_context.allowed_tables == []
+    assert broad_context.resolved_tables == []
+    assert include_all_context.resolved_tables == []
     assert entry["reason"] == "symbolic_broad_question"
     assert include_all_entry["reason"] == "symbolic_include_all"
     assert entry["symbolic"] is True
@@ -240,7 +240,7 @@ def test_validation_accepts_non_canonical_family_member_from_resolved_allowed_ta
 
     report = validate_sql(
         "SELECT ORDER_ID FROM DB.PUBLIC.SALES_2024",
-        allowed_tables=context.allowed_tables,
+        allowed_tables=context.resolved_tables,
         table_schemas=context.table_schemas,
     )
 
@@ -276,7 +276,7 @@ def test_resolver_renders_large_schema_summary_without_raw_table_metadata():
         question="Show confirmed cases by county.",
     )
 
-    assert context.allowed_tables == [table_name]
+    assert context.resolved_tables == [table_name]
     assert "Large-schema summary: covid19_usafacts_wide_daily_counts" in context.prompt_context
     assert "CONFIRMED_CASES and DEATHS repeat daily count columns named _YYYY_MM_DD" in (
         context.prompt_context
@@ -290,12 +290,12 @@ def test_resolver_renders_large_schema_summary_without_raw_table_metadata():
 
     valid = validate_sql(
         f'SELECT "state" FROM {table_name}',
-        allowed_tables=context.allowed_tables,
+        allowed_tables=context.resolved_tables,
         table_schemas=context.table_schemas,
     )
     invented = validate_sql(
         f"SELECT invented_column FROM {table_name}",
-        allowed_tables=context.allowed_tables,
+        allowed_tables=context.resolved_tables,
         table_schemas=context.table_schemas,
     )
 

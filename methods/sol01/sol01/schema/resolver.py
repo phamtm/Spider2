@@ -137,7 +137,6 @@ def resolve_schema_context(
         selected_objects=list(selected_objects),
         schema_context_objects=list(schema_context_evidence),
         resolved_tables=allowed_tables,
-        allowed_tables=allowed_tables,
         table_schemas=table_schemas,
         prompt_context=prompt_context,
         diagnostics=diagnostics,

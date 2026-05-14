@@ -232,15 +232,10 @@ def sanitize_schema_planning_decision(
     decision: SchemaPlanningDecision,
     schema_context_objects: Sequence[SchemaContextObject],
 ) -> tuple[SchemaPlanningDecision, dict[str, object]]:
-    """Drop hallucinated object ids and normalize exact available table names."""
+    """Drop hallucinated object ids and reject duplicates."""
 
     available_ids = [item.schema_object.object_id for item in schema_context_objects]
     available_id_set = set(available_ids)
-    exact_table_ids = {
-        item.schema_object.table_name: item.schema_object.object_id
-        for item in schema_context_objects
-        if item.schema_object.object_type == "table" and item.schema_object.table_name
-    }
 
     selected: list[SelectedSchemaObject] = []
     seen_ids: set[str] = set()
@@ -258,34 +253,16 @@ def sanitize_schema_planning_decision(
         selected.append(selected_object)
         seen_ids.add(object_id)
 
-    normalized_table_names: list[str] = []
-    rejected_table_names: list[str] = []
-    for table_name in decision.selected_tables:
-        object_id = exact_table_ids.get(table_name)
-        if object_id is None:
-            rejected_table_names.append(table_name)
-            continue
-        if object_id in seen_ids:
-            duplicate_object_ids.append(object_id)
-            continue
-        selected.append(SelectedSchemaObject(object_id=object_id, role="unknown"))
-        seen_ids.add(object_id)
-        normalized_table_names.append(table_name)
-
     diagnostics = {
         "available_object_count": len(available_ids),
         "selected_object_count": len(selected),
         "rejected_object_ids": rejected_object_ids,
         "duplicate_object_ids": duplicate_object_ids,
-        "normalized_table_names": normalized_table_names,
-        "rejected_table_names": rejected_table_names,
     }
     confidence = decision.confidence if selected else 0.0
     rationale = decision.rationale.strip()
-    if rejected_object_ids or rejected_table_names:
-        rationale = (
-            f"{rationale} Ignored ids or table names outside available schema metadata."
-        ).strip()
+    if rejected_object_ids:
+        rationale = (f"{rationale} Ignored ids outside available schema metadata.").strip()
     if duplicate_object_ids:
         rationale = f"{rationale} Ignored duplicate selections.".strip()
     if not selected:
@@ -294,7 +271,6 @@ def sanitize_schema_planning_decision(
     sanitized = decision.model_copy(
         update={
             "selected_objects": selected,
-            "selected_tables": [],
             "confidence": confidence,
             "rationale": rationale,
         }

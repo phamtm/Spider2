@@ -78,22 +78,19 @@ def test_schema_selection_model_validates_confidence_range():
     selection = SchemaSelection(
         db="E_commerce",
         selected_object_ids=["table:orders"],
-        selected_tables=["orders"],
         expanded_tables=["orders", "customers"],
-        allowed_tables=["orders", "customers"],
         rationale="Question mentions customers and orders.",
         confidence=0.8,
         diagnostics={"selection_prompt_chars": 100, "candidate_table_count": 2},
     )
     assert selection.confidence == 0.8
     assert selection.selected_object_ids == ["table:orders"]
-    assert selection.allowed_tables == ["orders", "customers"]
+    assert selection.expanded_tables == ["orders", "customers"]
     assert selection.diagnostics["selection_prompt_chars"] == 100
 
     with pytest.raises(ValidationError):
         SchemaSelection(
             db="E_commerce",
-            selected_tables=[],
             expanded_tables=[],
             rationale="bad confidence",
             confidence=1.2,
@@ -199,13 +196,12 @@ def test_resolved_schema_context_keeps_compact_selection_context():
         db="DB",
         selected_objects=[selected],
         resolved_tables=["DB.PUBLIC.ORDERS"],
-        allowed_tables=["DB.PUBLIC.ORDERS"],
         prompt_context="Table DB.PUBLIC.ORDERS: AMOUNT",
         diagnostics={"schema_context_object_count": 1},
     )
 
     assert context.selected_objects[0].role == "metric"
-    assert context.allowed_tables == ["DB.PUBLIC.ORDERS"]
+    assert context.resolved_tables == ["DB.PUBLIC.ORDERS"]
     assert context.prompt_context == "Table DB.PUBLIC.ORDERS: AMOUNT"
     assert context.diagnostics == {"schema_context_object_count": 1}
 

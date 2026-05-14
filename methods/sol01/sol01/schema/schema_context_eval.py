@@ -183,7 +183,7 @@ def run_schema_context_eval(
         )
 
         context_tables = _tables_from_schema_context_objects(cutoff_objects)
-        resolved_tables = _stable_tables(resolved.allowed_tables)
+        resolved_tables = _stable_tables(resolved.resolved_tables)
         context_gold_tables = _gold_overlap(gold_tables, context_tables)
         resolved_gold_tables = _gold_overlap(gold_tables, resolved_tables)
         missing_tables = [

@@ -281,13 +281,11 @@ def _resolve_expanded_schema(
         schema_context_evidence=schema_context_evidence,
     )
     current_tables = set(ctx.schema.expanded_tables)
-    added_tables = [table for table in resolved.allowed_tables if table not in current_tables]
+    added_tables = [table for table in resolved.resolved_tables if table not in current_tables]
     expanded_schema = ctx.schema.model_copy(
         update={
             "selected_object_ids": [selected.object_id for selected in selected_objects],
-            "selected_tables": list(resolved.resolved_tables),
-            "expanded_tables": list(resolved.allowed_tables),
-            "allowed_tables": list(resolved.allowed_tables),
+            "expanded_tables": list(resolved.resolved_tables),
             "diagnostics": {
                 **ctx.schema.diagnostics,
                 "schema_expansion": {
