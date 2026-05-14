@@ -87,5 +87,5 @@ def _resolve_colors(use_colors: bool | None, stream: TextIO) -> bool:
 def _quiet_noisy_loggers() -> None:
     """Keep third-party HTTP chatter out of normal solver runs."""
 
-    for logger_name in ("httpx", "httpcore", "openai", "pydantic_ai", "logfire"):
+    for logger_name in ("httpx", "httpcore", "openai", "pydantic_ai"):
         std_logging.getLogger(logger_name).setLevel(std_logging.WARNING)

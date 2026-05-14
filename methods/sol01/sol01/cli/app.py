@@ -14,7 +14,6 @@ from sol01.cli.inspect import register as register_inspect
 from sol01.cli.run import register as register_run
 from sol01.cli.schema_context import register as register_schema_context
 from sol01.infra.logging import configure_logging, get_logger
-from sol01.infra.observability import configure_logfire
 
 app = typer.Typer(help="Snowflake Spider2-snow solver.", no_args_is_help=True)
 logger = get_logger(__name__)
@@ -34,7 +33,6 @@ def main(
     """Keep the root command focused on subcommands."""
 
     configure_logging(log_level)
-    configure_logfire()
     logger.info("logging configured", log_level=log_level)
 
 
