@@ -10,7 +10,6 @@ from typing import Any, Protocol
 from pydantic import BaseModel
 
 from sol01.infra.config import (
-    DEFAULT_DOTENV_PATH,
     DEFAULT_SCHEMA_CONTEXT_VERSION,
     RuntimeConfig,
     SchemaContextConfig,
@@ -84,6 +83,7 @@ def run_tasks(
     *,
     run_id: str,
     config: RuntimeConfig,
+    schema_context_config: SchemaContextConfig,
     llm_client: StructuredLLM | None = None,
     outputs_root: Path | None = None,
     force: bool = False,
@@ -114,12 +114,12 @@ def run_tasks(
         skip_failed=skip_failed,
     )
 
-    schema_context_config = SchemaContextConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
     _prewarm_schema_context_caches(tasks, schema_context_config=schema_context_config)
     results = _run_task_batch(
         tasks,
         run_paths=run_paths,
         config=config,
+        schema_context_config=schema_context_config,
         llm_client=llm_client,
         force=force,
         skip_failed=skip_failed,
@@ -160,6 +160,7 @@ def _run_task_batch(
     *,
     run_paths: RunPaths,
     config: RuntimeConfig,
+    schema_context_config: SchemaContextConfig,
     llm_client: StructuredLLM | None,
     force: bool,
     skip_failed: bool,
@@ -172,6 +173,7 @@ def _run_task_batch(
                 task,
                 run_paths=run_paths,
                 config=config,
+                schema_context_config=schema_context_config,
                 llm_client=llm_client,
                 force=force,
                 skip_failed=skip_failed,
@@ -187,6 +189,7 @@ def _run_task_batch(
                 task,
                 run_paths=run_paths,
                 config=config,
+                schema_context_config=schema_context_config,
                 llm_client=None,
                 force=force,
                 skip_failed=skip_failed,
@@ -204,6 +207,7 @@ def _run_single_batch_task(
     *,
     run_paths: RunPaths,
     config: RuntimeConfig,
+    schema_context_config: SchemaContextConfig,
     llm_client: StructuredLLM | None,
     force: bool,
     skip_failed: bool,
@@ -215,6 +219,7 @@ def _run_single_batch_task(
             task,
             run_paths=run_paths,
             config=config,
+            schema_context_config=schema_context_config,
             llm_client=llm_client,
             force=force,
             skip_failed=skip_failed,
@@ -278,6 +283,7 @@ def run_task(
     *,
     run_paths: RunPaths,
     config: RuntimeConfig,
+    schema_context_config: SchemaContextConfig,
     llm_client: StructuredLLM | None = None,
     force: bool = False,
     skip_failed: bool = False,
@@ -295,7 +301,6 @@ def run_task(
         call_logger=LLMCallLogger(task_llm_log_path),
     )
     task_trace_path = trace_path_for(run_paths, instance_id=task.instance_id)
-    schema_context_config = SchemaContextConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
 
     skipped = check_skip(
         task,

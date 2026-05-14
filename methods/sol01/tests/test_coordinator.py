@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 
 from sol01.coordinator import run_task
-from sol01.infra.config import RuntimeConfig
+from sol01.infra.config import RuntimeConfig, SchemaContextConfig
 from sol01.llm.client import PromptSpec
 from sol01.models import (
     CandidateReviewReport,
@@ -274,6 +274,7 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
         task,
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
+        schema_context_config=SchemaContextConfig(),
         llm_client=llm,
         initial_candidates=1,
     )
@@ -350,6 +351,7 @@ def test_run_task_reruns_old_trace_without_schema_context_version(
         task,
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
+        schema_context_config=SchemaContextConfig(),
         llm_client=llm,
         initial_candidates=1,
     )
@@ -399,6 +401,7 @@ def test_close_executable_candidates_use_one_candidate_review(
         task,
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
+        schema_context_config=SchemaContextConfig(),
         llm_client=llm,
         initial_candidates=2,
     )
@@ -446,6 +449,7 @@ def test_tiny_aggregate_is_reviewed_by_candidate_review(
         task,
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
+        schema_context_config=SchemaContextConfig(),
         llm_client=llm,
         initial_candidates=1,
     )
@@ -482,6 +486,7 @@ def test_schema_expansion_uses_exact_table_name_and_reuses_intent(
         task,
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
+        schema_context_config=SchemaContextConfig(),
         llm_client=llm,
         initial_candidates=1,
         max_attempts=1,
@@ -542,6 +547,7 @@ def test_schema_expansion_selects_context_for_missing_column(
         task,
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
+        schema_context_config=SchemaContextConfig(),
         llm_client=llm,
         initial_candidates=1,
         max_attempts=1,
@@ -598,6 +604,7 @@ def test_schema_expansion_recovers_unambiguous_table_from_execution_error(
         task,
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
+        schema_context_config=SchemaContextConfig(),
         llm_client=llm,
         initial_candidates=1,
         max_attempts=1,
@@ -635,6 +642,7 @@ def test_schema_expansion_rejects_hallucinated_context_selection(
         task,
         run_paths=run_paths,
         config=RuntimeConfig(api_key="test-key"),
+        schema_context_config=SchemaContextConfig(),
         llm_client=llm,
         initial_candidates=1,
         max_attempts=1,

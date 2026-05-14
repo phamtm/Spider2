@@ -554,6 +554,7 @@ def handle_run(
         dotenv_path=DEFAULT_DOTENV_PATH,
         **({"concurrency": concurrency} if concurrency is not None else {}),
     )
+    schema_context_config = SchemaContextConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
     effective_run_id = run_id or _default_run_id("run")
     effective_outputs_root = outputs_root or OUTPUTS_ROOT
     logger.info(
@@ -566,6 +567,7 @@ def handle_run(
         tasks,
         run_id=effective_run_id,
         config=config,
+        schema_context_config=schema_context_config,
         force=force,
         skip_failed=skip_failed,
     )
@@ -768,6 +770,7 @@ def handle_ask(*, db: str, question: str) -> FinalAnswer:
         require_api_key=True,
         dotenv_path=DEFAULT_DOTENV_PATH,
     )
+    schema_context_config = SchemaContextConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
     ask_paths = ensure_ask_paths(outputs_root=OUTPUTS_ROOT)
     run_paths = ensure_run_paths("_internal", outputs_root=ask_paths.root)
     task = Task(instance_id="ask", db=db, question=question)
@@ -783,6 +786,7 @@ def handle_ask(*, db: str, question: str) -> FinalAnswer:
             task,
             run_paths=run_paths,
             config=config,
+            schema_context_config=schema_context_config,
             force=True,
         )
         _move_if_exists(run_paths.sql_dir / "ask.sql", ask_paths.sql_path)

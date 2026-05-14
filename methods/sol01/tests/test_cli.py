@@ -11,7 +11,7 @@ import typer
 from typer.testing import CliRunner
 
 from sol01 import cli
-from sol01.infra.config import RuntimeConfig
+from sol01.infra.config import RuntimeConfig, SchemaContextConfig
 from sol01.models import FinalAnswer, Task
 from sol01.output.output import AskPaths, ensure_run_paths, eval_input_csv_dir_for
 
@@ -74,7 +74,11 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch, tmp_path: Path):
         called["concurrency"] = concurrency
         return RuntimeConfig(api_key="test-key")
 
-    def fake_run_tasks(tasks, *, run_id, config, force, skip_failed):
+    def fake_schema_from_env(cls, *, dotenv_path=None):
+        called["schema_dotenv_path"] = dotenv_path
+        return SchemaContextConfig()
+
+    def fake_run_tasks(tasks, *, run_id, config, schema_context_config, force, skip_failed):
         called["task_ids"] = [task.instance_id for task in tasks]
         called["run_id"] = run_id
         return [
@@ -88,6 +92,7 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch, tmp_path: Path):
         ]
 
     monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
+    monkeypatch.setattr(cli.SchemaContextConfig, "from_env", classmethod(fake_schema_from_env))
     monkeypatch.setattr(cli, "run_tasks", fake_run_tasks)
 
     def fake_run_persisted_eval(run_id, *, expected_instance_ids=None, **kwargs):
@@ -126,6 +131,7 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch, tmp_path: Path):
 
     assert called["require_api_key"] is True
     assert called["dotenv_path"] == cli.DEFAULT_DOTENV_PATH
+    assert called["schema_dotenv_path"] == cli.DEFAULT_DOTENV_PATH
     assert called["concurrency"] is None
     assert called["task_ids"] == ["local003"]
     assert called["run_id"] == "smoke-local003"
@@ -153,7 +159,7 @@ def test_handle_run_leaves_schema_prewarm_to_batch_coordinator(monkeypatch, tmp_
         events.append(("config", require_api_key))
         return RuntimeConfig(api_key="test-key")
 
-    def fake_run_tasks(tasks, *, run_id, config, force, skip_failed):
+    def fake_run_tasks(tasks, *, run_id, config, schema_context_config, force, skip_failed):
         events.append(("run_tasks", [task.instance_id for task in tasks]))
         return []
 
@@ -279,7 +285,7 @@ def test_handle_run_uses_positional_selectors(monkeypatch, tmp_path: Path):
         ),
     )
 
-    def fake_run_tasks(tasks, *, run_id, config, force, skip_failed):
+    def fake_run_tasks(tasks, *, run_id, config, schema_context_config, force, skip_failed):
         called["task_ids"] = [task.instance_id for task in tasks]
         return []
 
@@ -686,7 +692,7 @@ def test_handle_ask_uses_ask_layout(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
     monkeypatch.setattr(cli, "ensure_ask_paths", lambda outputs_root: ask_paths)
 
-    def fake_run_task(task: Task, *, run_paths, config, force: bool):
+    def fake_run_task(task: Task, *, run_paths, config, schema_context_config, force: bool):
         (run_paths.sql_dir / "ask.sql").parent.mkdir(parents=True, exist_ok=True)
         (run_paths.csv_dir / "ask.csv").parent.mkdir(parents=True, exist_ok=True)
         (run_paths.traces_dir / "ask.json").parent.mkdir(parents=True, exist_ok=True)
@@ -737,7 +743,7 @@ def test_handle_ask_cleans_up_internal_dir_on_failure(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(cli.RuntimeConfig, "from_env", classmethod(fake_from_env))
     monkeypatch.setattr(cli, "ensure_ask_paths", lambda outputs_root: ask_paths)
 
-    def failing_run_task(task: Task, *, run_paths, config, force: bool):
+    def failing_run_task(task: Task, *, run_paths, config, schema_context_config, force: bool):
         run_paths.root.mkdir(parents=True, exist_ok=True)
         raise RuntimeError("boom")
 
