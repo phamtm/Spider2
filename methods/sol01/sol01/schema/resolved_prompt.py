@@ -4,13 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 
+from sol01.infra.policy import DEFAULT_SCHEMA_RENDER_POLICY
 from sol01.models import SchemaContextObject, SchemaObject, SelectedSchemaObject, TableSchema
-from sol01.schema.constants import (
-    MAX_FAMILY_MEMBERS_IN_PROMPT,
-    MAX_FAMILY_MEMBERS_TO_EXPAND,
-    MAX_SCHEMA_CONTEXT_EVIDENCE_LINES,
-    MAX_VARIANT_COLUMNS_IN_PROMPT,
-)
 from sol01.schema.family_resolution import (
     canonical_family_member,
     family_member_count,
@@ -20,6 +15,11 @@ from sol01.schema.family_resolution import (
 )
 from sol01.schema.reference_context import render_table_reference
 from sol01.schema.utils import _string_list
+
+MAX_FAMILY_MEMBERS_IN_PROMPT = DEFAULT_SCHEMA_RENDER_POLICY.family_members_in_prompt
+MAX_FAMILY_MEMBERS_TO_EXPAND = DEFAULT_SCHEMA_RENDER_POLICY.family_members_to_expand
+MAX_VARIANT_COLUMNS_IN_PROMPT = DEFAULT_SCHEMA_RENDER_POLICY.variant_columns_in_prompt
+MAX_SCHEMA_CONTEXT_EVIDENCE_LINES = DEFAULT_SCHEMA_RENDER_POLICY.schema_context_evidence_lines
 
 
 def render_prompt_context(

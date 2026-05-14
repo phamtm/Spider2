@@ -6,8 +6,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from datetime import date
 from typing import Any
 
+from sol01.infra.policy import DEFAULT_SCHEMA_RENDER_POLICY
 from sol01.models import SchemaObject, SchemaPlanningConstraints, SelectedSchemaObject, TableSchema
-from sol01.schema.constants import MAX_FAMILY_MEMBERS_TO_EXPAND
 from sol01.schema.family_constraints import (
     dimension_date,
     has_explicit_constraints,
@@ -18,6 +18,8 @@ from sol01.schema.family_constraints import (
     question_asks_broad_range,
 )
 from sol01.schema.utils import _metadata_text, _string_list
+
+MAX_FAMILY_MEMBERS_TO_EXPAND = DEFAULT_SCHEMA_RENDER_POLICY.family_members_to_expand
 
 
 def resolve_family(

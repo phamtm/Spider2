@@ -1,8 +1,0 @@
-"""Shared constants for the sol01 schema package."""
-
-from sol01.infra.policy import DEFAULT_SCHEMA_RENDER_POLICY
-
-MAX_FAMILY_MEMBERS_IN_PROMPT = DEFAULT_SCHEMA_RENDER_POLICY.family_members_in_prompt
-MAX_FAMILY_MEMBERS_TO_EXPAND = DEFAULT_SCHEMA_RENDER_POLICY.family_members_to_expand
-MAX_VARIANT_COLUMNS_IN_PROMPT = DEFAULT_SCHEMA_RENDER_POLICY.variant_columns_in_prompt
-MAX_SCHEMA_CONTEXT_EVIDENCE_LINES = DEFAULT_SCHEMA_RENDER_POLICY.schema_context_evidence_lines

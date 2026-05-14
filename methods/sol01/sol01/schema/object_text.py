@@ -6,7 +6,6 @@ from collections.abc import Iterable
 
 from sol01.infra.policy import DEFAULT_SCHEMA_RENDER_POLICY
 from sol01.models import SchemaObject
-from sol01.schema.constants import MAX_FAMILY_MEMBERS_IN_PROMPT
 from sol01.schema.large_schema_summaries import (
     LargeSchemaSummary,
     LargeSchemaSummaryRegistry,
@@ -19,6 +18,7 @@ from sol01.schema.summary_rendering import (
 )
 from sol01.schema.utils import _metadata_text, _string_list
 
+MAX_FAMILY_MEMBERS_IN_PROMPT = DEFAULT_SCHEMA_RENDER_POLICY.family_members_in_prompt
 MAX_COLUMNS_IN_PROMPT = DEFAULT_SCHEMA_RENDER_POLICY.table_columns_in_prompt
 MAX_SAMPLE_LITERAL_CHARS = DEFAULT_SCHEMA_RENDER_POLICY.sample_literal_chars
 

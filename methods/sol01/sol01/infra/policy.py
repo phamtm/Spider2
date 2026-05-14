@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 
 
 @dataclass(frozen=True)
@@ -140,29 +140,3 @@ DEFAULT_FILTER_GROUNDING_POLICY = FilterGroundingPolicy()
 DEFAULT_RECOVERY_SIGNAL_POLICY = RecoverySignalPolicy()
 DEFAULT_EVAL_DATASET_POLICY = EvalDatasetPolicy()
 DEFAULT_SCHEMA_CONTEXT_EVAL_POLICY = SchemaContextEvalPolicy()
-
-
-@dataclass(frozen=True)
-class Sol01PolicySurface:
-    """Convenience bundle for the main policy surfaces used by sol01."""
-
-    runtime: RuntimeProfile = field(default_factory=lambda: DEFAULT_RUNTIME_PROFILE)
-    solver: SolverPolicy = field(default_factory=lambda: DEFAULT_SOLVER_POLICY)
-    schema_context: SchemaContextPolicy = field(
-        default_factory=lambda: DEFAULT_SCHEMA_CONTEXT_POLICY
-    )
-    prompt_budget: PromptBudgetPolicy = field(default_factory=lambda: DEFAULT_PROMPT_BUDGET_POLICY)
-    schema_render: SchemaRenderPolicy = field(default_factory=lambda: DEFAULT_SCHEMA_RENDER_POLICY)
-    filter_grounding: FilterGroundingPolicy = field(
-        default_factory=lambda: DEFAULT_FILTER_GROUNDING_POLICY
-    )
-    recovery_signals: RecoverySignalPolicy = field(
-        default_factory=lambda: DEFAULT_RECOVERY_SIGNAL_POLICY
-    )
-    eval_dataset: EvalDatasetPolicy = field(default_factory=lambda: DEFAULT_EVAL_DATASET_POLICY)
-    schema_context_eval: SchemaContextEvalPolicy = field(
-        default_factory=lambda: DEFAULT_SCHEMA_CONTEXT_EVAL_POLICY
-    )
-
-
-DEFAULT_POLICY_SURFACE = Sol01PolicySurface()
