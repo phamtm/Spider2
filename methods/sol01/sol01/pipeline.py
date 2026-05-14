@@ -89,7 +89,7 @@ class TaskRun:
     prompt_hashes: dict[str, str] = dataclasses.field(default_factory=dict)
     attempts: list[AttemptRecord] = dataclasses.field(default_factory=list)
     candidate_review_payload: dict[str, Any] | None = None
-    schema_expansion_payload: dict[str, Any] | None = None
+    recovery_payload: dict[str, Any] | None = None
 
 
 def _current_best(run: TaskRun, *, preferred_stage: str | None = None) -> AttemptRecord | None:
@@ -305,296 +305,91 @@ def generate_initial_candidates(run: TaskRun, *, count: int, max_attempts: int) 
     return run
 
 
-def repair_failed_execution(run: TaskRun, *, max_attempts: int) -> TaskRun:
-    """Repair the best attempt if execution failed; appends to run.attempts."""
+def run_recovery_stage(
+    run: TaskRun,
+    *,
+    max_attempts: int,
+    semantic_repairs: int,
+) -> TaskRun:
+    """Run the single recovery stage until it is done or the shared budget is spent."""
 
-    best = _current_best(run)
-    if best is None or best.execution_result.ok or len(run.attempts) >= max_attempts:
-        return run
+    actions: list[dict[str, Any]] = []
+    remaining_semantic_repairs = semantic_repairs
+    review_ran = False
+    stop_reason = "no_attempts"
 
-    logger.info(
-        "repair requested",
-        instance_id=run.task.instance_id,
-        stage="repair",
-        best_stage=best.stage,
-    )
-    repaired = _run_prompt(
-        run.client,
-        prompt_hashes=run.prompt_hashes,
-        prompt_name="sql_repair",
-        output_type=SQLCandidate,
-        user_prompt=sql_repair_prompt(
-            run.task,
-            run.intent,
-            best,
-            run.sql_reference_context,
-            run.docs_context,
+    while True:
+        best = _current_best(run)
+        if best is None:
+            stop_reason = "no_attempts"
+            break
+
+        schema_trigger = schema_expansion_trigger(best)
+        if schema_trigger is not None:
+            if len(run.attempts) >= max_attempts:
+                best.repair_skipped_reason = "attempt budget exhausted"
+                stop_reason = "attempt_budget_exhausted"
+                break
+
+            action = _run_schema_recovery(run, best=best, trigger=schema_trigger)
+            actions.append(action)
+            if action["outcome"] == "expanded":
+                stop_reason = "schema_recovery_complete"
+                break
+            if action["outcome"] != "expanded_failed":
+                stop_reason = action["outcome"]
+                break
+            continue
+
+        if not best.execution_result.ok:
+            if len(run.attempts) >= max_attempts:
+                best.repair_skipped_reason = "attempt budget exhausted"
+                stop_reason = "attempt_budget_exhausted"
+                break
+
+            action = _run_sql_recovery(run, best=best)
+            actions.append(action)
+            if action["outcome"] == "recovered":
+                stop_reason = "sql_recovery_complete"
+                break
+            continue
+
+        if not review_ran:
+            review = _run_candidate_review(run, best=best)
+            review_ran = True
+            if not review.should_repair:
+                stop_reason = "review_complete"
+                break
+            if remaining_semantic_repairs < 1:
+                best = _current_best(run, preferred_stage=review.preferred_stage) or best
+                best.repair_skipped_reason = "semantic repair budget exhausted"
+                stop_reason = "semantic_repair_budget_exhausted"
+                break
+            if len(run.attempts) >= max_attempts:
+                best = _current_best(run, preferred_stage=review.preferred_stage) or best
+                best.repair_skipped_reason = "attempt budget exhausted"
+                stop_reason = "attempt_budget_exhausted"
+                break
+
+            actions.append(_run_semantic_recovery(run, best=best, review=review))
+            remaining_semantic_repairs -= 1
+            continue
+
+        stop_reason = "no_recovery_needed"
+        break
+
+    run.recovery_payload = {
+        "priority_order": ["schema", "sql", "semantic"],
+        "attempts_before_recovery": len(
+            [attempt for attempt in run.attempts if attempt.stage.startswith("initial_")]
         ),
-    )
-    attempt = evaluate_candidate(
-        task=run.task,
-        candidate=repaired,
-        intent=run.intent,
-        schema=run.schema,
-        table_schemas=run.table_schemas,
-        stage="repair",
-    )
-    run.attempts.append(attempt)
-    _log_candidate(run.task.instance_id, attempt)
-    return run
-
-
-def review_and_repair(run: TaskRun, *, max_attempts: int, semantic_repairs: int) -> TaskRun:
-    """Review executable attempts and optionally run one semantic repair."""
-
-    best = _current_best(run)
-    if best is None or not best.execution_result.ok:
-        return run
-
-    executable = [a for a in run.attempts if a.execution_result.ok]
-    review_reason = (
-        "final adjudication of the only executable candidate"
-        if len(executable) == 1
-        else "final adjudication across executable candidates using local observations"
-    )
-
-    logger.info(
-        "candidate review requested",
-        instance_id=run.task.instance_id,
-        best_stage=best.stage,
-        executable_attempts=len(executable),
-        reason=review_reason,
-    )
-    review = _run_prompt(
-        run.client,
-        prompt_hashes=run.prompt_hashes,
-        prompt_name="candidate_review",
-        output_type=CandidateReviewReport,
-        user_prompt=candidate_review_prompt(
-            run.task,
-            run.intent,
-            executable,
-            run.sql_reference_context,
-            run.docs_context,
-            baseline_stage=best.stage,
-            review_reason=review_reason,
-        ),
-    )
-    run.candidate_review_payload = {
-        "review_reason": review_reason,
-        **review.model_dump(mode="json"),
+        "attempts_after_recovery": len(run.attempts),
+        "max_attempts": max_attempts,
+        "semantic_repairs_allowed": semantic_repairs,
+        "semantic_repairs_remaining": remaining_semantic_repairs,
+        "actions": actions,
+        "stop_reason": stop_reason,
     }
-    best = _current_best(run, preferred_stage=review.preferred_stage) or best
-    best.critic = {
-        "confidence": review.confidence,
-        "issues": review.issues,
-        "should_repair": review.should_repair,
-        "repair_focus": review.repair_focus,
-    }
-    best.candidate_review = run.candidate_review_payload
-
-    logger.info(
-        "candidate review complete",
-        instance_id=run.task.instance_id,
-        preferred_stage=review.preferred_stage,
-        should_repair=review.should_repair,
-        confidence=review.confidence,
-        issues=review.issues,
-    )
-
-    if not review.should_repair or semantic_repairs < 1:
-        return run
-
-    if len(run.attempts) >= max_attempts:
-        best.repair_skipped_reason = "attempt budget exhausted"
-        logger.info(
-            "critic repair skipped",
-            instance_id=run.task.instance_id,
-            reason="attempt budget exhausted",
-        )
-        return run
-
-    logger.info(
-        "semantic repair requested",
-        instance_id=run.task.instance_id,
-        stage="critic_repair",
-        focus=review.repair_focus,
-    )
-    repaired = _run_prompt(
-        run.client,
-        prompt_hashes=run.prompt_hashes,
-        prompt_name="sql_repair",
-        output_type=SQLCandidate,
-        user_prompt=semantic_repair_prompt(
-            run.task,
-            run.intent,
-            best,
-            ConfidenceReport(
-                confidence=review.confidence,
-                issues=review.issues,
-                should_repair=review.should_repair,
-                repair_focus=review.repair_focus,
-            ),
-            run.sql_reference_context,
-            run.docs_context,
-        ),
-    )
-    attempt = evaluate_candidate(
-        task=run.task,
-        candidate=repaired,
-        intent=run.intent,
-        schema=run.schema,
-        table_schemas=run.table_schemas,
-        stage="critic_repair",
-    )
-    run.attempts.append(attempt)
-    _log_candidate(run.task.instance_id, attempt)
-    return run
-
-
-def attempt_schema_expansion(run: TaskRun) -> TaskRun:
-    """Run one schema-expansion attempt when evidence warrants it."""
-
-    best = _current_best(run)
-    if best is None:
-        return run
-
-    trigger = schema_expansion_trigger(best)
-    if trigger is None:
-        return run
-
-    try:
-        db_index = load_db_index(run.task.db)
-    except Exception:
-        return run
-
-    expansion_query = schema_expansion_query(
-        run.task.question,
-        best,
-        trigger,
-        run.schema.selected_object_ids,
-        run.schema.expanded_tables,
-    )
-    expansion_payload: dict[str, Any] = {
-        "trigger": trigger,
-        "expansion_query": expansion_query,
-        "decision": None,
-        "added_tables": [],
-        "outcome": "no_new_tables",
-    }
-    schema_context_cache = build_schema_context_cache(
-        run.task.db,
-        db_index=db_index,
-        config=run.schema_context_config,
-    )
-
-    det_tables = deterministic_expansion_tables(best, run.schema, db_index)
-    if det_tables:
-        expansion_payload["decision"] = {
-            "source": "exact_name",
-            "additional_tables": det_tables,
-        }
-        selected_additions: list[SelectedSchemaObject] = [
-            SelectedSchemaObject(
-                object_id=f"table:{t}",
-                role="primary",
-                reason="unambiguous table name in schema error",
-            )
-            for t in det_tables
-        ]
-        schema_context_objects: list[Any] = []
-        planner_diagnostics: dict[str, object] = {}
-    else:
-        selected_additions, schema_context_objects, planner_diagnostics = _select_expansion_objects(
-            run,
-            expansion_query=expansion_query,
-            schema_context_cache=schema_context_cache,
-        )
-        expansion_payload["decision"] = {
-            "source": "schema_context",
-            "selected_object_ids": [s.object_id for s in selected_additions],
-        }
-
-    expanded_schema, resolved, added_tables = resolve_expanded_schema(
-        run.task.db,
-        run.task.question,
-        run.schema,
-        selected_additions,
-        schema_context_cache=schema_context_cache,
-        db_index=db_index,
-        schema_context_evidence=schema_context_objects,
-        expansion_query=expansion_query,
-    )
-    expansion_payload.update(
-        {
-            "schema_context_objects": schema_context_object_trace(schema_context_objects),
-            "selected_additions": [s.model_dump(mode="json") for s in selected_additions],
-            "added_tables": added_tables,
-            "planner": planner_diagnostics,
-            "resolver": resolved.diagnostics,
-            "prompt_budget": _prompt_budget_diagnostics(
-                sql_reference_context=resolved.prompt_context,
-                schema_context_config=run.schema_context_config,
-            ),
-        }
-    )
-
-    if not added_tables:
-        expansion_payload["outcome"] = "no_new_tables"
-        run.schema_expansion_payload = expansion_payload
-        return run
-
-    # Update run context with the expanded schema
-    new_table_schemas = resolved.table_schemas or table_schemas_for_selection(expanded_schema)
-    run.schema = expanded_schema
-    run.table_schemas = new_table_schemas
-    run.sql_reference_context = _checked_schema_prompt(
-        "schema_expansion_sql_reference_context",
-        resolved.prompt_context,
-        run.schema_context_config,
-    )
-    run.intent = augment_intent_with_value_groundings(
-        run.intent, task=run.task, schema=expanded_schema, table_schemas=new_table_schemas
-    )
-
-    expansion_stage = "schema_expansion"
-    expansion_payload["expansion_attempt_stage"] = expansion_stage
-    batch = _run_prompt(
-        run.client,
-        prompt_hashes=run.prompt_hashes,
-        prompt_name="sql_generation_batch",
-        output_type=SQLCandidateBatch,
-        user_prompt=sql_generation_batch_prompt(
-            run.task,
-            run.intent,
-            run.sql_reference_context,
-            run.docs_context,
-            candidate_count=1,
-        ),
-    )
-
-    if not batch.candidates:
-        expansion_payload["outcome"] = "expanded_no_candidate"
-        run.schema_context = schema_context_with_expansion(run.schema_context, expansion_payload)
-        run.schema_expansion_payload = expansion_payload
-        return run
-
-    expansion_attempt = evaluate_candidate(
-        task=run.task,
-        candidate=batch.candidates[0],
-        intent=run.intent,
-        schema=run.schema,
-        table_schemas=run.table_schemas,
-        stage=expansion_stage,
-    )
-    run.attempts.append(expansion_attempt)
-    _log_candidate(run.task.instance_id, expansion_attempt)
-
-    expansion_payload["outcome"] = (
-        "expanded" if expansion_attempt.execution_result.ok else "expanded_failed"
-    )
-    run.schema_context = schema_context_with_expansion(run.schema_context, expansion_payload)
-    run.schema_expansion_payload = expansion_payload
     return run
 
 
@@ -632,8 +427,8 @@ def write_task_output(
     }
     if run.candidate_review_payload is not None:
         trace_payload["candidate_review"] = run.candidate_review_payload
-    if run.schema_expansion_payload is not None:
-        trace_payload["schema_expansion"] = run.schema_expansion_payload
+    if run.recovery_payload is not None:
+        trace_payload["recovery"] = run.recovery_payload
     if live_logging_enabled:
         trace_payload["llm_call_log_path"] = str(task_llm_log_path)
 
@@ -767,6 +562,302 @@ def _select_expansion_objects(
         "confidence": sanitized_decision.confidence,
     }
     return selected_additions, schema_context_objects, diagnostics
+
+
+def _run_sql_recovery(run: TaskRun, *, best: AttemptRecord) -> dict[str, Any]:
+    """Attempt one SQL-focused recovery for a non-executable best attempt."""
+
+    logger.info(
+        "recovery action requested",
+        instance_id=run.task.instance_id,
+        action="sql",
+        best_stage=best.stage,
+    )
+    repaired = _run_prompt(
+        run.client,
+        prompt_hashes=run.prompt_hashes,
+        prompt_name="sql_repair",
+        output_type=SQLCandidate,
+        user_prompt=sql_repair_prompt(
+            run.task,
+            run.intent,
+            best,
+            run.sql_reference_context,
+            run.docs_context,
+        ),
+    )
+    attempt = evaluate_candidate(
+        task=run.task,
+        candidate=repaired,
+        intent=run.intent,
+        schema=run.schema,
+        table_schemas=run.table_schemas,
+        stage="recovery_sql",
+    )
+    run.attempts.append(attempt)
+    _log_candidate(run.task.instance_id, attempt)
+    return {
+        "kind": "sql",
+        "trigger": "best_attempt_not_executable",
+        "source_stage": best.stage,
+        "attempt_stage": attempt.stage,
+        "outcome": "recovered" if attempt.execution_result.ok else "still_failed",
+    }
+
+
+def _run_candidate_review(run: TaskRun, *, best: AttemptRecord) -> CandidateReviewReport:
+    """Review executable attempts and attach the critic report to the preferred baseline."""
+
+    executable = [attempt for attempt in run.attempts if attempt.execution_result.ok]
+    review_reason = (
+        "final adjudication of the only executable candidate"
+        if len(executable) == 1
+        else "final adjudication across executable candidates using local observations"
+    )
+
+    logger.info(
+        "candidate review requested",
+        instance_id=run.task.instance_id,
+        best_stage=best.stage,
+        executable_attempts=len(executable),
+        reason=review_reason,
+    )
+    review = _run_prompt(
+        run.client,
+        prompt_hashes=run.prompt_hashes,
+        prompt_name="candidate_review",
+        output_type=CandidateReviewReport,
+        user_prompt=candidate_review_prompt(
+            run.task,
+            run.intent,
+            executable,
+            run.sql_reference_context,
+            run.docs_context,
+            baseline_stage=best.stage,
+            review_reason=review_reason,
+        ),
+    )
+    run.candidate_review_payload = {
+        "review_reason": review_reason,
+        **review.model_dump(mode="json"),
+    }
+    annotated = _current_best(run, preferred_stage=review.preferred_stage) or best
+    annotated.critic = {
+        "confidence": review.confidence,
+        "issues": review.issues,
+        "should_repair": review.should_repair,
+        "repair_focus": review.repair_focus,
+    }
+    annotated.candidate_review = run.candidate_review_payload
+
+    logger.info(
+        "candidate review complete",
+        instance_id=run.task.instance_id,
+        preferred_stage=review.preferred_stage,
+        should_repair=review.should_repair,
+        confidence=review.confidence,
+        issues=review.issues,
+    )
+    return review
+
+
+def _run_semantic_recovery(
+    run: TaskRun,
+    *,
+    best: AttemptRecord,
+    review: CandidateReviewReport,
+) -> dict[str, Any]:
+    """Attempt one semantic recovery after the critic identifies a concrete issue."""
+
+    logger.info(
+        "recovery action requested",
+        instance_id=run.task.instance_id,
+        action="semantic",
+        best_stage=best.stage,
+        focus=review.repair_focus,
+    )
+    repaired = _run_prompt(
+        run.client,
+        prompt_hashes=run.prompt_hashes,
+        prompt_name="sql_repair",
+        output_type=SQLCandidate,
+        user_prompt=semantic_repair_prompt(
+            run.task,
+            run.intent,
+            best,
+            ConfidenceReport(
+                confidence=review.confidence,
+                issues=review.issues,
+                should_repair=review.should_repair,
+                repair_focus=review.repair_focus,
+            ),
+            run.sql_reference_context,
+            run.docs_context,
+        ),
+    )
+    attempt = evaluate_candidate(
+        task=run.task,
+        candidate=repaired,
+        intent=run.intent,
+        schema=run.schema,
+        table_schemas=run.table_schemas,
+        stage="recovery_semantic",
+    )
+    run.attempts.append(attempt)
+    _log_candidate(run.task.instance_id, attempt)
+    return {
+        "kind": "semantic",
+        "trigger": review.repair_focus or "critic_requested_repair",
+        "source_stage": best.stage,
+        "attempt_stage": attempt.stage,
+        "outcome": "recovered" if attempt.execution_result.ok else "still_failed",
+    }
+
+
+def _run_schema_recovery(
+    run: TaskRun,
+    *,
+    best: AttemptRecord,
+    trigger: str,
+) -> dict[str, Any]:
+    """Expand schema context and regenerate one candidate when a schema miss is evident."""
+
+    try:
+        db_index = load_db_index(run.task.db)
+    except Exception:
+        return {
+            "kind": "schema",
+            "trigger": trigger,
+            "source_stage": best.stage,
+            "attempt_stage": None,
+            "decision": None,
+            "added_tables": [],
+            "outcome": "db_index_unavailable",
+        }
+
+    expansion_query = schema_expansion_query(
+        run.task.question,
+        best,
+        trigger,
+        run.schema.selected_object_ids,
+        run.schema.expanded_tables,
+    )
+    action: dict[str, Any] = {
+        "kind": "schema",
+        "trigger": trigger,
+        "source_stage": best.stage,
+        "expansion_query": expansion_query,
+        "decision": None,
+        "added_tables": [],
+        "outcome": "no_new_tables",
+    }
+    schema_context_cache = build_schema_context_cache(
+        run.task.db,
+        db_index=db_index,
+        config=run.schema_context_config,
+    )
+
+    det_tables = deterministic_expansion_tables(best, run.schema, db_index)
+    if det_tables:
+        action["decision"] = {
+            "source": "exact_name",
+            "additional_tables": det_tables,
+        }
+        selected_additions: list[SelectedSchemaObject] = [
+            SelectedSchemaObject(
+                object_id=f"table:{table_name}",
+                role="primary",
+                reason="unambiguous table name in schema error",
+            )
+            for table_name in det_tables
+        ]
+        schema_context_objects: list[Any] = []
+        planner_diagnostics: dict[str, object] = {}
+    else:
+        selected_additions, schema_context_objects, planner_diagnostics = _select_expansion_objects(
+            run,
+            expansion_query=expansion_query,
+            schema_context_cache=schema_context_cache,
+        )
+        action["decision"] = {
+            "source": "schema_context",
+            "selected_object_ids": [selected.object_id for selected in selected_additions],
+        }
+
+    expanded_schema, resolved, added_tables = resolve_expanded_schema(
+        run.task.db,
+        run.task.question,
+        run.schema,
+        selected_additions,
+        schema_context_cache=schema_context_cache,
+        db_index=db_index,
+        schema_context_evidence=schema_context_objects,
+        expansion_query=expansion_query,
+    )
+    action.update(
+        {
+            "schema_context_objects": schema_context_object_trace(schema_context_objects),
+            "selected_additions": [s.model_dump(mode="json") for s in selected_additions],
+            "added_tables": added_tables,
+            "planner": planner_diagnostics,
+            "resolver": resolved.diagnostics,
+            "prompt_budget": _prompt_budget_diagnostics(
+                sql_reference_context=resolved.prompt_context,
+                schema_context_config=run.schema_context_config,
+            ),
+        }
+    )
+
+    if not added_tables:
+        run.schema_context = schema_context_with_expansion(run.schema_context, action)
+        return action
+
+    new_table_schemas = resolved.table_schemas or table_schemas_for_selection(expanded_schema)
+    run.schema = expanded_schema
+    run.table_schemas = new_table_schemas
+    run.sql_reference_context = _checked_schema_prompt(
+        "schema_expansion_sql_reference_context",
+        resolved.prompt_context,
+        run.schema_context_config,
+    )
+    run.intent = augment_intent_with_value_groundings(
+        run.intent, task=run.task, schema=expanded_schema, table_schemas=new_table_schemas
+    )
+
+    batch = _run_prompt(
+        run.client,
+        prompt_hashes=run.prompt_hashes,
+        prompt_name="sql_generation_batch",
+        output_type=SQLCandidateBatch,
+        user_prompt=sql_generation_batch_prompt(
+            run.task,
+            run.intent,
+            run.sql_reference_context,
+            run.docs_context,
+            candidate_count=1,
+        ),
+    )
+
+    if not batch.candidates:
+        action["outcome"] = "expanded_no_candidate"
+        run.schema_context = schema_context_with_expansion(run.schema_context, action)
+        return action
+
+    expansion_attempt = evaluate_candidate(
+        task=run.task,
+        candidate=batch.candidates[0],
+        intent=run.intent,
+        schema=run.schema,
+        table_schemas=run.table_schemas,
+        stage="recovery_schema",
+    )
+    run.attempts.append(expansion_attempt)
+    _log_candidate(run.task.instance_id, expansion_attempt)
+
+    action["attempt_stage"] = expansion_attempt.stage
+    action["outcome"] = "expanded" if expansion_attempt.execution_result.ok else "expanded_failed"
+    run.schema_context = schema_context_with_expansion(run.schema_context, action)
+    return action
 
 
 def _build_planning_prompt(

@@ -69,8 +69,10 @@ def final_winner_reason(
         and candidate_review_payload.get("preferred_stage") == stage
     ):
         return f"model preferred: {stage}"
-    if stage == "critic_repair":
-        return "critic repair: highest scoring"
-    if stage == "schema_expansion":
-        return "schema expansion: highest scoring"
+    if stage == "recovery_semantic":
+        return "recovery: semantic fix won"
+    if stage == "recovery_schema":
+        return "recovery: schema fix won"
+    if stage == "recovery_sql":
+        return "recovery: SQL fix won"
     return f"score: best executable (stage={stage})"

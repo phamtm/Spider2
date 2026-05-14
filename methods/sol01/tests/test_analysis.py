@@ -167,7 +167,7 @@ def test_analyze_run_groups_failures_and_writes_reports(tmp_path: Path):
                     },
                 },
                 {
-                    "stage": "critic_repair",
+                    "stage": "recovery_semantic",
                     "sql": "SELECT missing_column FROM sales",
                     "validation": {"ok": True, "errors": []},
                     "execution_result": {"ok": False, "error": "no such column: missing_column"},
@@ -239,7 +239,7 @@ def test_analyze_run_uses_final_attempt_index_over_last_attempt(tmp_path: Path):
                     },
                 },
                 {
-                    "stage": "critic_repair",
+                    "stage": "recovery_semantic",
                     "sql": "SELECT missing_col FROM sales",
                     "validation": {
                         "ok": False,

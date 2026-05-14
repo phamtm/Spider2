@@ -388,7 +388,8 @@ def test_tiny_aggregate_is_reviewed_by_candidate_review(
     trace = json.loads((run_paths.traces_dir / "sf_count.json").read_text(encoding="utf-8"))
     assert "aggregate_verification" not in trace
     assert trace["candidate_review"]["should_repair"] is True
-    assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "critic_repair"]
+    assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "recovery_semantic"]
+    assert trace["recovery"]["actions"][0]["kind"] == "semantic"
 
 
 def test_schema_expansion_uses_exact_table_name_and_reuses_intent(
@@ -419,17 +420,17 @@ def test_schema_expansion_uses_exact_table_name_and_reuses_intent(
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
         initial_candidates=1,
-        max_attempts=1,
+        max_attempts=2,
         semantic_repairs=0,
     )
 
     assert answer.status == "success"
     trace = json.loads((run_paths.traces_dir / "sf_expand.json").read_text(encoding="utf-8"))
-    assert trace["schema_expansion"]["decision"]["source"] == "exact_name"
+    assert trace["recovery"]["actions"][0]["decision"]["source"] == "exact_name"
     assert set(trace["schema_selection"]["expanded_tables"]) == {SALES_TABLE, ORDERS_TABLE}
-    assert trace["schema_expansion"]["added_tables"] == [ORDERS_TABLE]
+    assert trace["recovery"]["actions"][0]["added_tables"] == [ORDERS_TABLE]
     assert "schema_expansion" not in prompts
-    assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "schema_expansion"]
+    assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "recovery_schema"]
 
 
 def test_schema_expansion_selects_context_for_missing_column(
@@ -491,7 +492,7 @@ def test_schema_expansion_selects_context_for_missing_column(
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
         initial_candidates=1,
-        max_attempts=1,
+        max_attempts=2,
         semantic_repairs=0,
     )
 
@@ -503,7 +504,7 @@ def test_schema_expansion_selects_context_for_missing_column(
     trace = json.loads(
         (run_paths.traces_dir / "sf_context_expand.json").read_text(encoding="utf-8")
     )
-    expansion = trace["schema_expansion"]
+    expansion = trace["recovery"]["actions"][0]
     assert expansion["decision"]["source"] == "schema_context"
     assert expansion["schema_context_objects"][0]["object_id"] == f"table:{ORDERS_TABLE}"
     assert expansion["selected_additions"][0]["object_id"] == f"table:{ORDERS_TABLE}"
@@ -512,7 +513,7 @@ def test_schema_expansion_selects_context_for_missing_column(
     assert "All available tables" not in prompts["planning"][1]
     assert "Available schema metadata evidence" in prompts["planning"][1]
     assert trace["schema_context"]["expansions"][0]["outcome"] == "expanded"
-    assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "schema_expansion"]
+    assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "recovery_schema"]
 
 
 def test_schema_expansion_recovers_unambiguous_table_from_execution_error(
@@ -548,14 +549,14 @@ def test_schema_expansion_recovers_unambiguous_table_from_execution_error(
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
         initial_candidates=1,
-        max_attempts=1,
+        max_attempts=2,
         semantic_repairs=0,
     )
 
     assert answer.status == "success"
     trace = json.loads((run_paths.traces_dir / "sf_exec_expand.json").read_text(encoding="utf-8"))
-    assert trace["schema_expansion"]["decision"]["source"] == "exact_name"
-    assert trace["schema_expansion"]["added_tables"] == [ORDERS_TABLE]
+    assert trace["recovery"]["actions"][0]["decision"]["source"] == "exact_name"
+    assert trace["recovery"]["actions"][0]["added_tables"] == [ORDERS_TABLE]
 
 
 def test_schema_expansion_rejects_hallucinated_context_selection(
@@ -586,13 +587,13 @@ def test_schema_expansion_rejects_hallucinated_context_selection(
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
         initial_candidates=1,
-        max_attempts=1,
+        max_attempts=2,
         semantic_repairs=0,
     )
 
     assert answer.status == "failed"
     trace = json.loads((run_paths.traces_dir / "sf_reject_expand.json").read_text(encoding="utf-8"))
-    expansion = trace["schema_expansion"]
+    expansion = trace["recovery"]["actions"][0]
     assert expansion["decision"]["source"] == "schema_context"
     assert expansion["selected_additions"] == []
     assert expansion["added_tables"] == []

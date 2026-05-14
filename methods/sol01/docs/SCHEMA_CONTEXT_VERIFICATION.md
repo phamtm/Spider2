@@ -38,7 +38,7 @@ uv run pytest tests/test_schema_context_planning.py tests/test_coordinator.py \
 Result: `48 passed`.
 
 These tests cover schema-context planning prompts, planner sanitization, trace
-`schema_context_version` and `schema_context` diagnostics, schema expansion,
+`schema_context_version` and `schema_context` diagnostics, schema recovery,
 offline schema-context-eval accounting, resolver expansion, large-schema summaries,
 schema-context caching, schema objects, and chunk rendering.
 

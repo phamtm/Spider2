@@ -189,8 +189,8 @@ excluded so arbitrary literals are not promoted into SQL prompts.
 
 Each task trace records `schema_context_version`, effective schema-context config,
 available schema-object evidence, context diagnostics, planner sanitization
-diagnostics, resolver entries, allowed tables, and schema expansion diagnostics
-when repair adds schema context.
+diagnostics, resolver entries, allowed tables, and recovery diagnostics when
+schema recovery adds schema context.
 
 To verify prompt size, inspect `schema_context.prompt_budget` in
 `traces/<instance_id>.json`, or run:

@@ -28,12 +28,10 @@ from sol01.output.output import (
 )
 from sol01.pipeline import (
     TaskRun,
-    attempt_schema_expansion,
     check_skip,
     generate_initial_candidates,
     plan_schema,
-    repair_failed_execution,
-    review_and_repair,
+    run_recovery_stage,
     write_task_output,
 )
 from sol01.schema.db_index import load_db_index
@@ -306,9 +304,11 @@ def run_task(
     run = TaskRun(task=task, client=client, schema_context_config=schema_context_config)
     run = plan_schema(run, run_paths=run_paths)
     run = generate_initial_candidates(run, count=initial_candidates, max_attempts=max_attempts)
-    run = repair_failed_execution(run, max_attempts=max_attempts)
-    run = review_and_repair(run, max_attempts=max_attempts, semantic_repairs=semantic_repairs)
-    run = attempt_schema_expansion(run)
+    run = run_recovery_stage(
+        run,
+        max_attempts=max_attempts,
+        semantic_repairs=semantic_repairs,
+    )
     return write_task_output(
         run,
         run_paths=run_paths,

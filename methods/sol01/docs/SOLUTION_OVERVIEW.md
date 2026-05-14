@@ -40,8 +40,7 @@ Spider2-Snow task
   -> validate each SQL candidate
   -> execute valid candidates in Snowflake
   -> attach local observations and score breakdowns
-  -> ask the LLM to adjudicate executable candidates
-  -> repair when needed
+  -> run one recovery stage when needed
   -> write final SQL and CSV
   -> run official Spider2-Snow eval
   -> save run, trace, eval, and registry artifacts
@@ -378,17 +377,31 @@ in local code.
 
 ## Repairs
 
-`sol01` has three repair paths.
+`sol01` has one recovery stage after the initial candidate batch.
 
-### Execution Repair
+The recovery stage uses a simple priority order:
+
+- schema recovery first when the trace shows the selected schema is incomplete
+- SQL recovery when the best candidate still does not execute
+- semantic recovery when candidate review finds a concrete issue in an executable candidate
+
+All recovery attempts share the same task-level attempt budget.
+
+### SQL Recovery
 
 If the best candidate does not execute, the solver asks for a SQL repair using
 the validation and execution feedback.
 
-### Semantic Repair
+### Semantic Recovery
 
 When candidate review finds a concrete semantic issue, the solver asks for one
 semantic repair.
+
+### Schema Recovery
+
+When validation, execution, or critic evidence shows that the selected schema
+is incomplete, the solver expands the schema context first and retries SQL
+generation against that broader context.
 
 The review looks for concrete issues such as:
 
@@ -414,8 +427,8 @@ The final candidate must execute successfully. The solver writes:
 - `llm_calls/<instance_id>.jsonl`
 
 The trace contains the full local decision path: schema selection, intent,
-prompt hashes, attempts, scores, candidate review output, final SQL, and final
-execution summary.
+prompt hashes, attempts, recovery actions, candidate review output, final SQL,
+and final execution summary.
 
 Schema-context traces also include:
 
@@ -425,7 +438,7 @@ Schema-context traces also include:
 - available object IDs, evidence, and chunk snippets
 - planner sanitization diagnostics
 - resolver entries, allowed tables, and resolver warnings
-- schema expansion diagnostics when repair expands schema context
+- recovery diagnostics when schema recovery expands schema context
 
 Prompt budget diagnostics live in `schema_context.prompt_budget` inside each
 task trace. They record planning and resolved-context character counts against

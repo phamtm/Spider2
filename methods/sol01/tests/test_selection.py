@@ -65,14 +65,14 @@ def test_select_winner_preferred_non_executable_falls_back_to_score():
     assert "score" in result.reason
 
 
-def test_select_winner_schema_expansion_wins_when_higher_score():
+def test_select_winner_schema_recovery_wins_when_higher_score():
     initial = _attempt("initial_1", ok=False, score=-800.0)
-    expansion = _attempt("schema_expansion", ok=True, score=1100.0)
+    expansion = _attempt("recovery_schema", ok=True, score=1100.0)
     result = select_winner([initial, expansion])
     assert result is not None
     assert result.attempt is expansion
     assert result.index == 1
-    assert "schema_expansion" in result.reason
+    assert "recovery_schema" in result.reason
 
 
 def test_select_winner_no_executable_returns_best_score():
