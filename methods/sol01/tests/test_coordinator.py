@@ -139,7 +139,6 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
     }
     monkeypatch.setattr("sol01.coordinator.load_db_index", lambda *args, **kwargs: schema)
     monkeypatch.setattr("sol01.pipeline.load_db_index", lambda *args, **kwargs: schema)
-    monkeypatch.setattr("sol01.schema.expansion.load_db_index", lambda *args, **kwargs: schema)
     monkeypatch.setattr(
         "sol01.candidates.verification.load_db_index", lambda *args, **kwargs: schema
     )
@@ -176,21 +175,7 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
         lambda *args, **kwargs: schema_context_cache,
     )
     monkeypatch.setattr(
-        "sol01.schema.expansion.build_schema_context_cache",
-        lambda *args, **kwargs: schema_context_cache,
-    )
-    monkeypatch.setattr(
         "sol01.pipeline.select_schema_context_objects",
-        lambda *args, **kwargs: (
-            [
-                SchemaContextObject(schema_object=schema_objects[0], rank=1, score=0.9),
-                SchemaContextObject(schema_object=schema_objects[1], rank=2, score=0.8),
-            ],
-            {"query": {"text": "test query"}, "candidate_count": 2},
-        ),
-    )
-    monkeypatch.setattr(
-        "sol01.schema.expansion.select_schema_context_objects",
         lambda *args, **kwargs: (
             [
                 SchemaContextObject(schema_object=schema_objects[0], rank=1, score=0.9),
@@ -511,15 +496,23 @@ def test_schema_expansion_selects_context_for_missing_column(
     queries: list[str] = []
 
     def fake_select_schema_context_objects(index: Any, question: str, **kwargs: Any):
-        queries.append(question)
-        schema_object = next(obj for obj in index.objects if obj.table_name == ORDERS_TABLE)
+        if "Schema expansion trigger:" in question:
+            queries.append(question)
+            schema_object = next(obj for obj in index.objects if obj.table_name == ORDERS_TABLE)
+            return (
+                [SchemaContextObject(schema_object=schema_object, rank=1, score=0.9)],
+                {"query": {"text": question}, "candidate_count": 1},
+            )
         return (
-            [SchemaContextObject(schema_object=schema_object, rank=1, score=0.9)],
-            {"query": {"text": question}, "candidate_count": 1},
+            [
+                SchemaContextObject(schema_object=index.objects[0], rank=1, score=0.9),
+                SchemaContextObject(schema_object=index.objects[1], rank=2, score=0.8),
+            ],
+            {"query": {"text": question}, "candidate_count": 2},
         )
 
     monkeypatch.setattr(
-        "sol01.schema.expansion.select_schema_context_objects",
+        "sol01.pipeline.select_schema_context_objects",
         fake_select_schema_context_objects,
     )
     task = Task(instance_id="sf_context_expand", db="TEST_DB", question="Show order totals.")

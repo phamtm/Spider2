@@ -32,20 +32,15 @@ from sol01.output.output import (
     write_trace,
 )
 from sol01.pipeline import (
+    attempt_schema_expansion,
     build_context,
-    build_planning_prompt,
     check_skip,
     generate_initial_candidates,
-    log_candidate,
-    prompt_budget_diagnostics,
-    rebuild_context_for_expansion,
     repair_failed_execution,
     review_and_repair,
-    run_prompt,
     write_task_output,
 )
 from sol01.schema.db_index import load_db_index
-from sol01.schema.expansion import attempt_schema_expansion
 from sol01.schema.index import CACHE_PATH
 from sol01.schema.schema_context_cache import build_schema_context_cache
 
@@ -335,11 +330,6 @@ def run_task(
         ctx,
         attempts,
         best_attempt,
-        run_prompt=run_prompt,
-        build_planning_prompt=build_planning_prompt,
-        prompt_budget_diagnostics=prompt_budget_diagnostics,
-        rebuild_context=rebuild_context_for_expansion,
-        log_candidate=log_candidate,
     )
 
     return write_task_output(

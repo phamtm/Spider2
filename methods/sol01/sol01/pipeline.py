@@ -26,6 +26,7 @@ from sol01.llm.prompt_builders import (
     enforce_prompt_budget,
     sanitize_schema_planning_decision,
     schema_context_planning_user_prompt,
+    schema_expansion_trigger,
     semantic_repair_prompt,
     sql_generation_batch_prompt,
     sql_reference_context,
@@ -41,6 +42,7 @@ from sol01.models import (
     Intent,
     SchemaPlanningDecision,
     SchemaSelection,
+    SelectedSchemaObject,
     SQLCandidate,
     SQLCandidateBatch,
     Task,
@@ -53,6 +55,13 @@ from sol01.output.output import (
     write_trace,
 )
 from sol01.schema.db_index import load_db_index
+from sol01.schema.expansion import (
+    deterministic_expansion_tables,
+    resolve_expanded_schema,
+    schema_context_object_trace,
+    schema_context_with_expansion,
+    schema_expansion_query,
+)
 from sol01.schema.resolver import resolve_schema_context
 from sol01.schema.schema_context import select_schema_context_objects
 from sol01.schema.schema_context_cache import build_schema_context_cache
@@ -756,6 +765,208 @@ def write_task_output(
         csv_path=None,
         trace_path=str(task_trace_path),
     )
+
+
+def attempt_schema_expansion(
+    ctx: TaskContext,
+    attempts: list[AttemptRecord],
+    current_best: AttemptRecord | None,
+) -> tuple[AttemptRecord | None, dict[str, Any] | None, TaskContext | None]:
+    """Run one schema-expansion recovery attempt when evidence warrants it."""
+
+    if current_best is None:
+        return current_best, None, None
+
+    trigger = schema_expansion_trigger(current_best)
+    if trigger is None:
+        return current_best, None, None
+
+    try:
+        db_index = load_db_index(ctx.task.db)
+    except Exception:
+        return current_best, None, None
+
+    expansion_query = schema_expansion_query(
+        ctx.task.question,
+        current_best,
+        trigger,
+        ctx.schema.selected_object_ids,
+        ctx.schema.expanded_tables,
+    )
+    expansion_payload: dict[str, Any] = {
+        "trigger": trigger,
+        "expansion_query": expansion_query,
+        "decision": None,
+        "added_tables": [],
+        "outcome": "no_new_tables",
+    }
+    schema_context_cache = build_schema_context_cache(
+        ctx.task.db,
+        db_index=db_index,
+        config=ctx.schema_context_config,
+    )
+
+    det_tables = deterministic_expansion_tables(current_best, ctx.schema, db_index)
+    if det_tables:
+        expansion_payload["decision"] = {
+            "source": "exact_name",
+            "additional_tables": det_tables,
+        }
+        selected_additions: list[SelectedSchemaObject] = [
+            SelectedSchemaObject(
+                object_id=f"table:{table_name}",
+                role="primary",
+                reason="unambiguous table name in schema error",
+            )
+            for table_name in det_tables
+        ]
+        schema_context_objects: list[Any] = []
+        planner_diagnostics: dict[str, object] = {}
+    else:
+        selected_additions, schema_context_objects, planner_diagnostics = _select_expansion_objects(
+            ctx,
+            expansion_query=expansion_query,
+            schema_context_cache=schema_context_cache,
+        )
+        expansion_payload["decision"] = {
+            "source": "schema_context",
+            "selected_object_ids": [selected.object_id for selected in selected_additions],
+        }
+
+    expanded_schema, resolved, added_tables = resolve_expanded_schema(
+        ctx.task.db,
+        ctx.task.question,
+        ctx.schema,
+        selected_additions,
+        schema_context_cache=schema_context_cache,
+        db_index=db_index,
+        schema_context_evidence=schema_context_objects,
+        expansion_query=expansion_query,
+    )
+    expansion_payload.update(
+        {
+            "schema_context_objects": schema_context_object_trace(schema_context_objects),
+            "selected_additions": [
+                selected.model_dump(mode="json") for selected in selected_additions
+            ],
+            "added_tables": added_tables,
+            "planner": planner_diagnostics,
+            "resolver": resolved.diagnostics,
+            "prompt_budget": prompt_budget_diagnostics(
+                sql_reference_context=resolved.prompt_context,
+                schema_context_config=ctx.schema_context_config,
+            ),
+        }
+    )
+    if not added_tables:
+        expansion_payload["outcome"] = "no_new_tables"
+        return current_best, expansion_payload, None
+
+    expanded_ctx = rebuild_context_for_expansion(
+        ctx,
+        expanded_schema,
+        table_schemas=resolved.table_schemas,
+        prebuilt_reference=resolved.prompt_context,
+    )
+
+    expansion_stage = "schema_expansion"
+    expansion_payload["expansion_attempt_stage"] = expansion_stage
+    batch = run_prompt(
+        expanded_ctx.client,
+        prompt_hashes=expanded_ctx.prompt_hashes,
+        prompt_name="sql_generation_batch",
+        output_type=SQLCandidateBatch,
+        user_prompt=sql_generation_batch_prompt(
+            expanded_ctx.task,
+            expanded_ctx.intent,
+            expanded_ctx.sql_reference_context,
+            expanded_ctx.docs_context,
+            candidate_count=1,
+        ),
+    )
+    if not batch.candidates:
+        expansion_payload["outcome"] = "expanded_no_candidate"
+        expanded_ctx.schema_context = schema_context_with_expansion(
+            ctx.schema_context,
+            expansion_payload,
+        )
+        return _winner_attempt(attempts), expansion_payload, expanded_ctx
+
+    expansion_attempt = evaluate_candidate(
+        task=expanded_ctx.task,
+        candidate=batch.candidates[0],
+        intent=expanded_ctx.intent,
+        schema=expanded_ctx.schema,
+        table_schemas=expanded_ctx.table_schemas,
+        stage=expansion_stage,
+    )
+    attempts.append(expansion_attempt)
+    log_candidate(ctx.task.instance_id, expansion_attempt)
+
+    expansion_payload["outcome"] = (
+        "expanded" if expansion_attempt.execution_result.ok else "expanded_failed"
+    )
+    expanded_ctx.schema_context = schema_context_with_expansion(
+        ctx.schema_context,
+        expansion_payload,
+    )
+    return _winner_attempt(attempts), expansion_payload, expanded_ctx
+
+
+def _select_expansion_objects(
+    ctx: TaskContext,
+    *,
+    expansion_query: str,
+    schema_context_cache: Any,
+) -> tuple[list[SelectedSchemaObject], list[Any], dict[str, object]]:
+    """Select and sanitize schema objects for one expansion attempt."""
+
+    linked_docs = [] if ctx.docs_context is None else [ctx.docs_context]
+    schema_context_objects, context_diagnostics = select_schema_context_objects(
+        schema_context_cache,
+        expansion_query,
+        linked_docs=linked_docs,
+        config=ctx.schema_context_config,
+    )
+    expansion_task = ctx.task.model_copy(
+        update={
+            "question": (f"{ctx.task.question}\n\nSchema expansion evidence:\n{expansion_query}")
+        }
+    )
+    planning_prompt = build_planning_prompt(
+        expansion_task,
+        ctx.docs_context,
+        schema_context_objects,
+        schema_context_config=ctx.schema_context_config,
+    )
+    decision = run_prompt(
+        ctx.client,
+        prompt_hashes=ctx.prompt_hashes,
+        prompt_name="planning",
+        output_type=SchemaPlanningDecision,
+        user_prompt=planning_prompt,
+    )
+    sanitized_decision, planner_diagnostics = sanitize_schema_planning_decision(
+        decision,
+        schema_context_objects,
+    )
+    current_object_ids = set(ctx.schema.selected_object_ids)
+    selected_additions = [
+        selected
+        for selected in sanitized_decision.selected_objects
+        if selected.object_id not in current_object_ids
+    ]
+    diagnostics: dict[str, object] = {
+        "selection": context_diagnostics,
+        "planner": planner_diagnostics,
+        "prompt_budget": prompt_budget_diagnostics(
+            planning_prompt=planning_prompt,
+            schema_context_config=ctx.schema_context_config,
+        ),
+        "rationale": sanitized_decision.rationale,
+        "confidence": sanitized_decision.confidence,
+    }
+    return selected_additions, schema_context_objects, diagnostics
 
 
 def run_prompt(
