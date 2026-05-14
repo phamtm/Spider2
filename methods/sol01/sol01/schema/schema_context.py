@@ -247,7 +247,7 @@ def _schema_context_objects(
         SchemaContextObject(
             schema_object=schema_object,
             planning_text=_chunk_planning_text(chunks_by_object.get(schema_object.object_id)),
-            rank=rank,
+            position=rank,
         )
         for rank, schema_object in enumerate(objects, start=1)
     ]
@@ -289,7 +289,7 @@ def _diagnostics(
             {
                 "object_id": obj.schema_object.object_id,
                 "object_type": obj.schema_object.object_type,
-                "position": obj.rank,
+                "position": obj.position,
             }
             for obj in schema_context_objects
         ],

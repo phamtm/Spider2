@@ -315,8 +315,6 @@ def _schema_context_object_evidence(
             header += f"\n  column: {schema_object.column_name}"
         if schema_object.description:
             header += f"\n  description: {_single_line(schema_object.description)}"
-        if item.score is not None:
-            header += f"\n  score: {item.score:.4f}"
 
         evidence_lines = [header]
         if item.planning_text:

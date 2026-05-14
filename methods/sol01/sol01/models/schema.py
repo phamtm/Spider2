@@ -135,8 +135,7 @@ class SchemaContextChunk(BaseModel):
     prompt_text: str = ""
     source_definition: str = ""
     inferred_usage: str = ""
-    source: Literal["schema", "linked_doc", "sample", "join", "family"] = "schema"
-    linked_doc_title: str | None = None
+    source: Literal["schema", "sample", "join", "family"] = "schema"
     metadata: dict[str, object] = Field(default_factory=dict)
 
     @field_validator("object_id")
@@ -166,8 +165,7 @@ class SchemaContextObject(BaseModel):
 
     schema_object: SchemaObject
     planning_text: str = ""
-    rank: int = Field(ge=1)
-    score: float | None = None
+    position: int = Field(ge=1)
 
 
 class SchemaPlanningConstraints(BaseModel):

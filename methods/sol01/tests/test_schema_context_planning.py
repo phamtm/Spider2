@@ -134,8 +134,7 @@ def test_schema_context_planning_prompt_uses_curated_summary_evidence_for_covere
             SchemaContextObject(
                 schema_object=schema_object,
                 planning_text=planning_text,
-                rank=1,
-                score=1.0,
+                position=1,
             )
         ],
     )
@@ -343,13 +342,11 @@ def _schema_context_objects() -> list[SchemaContextObject]:
         SchemaContextObject(
             schema_object=orders,
             planning_text="Orders table with status and amount fields.",
-            rank=1,
-            score=0.9,
+            position=1,
         ),
         SchemaContextObject(
             schema_object=amount,
             planning_text="Amount column used as revenue evidence.",
-            rank=2,
-            score=0.7,
+            position=2,
         ),
     ]

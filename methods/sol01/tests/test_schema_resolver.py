@@ -439,5 +439,5 @@ def _schema_context_join_evidence() -> SchemaContextObject:
     return SchemaContextObject(
         schema_object=join_object,
         planning_text="Join candidate: DB.PUBLIC.SALES_2022.ORDER_ID = DB.PUBLIC.ORDERS.ORDER_ID.",
-        rank=1,
+        position=1,
     )

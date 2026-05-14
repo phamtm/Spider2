@@ -240,7 +240,7 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
                 "object_type": item.schema_object.object_type,
                 "name": item.schema_object.name,
                 "table_name": item.schema_object.table_name,
-                "position": item.rank,
+                "position": item.position,
             }
             for item in schema_context_objects
         ],

@@ -202,14 +202,13 @@ def handle_schema_context_eval(
         raise typer.Exit(code=1)
 
     config = SchemaContextConfig.from_env(dotenv_path=DEFAULT_DOTENV_PATH)
-    if object_cutoff is not None:
-        config = config.model_copy(update={"object_cutoff": object_cutoff})
     baseline_tasks = load_schema_context_eval_task_rows(baseline_path) if baseline_path else {}
     trace_dirs = [ensure_run_paths(run_id).traces_dir for run_id in trace_run_ids or []]
     return run_schema_context_eval(
         tasks,
         gold_tables_by_instance=gold_tables,
         config=config,
+        **({"object_cutoff": object_cutoff} if object_cutoff is not None else {}),
         covered_only=covered_only,
         baseline_tasks=baseline_tasks,
         trace_dirs=trace_dirs,

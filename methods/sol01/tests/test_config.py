@@ -11,7 +11,6 @@ from sol01.infra.config import (
 )
 
 SCHEMA_CONTEXT_ENV_VARS = [
-    "SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF",
     "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD",
     "SOL01_SCHEMA_MAX_LINKED_DOC_CHARS",
     "SOL01_SCHEMA_MAX_PROMPT_CHARS",
@@ -204,7 +203,6 @@ def test_schema_context_config_defaults(monkeypatch):
 
     config = SchemaContextConfig.from_env()
 
-    assert config.object_cutoff > 0
     assert 0.0 <= config.family_similarity_threshold <= 1.0
     assert config.max_linked_doc_chars > 0
     assert config.max_schema_prompt_chars > config.max_linked_doc_chars
@@ -215,13 +213,11 @@ def test_schema_context_config_defaults(monkeypatch):
     [
         pytest.param(
             {
-                "SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF": "9",
                 "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD": "0.7",
                 "SOL01_SCHEMA_MAX_LINKED_DOC_CHARS": "4000",
                 "SOL01_SCHEMA_MAX_PROMPT_CHARS": "18000",
             },
             {
-                "object_cutoff": 9,
                 "family_similarity_threshold": 0.7,
                 "max_linked_doc_chars": 4000,
                 "max_schema_prompt_chars": 18000,
@@ -245,15 +241,7 @@ def test_schema_context_env_overrides(monkeypatch, env_overrides, expected):
     "bad_env,match",
     [
         pytest.param(
-            {"SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF": "0"},
-            "positive integer",
-            id="zero-cutoff",
-        ),
-        pytest.param(
-            {
-                "SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF": "3",
-                "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD": "1.1",
-            },
+            {"SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD": "1.1"},
             "between 0 and 1",
             id="threshold-above-one",
         ),

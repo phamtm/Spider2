@@ -12,7 +12,6 @@ DEFAULT_MODEL = "deepseek/deepseek-v4-pro"
 DEFAULT_PROVIDER_ONLY = "deepseek"
 DEFAULT_CONCURRENCY = 4
 DEFAULT_SCHEMA_CONTEXT_VERSION = "schema_context_v1"
-DEFAULT_SCHEMA_CONTEXT_OBJECT_CUTOFF = 12
 DEFAULT_FAMILY_SIMILARITY_THRESHOLD = 0.82
 DEFAULT_MAX_LINKED_DOC_CHARS = 6000
 DEFAULT_MAX_SCHEMA_PROMPT_CHARS = 24000
@@ -83,7 +82,6 @@ class RuntimeConfig(BaseModel):
 class SchemaContextConfig(BaseModel):
     """Schema-context settings used before LLM planning."""
 
-    object_cutoff: int = Field(default=DEFAULT_SCHEMA_CONTEXT_OBJECT_CUTOFF, ge=1)
     family_similarity_threshold: float = Field(
         default=DEFAULT_FAMILY_SIMILARITY_THRESHOLD,
         ge=0.0,
@@ -99,10 +97,6 @@ class SchemaContextConfig(BaseModel):
         _load_local_dotenv(dotenv_path)
 
         return cls(
-            object_cutoff=_env_positive_int(
-                "SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF",
-                default=DEFAULT_SCHEMA_CONTEXT_OBJECT_CUTOFF,
-            ),
             family_similarity_threshold=_env_unit_float(
                 "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD",
                 default=DEFAULT_FAMILY_SIMILARITY_THRESHOLD,

@@ -117,8 +117,7 @@ def schema_context_object_trace(schema_context_objects: list[Any]) -> list[dict[
             "object_type": item.schema_object.object_type,
             "name": item.schema_object.name,
             "table_name": item.schema_object.table_name,
-            "rank": item.rank,
-            "score": item.score,
+            "position": item.position,
         }
         for item in schema_context_objects
     ]

@@ -15,7 +15,6 @@ from sol01.analysis.schema_context_eval import (
     write_schema_context_eval_report,
 )
 from sol01.cli import schema_context as cli_schema_context
-from sol01.infra.config import SchemaContextConfig
 from sol01.models import ColumnSchema, SchemaContextChunk, SchemaObject, TableSchema, Task
 from sol01.schema.schema_context_cache import SchemaContextCache
 
@@ -65,7 +64,7 @@ def test_schema_context_eval_reports_gold_coverage_family_success_and_failures()
             "sf_family": ["DB.PUBLIC.SALES_2022", "DB.PUBLIC.SALES_2023"],
             "sf_missing": ["DB.PUBLIC.CUSTOMERS"],
         },
-        config=SchemaContextConfig(object_cutoff=3),
+        object_cutoff=3,
         db_index_loader=lambda db: db_index,
         schema_context_cache_loader=lambda db, db_index, config: index,
     )
@@ -114,7 +113,7 @@ def test_schema_context_eval_filters_covered_schemas_and_compares_baseline(monke
             "sf_family": ["DB.PUBLIC.SALES_2022", "DB.PUBLIC.SALES_2023"],
             "sf_missing": ["DB.PUBLIC.CUSTOMERS"],
         },
-        config=SchemaContextConfig(object_cutoff=3),
+        object_cutoff=3,
         db_index_loader=lambda db: _db_index(),
         schema_context_cache_loader=lambda db, db_index, config: _schema_context_cache(),
         covered_only=True,
@@ -166,7 +165,7 @@ def test_schema_context_eval_persists_report_and_hallucinated_column_failures(tm
         gold_tables_by_instance={
             "sf_family": ["DB.PUBLIC.SALES_2022", "DB.PUBLIC.SALES_2023"],
         },
-        config=SchemaContextConfig(object_cutoff=3),
+        object_cutoff=3,
         db_index_loader=lambda db: _db_index(),
         schema_context_cache_loader=lambda db, db_index, config: _schema_context_cache(),
         trace_dirs=[trace_dir],

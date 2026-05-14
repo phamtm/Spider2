@@ -163,8 +163,7 @@ def test_schema_context_core_models_construct_and_validate_object_types():
     context_object = SchemaContextObject(
         schema_object=schema_object,
         planning_text="Orders table with amount and customer fields.",
-        rank=1,
-        score=0.9,
+        position=1,
     )
 
     assert context_object.schema_object.object_type == "table"

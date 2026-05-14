@@ -25,6 +25,7 @@ from sol01.schema.schema_context import build_available_schema_context
 from sol01.schema.schema_context_cache import SchemaContextCache, build_schema_context_cache
 
 DEFAULT_GOLD_TABLE_PATH = REPO_ROOT / "methods" / "gold-tables" / "spider2-snow-gold-tables.jsonl"
+DEFAULT_SCHEMA_CONTEXT_OBJECT_CUTOFF = 12
 DEFAULT_FAILURE_EVIDENCE_LIMIT = 5
 DEFAULT_FAILURE_LIMIT = 20
 DEFAULT_PROMPT_WIN_LIMIT = 20
@@ -127,6 +128,7 @@ def run_schema_context_eval(
     *,
     gold_tables_by_instance: Mapping[str, Sequence[str]],
     config: SchemaContextConfig | None = None,
+    object_cutoff: int = DEFAULT_SCHEMA_CONTEXT_OBJECT_CUTOFF,
     db_index_loader: Callable[[str], Mapping[str, TableSchema]] = load_db_index,
     schema_context_cache_loader: Callable[
         [str, Mapping[str, TableSchema], SchemaContextConfig],
@@ -164,7 +166,7 @@ def run_schema_context_eval(
             linked_docs=linked_docs,
             config=config,
         )
-        cutoff_objects = list(schema_context_objects[: config.object_cutoff])
+        cutoff_objects = list(schema_context_objects[:object_cutoff])
         selected_objects = [
             SelectedSchemaObject(
                 object_id=item.schema_object.object_id,
@@ -241,7 +243,7 @@ def run_schema_context_eval(
 
     return _build_report(
         rows,
-        object_cutoff=config.object_cutoff,
+        object_cutoff=object_cutoff,
         failures=failures,
         baseline_tasks=baseline_tasks or {},
         hallucinated_column_failures=_hallucinated_column_failures(trace_dirs),
@@ -458,8 +460,7 @@ def _top_evidence(
                 {
                     "object_id": item.schema_object.object_id,
                     "object_type": item.schema_object.object_type,
-                    "rank": item.rank,
-                    "score": item.score,
+                    "position": item.position,
                     "text": " ".join(item.planning_text.split())[:500],
                 }
             )

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sol01.infra.config import SchemaContextConfig
 from sol01.models import ColumnSchema, SchemaContextChunk, SchemaObject, TableSchema
 from sol01.schema.chunks import render_schema_chunks
 from sol01.schema.objects import build_schema_objects
@@ -52,7 +51,6 @@ def test_full_database_metadata_context_returns_all_schema_objects_without_ranki
     objects, diagnostics = build_available_schema_context(
         index,
         "Find ORDERS where status is 'closed'",
-        config=SchemaContextConfig(object_cutoff=2),
     )
 
     selected_ids = [obj.schema_object.object_id for obj in objects]
@@ -71,19 +69,6 @@ def test_full_database_metadata_context_returns_all_schema_objects_without_ranki
         "chunks_total": 7,
         "available_objects": 7,
     }
-    assert all(obj.score is None for obj in objects)
-
-
-def test_object_cutoff_does_not_limit_available_schema_context():
-    index = _fake_index()
-
-    objects, _ = build_available_schema_context(
-        index,
-        "orders status customer amount",
-        config=SchemaContextConfig(object_cutoff=1),
-    )
-
-    assert len(objects) == len(index.objects)
 
 
 def test_summary_backed_context_uses_only_curated_large_schema_objects():
@@ -136,7 +121,6 @@ def test_summary_backed_context_uses_only_curated_large_schema_objects():
     schema_context_objects, diagnostics = build_available_schema_context(
         index,
         "Count daily github archive repository events",
-        config=SchemaContextConfig(object_cutoff=1),
     )
 
     assert diagnostics["context_mode"] == "large_schema_summary"
