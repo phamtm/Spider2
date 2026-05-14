@@ -17,7 +17,12 @@ from sol01.candidates.verification import (
     table_schemas_for_selection,
 )
 from sol01.execution.snowflake_runner import dataframe_records
-from sol01.infra.config import DEFAULT_SCHEMA_CONTEXT_VERSION, SchemaContextConfig
+from sol01.infra.config import (
+    DEFAULT_SCHEMA_CONTEXT_VERSION,
+    DEFAULT_SOLVER_POLICY,
+    SchemaContextConfig,
+    SolverPolicy,
+)
 from sol01.infra.logging import get_logger
 from sol01.infra.strings import question_preview
 from sol01.llm.client import LLMClient
@@ -75,6 +80,7 @@ class TaskRun:
     task: Task
     client: LLMClient
     schema_context_config: SchemaContextConfig
+    policy: SolverPolicy = dataclasses.field(default_factory=lambda: DEFAULT_SOLVER_POLICY)
     schema_context_version: str = DEFAULT_SCHEMA_CONTEXT_VERSION
 
     # Set during plan_schema
@@ -155,12 +161,8 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
         db_index=db_index,
         config=run.schema_context_config,
     )
-    linked_docs = [] if run.docs_context is None else [run.docs_context]
     schema_context_objects, context_diagnostics = build_available_schema_context(
-        schema_context_cache,
-        run.task.question,
-        linked_docs=linked_docs,
-        config=run.schema_context_config,
+        schema_context_cache
     )
     planning_prompt = _build_planning_prompt(
         run.task,
@@ -264,16 +266,18 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
     return run
 
 
-def generate_initial_candidates(run: TaskRun, *, count: int, max_attempts: int) -> TaskRun:
-    """Generate up to count SQL candidates and append them to run.attempts."""
+def generate_initial_candidates(run: TaskRun) -> TaskRun:
+    """Generate the configured initial SQL candidates and append them to run.attempts."""
 
     logger.info(
         "generating candidates",
         instance_id=run.task.instance_id,
-        initial_candidates=count,
-        max_attempts=max_attempts,
+        initial_candidates=run.policy.initial_candidates,
+        max_attempts=run.policy.max_attempts,
     )
-    candidate_limit = min(count, max_attempts - len(run.attempts))
+    candidate_limit = min(
+        run.policy.initial_candidates, run.policy.max_attempts - len(run.attempts)
+    )
     if candidate_limit <= 0:
         return run
 
@@ -304,16 +308,11 @@ def generate_initial_candidates(run: TaskRun, *, count: int, max_attempts: int) 
     return run
 
 
-def run_recovery_stage(
-    run: TaskRun,
-    *,
-    max_attempts: int,
-    semantic_repairs: int,
-) -> TaskRun:
+def run_recovery_stage(run: TaskRun) -> TaskRun:
     """Run the single recovery stage until it is done or the shared budget is spent."""
 
     actions: list[dict[str, Any]] = []
-    remaining_semantic_repairs = semantic_repairs
+    remaining_semantic_repairs = run.policy.semantic_repairs
     review_ran = False
     stop_reason = "no_attempts"
 
@@ -325,7 +324,7 @@ def run_recovery_stage(
 
         schema_trigger = schema_expansion_trigger(best)
         if schema_trigger is not None:
-            if len(run.attempts) >= max_attempts:
+            if len(run.attempts) >= run.policy.max_attempts:
                 best.repair_skipped_reason = "attempt budget exhausted"
                 stop_reason = "attempt_budget_exhausted"
                 break
@@ -341,7 +340,7 @@ def run_recovery_stage(
             continue
 
         if not best.execution_result.ok:
-            if len(run.attempts) >= max_attempts:
+            if len(run.attempts) >= run.policy.max_attempts:
                 best.repair_skipped_reason = "attempt budget exhausted"
                 stop_reason = "attempt_budget_exhausted"
                 break
@@ -364,7 +363,7 @@ def run_recovery_stage(
                 best.repair_skipped_reason = "semantic repair budget exhausted"
                 stop_reason = "semantic_repair_budget_exhausted"
                 break
-            if len(run.attempts) >= max_attempts:
+            if len(run.attempts) >= run.policy.max_attempts:
                 best = _current_best(run, preferred_stage=review.preferred_stage) or best
                 best.repair_skipped_reason = "attempt budget exhausted"
                 stop_reason = "attempt_budget_exhausted"
@@ -383,8 +382,8 @@ def run_recovery_stage(
             [attempt for attempt in run.attempts if attempt.stage.startswith("initial_")]
         ),
         "attempts_after_recovery": len(run.attempts),
-        "max_attempts": max_attempts,
-        "semantic_repairs_allowed": semantic_repairs,
+        "max_attempts": run.policy.max_attempts,
+        "semantic_repairs_allowed": run.policy.semantic_repairs,
         "semantic_repairs_remaining": remaining_semantic_repairs,
         "actions": actions,
         "stop_reason": stop_reason,
@@ -415,6 +414,7 @@ def write_task_output(
         "schema_selection": run.schema.model_dump(mode="json"),
         "schema_context_version": run.schema_context_version,
         "schema_context": run.schema_context,
+        "solver_policy": run.policy.as_dict(),
         "intent": run.intent.model_dump(mode="json"),
         "prompt_hashes": run.prompt_hashes,
         "final_attempt_index": final_attempt_index,
@@ -520,12 +520,8 @@ def _select_expansion_objects(
 ) -> tuple[list[SelectedSchemaObject], list[Any], dict[str, object]]:
     """Select and sanitize schema objects for one expansion attempt."""
 
-    linked_docs = [] if run.docs_context is None else [run.docs_context]
     schema_context_objects, context_diagnostics = build_available_schema_context(
-        schema_context_cache,
-        expansion_query,
-        linked_docs=linked_docs,
-        config=run.schema_context_config,
+        schema_context_cache
     )
     expansion_task = run.task.model_copy(
         update={"question": f"{run.task.question}\n\nSchema expansion evidence:\n{expansion_query}"}
@@ -871,8 +867,7 @@ def _build_planning_prompt(
         task.db,
         docs_context,
         schema_context_objects,
-        max_docs_chars=schema_context_config.max_linked_doc_chars,
-        max_total_chars=schema_context_config.max_schema_prompt_chars,
+        schema_context_config=schema_context_config,
     )
 
 

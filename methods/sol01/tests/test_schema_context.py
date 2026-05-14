@@ -7,50 +7,14 @@ from pathlib import Path
 from sol01.models import ColumnSchema, SchemaObject, TableSchema
 from sol01.schema.object_text import annotate_summary_metadata
 from sol01.schema.objects import build_schema_objects
-from sol01.schema.schema_context import (
-    build_available_schema_context,
-    build_question_context,
-    clip_linked_docs,
-)
+from sol01.schema.schema_context import build_available_schema_context
 from sol01.schema.schema_context_cache import SchemaContextCache
-
-
-def test_question_context_clips_linked_docs_and_keeps_compact_query_text():
-    context = build_question_context(
-        "Show DB.PUBLIC.ORDERS where STATUS = 'closed' in FY_2024 and 2024-01-03",
-        linked_docs=[
-            "Irrelevant billing policy paragraph.\n\n"
-            "Orders status values include closed and open for fulfilled orders."
-        ],
-        exact_literals=["VIP_CUSTOMER"],
-        max_doc_chars=80,
-    )
-
-    assert (
-        context.question
-        == "Show DB.PUBLIC.ORDERS where STATUS = 'closed' in FY_2024 and 2024-01-03"
-    )
-    assert context.linked_doc_context.startswith("Orders status values")
-    assert len(context.linked_doc_context) <= 80
-    assert "VIP_CUSTOMER" in context.text
-    assert "closed" in context.text
-
-    clipped = clip_linked_docs(
-        ["alpha beta.\n\ntarget revenue status paragraph.\n\ntrailing text."],
-        query_terms=["status"],
-        max_doc_chars=40,
-    )
-
-    assert clipped == "target revenue status paragraph."
 
 
 def test_full_metadata_context_returns_all_objects_in_stable_order():
     index = _fake_index()
 
-    objects, diagnostics = build_available_schema_context(
-        index,
-        "Find ORDERS where status is 'closed'",
-    )
+    objects, diagnostics = build_available_schema_context(index)
 
     selected_ids = {obj.schema_object.object_id for obj in objects}
     assert selected_ids == {
@@ -123,10 +87,7 @@ def test_summary_backed_context_uses_only_curated_large_schema_objects():
         objects=annotate_summary_metadata(objects),
     )
 
-    schema_context_objects, diagnostics = build_available_schema_context(
-        index,
-        "Count daily github archive repository events",
-    )
+    schema_context_objects, diagnostics = build_available_schema_context(index)
 
     assert diagnostics["context_mode"] == "summary_only"
     schema_context_ids = [item.schema_object.object_id for item in schema_context_objects]

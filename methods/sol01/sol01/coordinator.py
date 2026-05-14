@@ -9,7 +9,12 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel
 
-from sol01.infra.config import RuntimeConfig, SchemaContextConfig
+from sol01.infra.config import (
+    DEFAULT_SOLVER_POLICY,
+    RuntimeConfig,
+    SchemaContextConfig,
+    SolverPolicy,
+)
 from sol01.infra.logging import get_logger
 from sol01.llm.client import LLMClient, PromptSpec
 from sol01.llm.llm_logging import LLMCallLogger
@@ -77,6 +82,7 @@ def run_tasks(
     outputs_root: Path | None = None,
     force: bool = False,
     skip_failed: bool = False,
+    policy: SolverPolicy = DEFAULT_SOLVER_POLICY,
 ) -> list[FinalAnswer]:
     """Run a batch of tasks and write a manifest before processing them."""
 
@@ -89,6 +95,7 @@ def run_tasks(
             "provider_routing": config.provider_routing,
             "config": {
                 "concurrency": config.concurrency,
+                "solver_policy": policy.as_dict(),
             },
         },
     )
@@ -99,6 +106,7 @@ def run_tasks(
         model=getattr(config, "model", None),
         provider_routing=getattr(config, "provider_routing", None),
         concurrency=getattr(config, "concurrency", None),
+        solver_policy=policy.as_dict(),
         force=force,
         skip_failed=skip_failed,
     )
@@ -112,6 +120,7 @@ def run_tasks(
         llm_client=llm_client,
         force=force,
         skip_failed=skip_failed,
+        policy=policy,
     )
     logger.info(
         "run complete",
@@ -153,6 +162,7 @@ def _run_task_batch(
     llm_client: StructuredLLM | None,
     force: bool,
     skip_failed: bool,
+    policy: SolverPolicy,
 ) -> list[FinalAnswer]:
     """Run tasks sequentially or with bounded concurrency, preserving input order."""
 
@@ -166,6 +176,7 @@ def _run_task_batch(
                 llm_client=llm_client,
                 force=force,
                 skip_failed=skip_failed,
+                policy=policy,
             )
             for task in tasks
         ]
@@ -182,6 +193,7 @@ def _run_task_batch(
                 llm_client=None,
                 force=force,
                 skip_failed=skip_failed,
+                policy=policy,
             ): index
             for index, task in enumerate(tasks)
         }
@@ -200,6 +212,7 @@ def _run_single_batch_task(
     llm_client: StructuredLLM | None,
     force: bool,
     skip_failed: bool,
+    policy: SolverPolicy,
 ) -> FinalAnswer:
     """Run one task and convert unexpected exceptions into failed traces."""
 
@@ -212,6 +225,7 @@ def _run_single_batch_task(
             llm_client=llm_client,
             force=force,
             skip_failed=skip_failed,
+            policy=policy,
         )
     except Exception as exc:
         return _record_batch_task_failure(
@@ -276,9 +290,7 @@ def run_task(
     llm_client: StructuredLLM | None = None,
     force: bool = False,
     skip_failed: bool = False,
-    initial_candidates: int = 3,
-    max_attempts: int = 4,
-    semantic_repairs: int = 1,
+    policy: SolverPolicy = DEFAULT_SOLVER_POLICY,
 ) -> FinalAnswer:
     """Run one task through the explicit solver stage pipeline."""
 
@@ -301,14 +313,15 @@ def run_task(
     if skipped is not None:
         return skipped
 
-    run = TaskRun(task=task, client=client, schema_context_config=schema_context_config)
-    run = plan_schema(run, run_paths=run_paths)
-    run = generate_initial_candidates(run, count=initial_candidates, max_attempts=max_attempts)
-    run = run_recovery_stage(
-        run,
-        max_attempts=max_attempts,
-        semantic_repairs=semantic_repairs,
+    run = TaskRun(
+        task=task,
+        client=client,
+        schema_context_config=schema_context_config,
+        policy=policy,
     )
+    run = plan_schema(run, run_paths=run_paths)
+    run = generate_initial_candidates(run)
+    run = run_recovery_stage(run)
     return write_task_output(
         run,
         run_paths=run_paths,

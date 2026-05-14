@@ -1,6 +1,7 @@
 """Runtime settings for the sol01 command line tools and LLM calls."""
 
 import os
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +16,38 @@ DEFAULT_SCHEMA_CONTEXT_VERSION = "schema_context_v1"
 DEFAULT_FAMILY_SIMILARITY_THRESHOLD = 0.82
 DEFAULT_MAX_LINKED_DOC_CHARS = 6000
 DEFAULT_MAX_SCHEMA_PROMPT_CHARS = 24000
+DEFAULT_INITIAL_CANDIDATES = 3
+DEFAULT_MAX_ATTEMPTS = 4
+DEFAULT_SEMANTIC_REPAIRS = 1
 METHOD_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DOTENV_PATH = METHOD_ROOT / ".env"
+
+
+@dataclass(frozen=True)
+class SolverPolicy:
+    """Small internal policy object for solver retry and recovery budgets."""
+
+    initial_candidates: int = DEFAULT_INITIAL_CANDIDATES
+    max_attempts: int = DEFAULT_MAX_ATTEMPTS
+    semantic_repairs: int = DEFAULT_SEMANTIC_REPAIRS
+
+    def __post_init__(self) -> None:
+        if self.initial_candidates < 1:
+            raise ValueError("initial_candidates must be positive")
+        if self.max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
+        if self.semantic_repairs < 0:
+            raise ValueError("semantic_repairs must be zero or positive")
+        if self.initial_candidates > self.max_attempts:
+            raise ValueError("initial_candidates must not exceed max_attempts")
+
+    def as_dict(self) -> dict[str, int]:
+        """Return a JSON-ready trace payload."""
+
+        return asdict(self)
+
+
+DEFAULT_SOLVER_POLICY = SolverPolicy()
 
 
 class RuntimeConfig(BaseModel):
@@ -110,6 +141,12 @@ class SchemaContextConfig(BaseModel):
                 default=DEFAULT_MAX_SCHEMA_PROMPT_CHARS,
             ),
         )
+
+    @property
+    def planning_evidence_chars(self) -> int:
+        """Reserve the remaining planning budget for schema evidence."""
+
+        return max(0, self.max_schema_prompt_chars - self.max_linked_doc_chars)
 
 
 def _env_first(*names: str) -> str | None:

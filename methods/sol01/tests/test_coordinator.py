@@ -12,7 +12,12 @@ import pandas as pd
 import pytest
 
 from sol01.coordinator import run_task
-from sol01.infra.config import RuntimeConfig, SchemaContextConfig
+from sol01.infra.config import (
+    DEFAULT_SOLVER_POLICY,
+    RuntimeConfig,
+    SchemaContextConfig,
+    SolverPolicy,
+)
 from sol01.llm.client import PromptSpec
 from sol01.models import (
     CandidateReviewReport,
@@ -32,6 +37,14 @@ from sol01.output.output import ensure_run_paths
 
 SALES_TABLE = "TEST_DB.PUBLIC.SALES"
 ORDERS_TABLE = "TEST_DB.PUBLIC.ORDERS"
+
+
+def _policy(**updates: int) -> SolverPolicy:
+    values = {
+        **DEFAULT_SOLVER_POLICY.as_dict(),
+        **updates,
+    }
+    return SolverPolicy(**values)
 
 
 @dataclass
@@ -105,7 +118,7 @@ def fake_snowflake(monkeypatch: pytest.MonkeyPatch) -> None:
         "sol01.candidates.evaluator.fetch_query_dataframe", fake_fetch_query_dataframe
     )
     monkeypatch.setattr(
-        "sol01.candidates.verification._fetch_query_dataframe", fake_fetch_query_dataframe
+        "sol01.candidates.filter_grounding._fetch_query_dataframe", fake_fetch_query_dataframe
     )
 
 
@@ -263,7 +276,7 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
         config=RuntimeConfig(api_key="test-key"),
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
-        initial_candidates=1,
+        policy=_policy(initial_candidates=1),
     )
 
     assert isinstance(answer, FinalAnswer)
@@ -277,6 +290,7 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
     assert trace["schema_selection"]["expanded_tables"] == [SALES_TABLE]
     assert trace["schema_context_version"] == "schema_context_v1"
     assert trace["schema_context"]["cache"]["cache_key"] == "test-cache-key"
+    assert trace["solver_policy"] == _policy(initial_candidates=1).as_dict()
     prompt_budget = trace["schema_selection"]["diagnostics"]["prompt_budget"]
     assert prompt_budget["planning_prompt_chars"] <= prompt_budget["max_schema_prompt_chars"]
     assert prompt_budget["sql_reference_context_chars"] <= prompt_budget["max_schema_prompt_chars"]
@@ -332,7 +346,7 @@ def test_close_executable_candidates_use_one_candidate_review(
         config=RuntimeConfig(api_key="test-key"),
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
-        initial_candidates=2,
+        policy=_policy(initial_candidates=2),
     )
 
     assert answer.status == "success"
@@ -380,7 +394,7 @@ def test_tiny_aggregate_is_reviewed_by_candidate_review(
         config=RuntimeConfig(api_key="test-key"),
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
-        initial_candidates=1,
+        policy=_policy(initial_candidates=1),
     )
 
     assert answer.status == "success"
@@ -418,9 +432,7 @@ def test_schema_expansion_uses_exact_table_name_and_reuses_intent(
         config=RuntimeConfig(api_key="test-key"),
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
-        initial_candidates=1,
-        max_attempts=2,
-        semantic_repairs=0,
+        policy=_policy(initial_candidates=1, max_attempts=2, semantic_repairs=0),
     )
 
     assert answer.status == "success"
@@ -438,25 +450,23 @@ def test_schema_expansion_selects_context_for_missing_column(
     fake_snowflake: None,
     db_index: dict[str, TableSchema],
 ):
-    queries: list[str] = []
+    call_count = 0
 
-    def fake_build_available_schema_context(index: Any, question: str, **kwargs: Any):
-        if "Schema expansion trigger:" in question:
-            queries.append(question)
+    def fake_build_available_schema_context(index: Any):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
             schema_object = next(obj for obj in index.objects if obj.table_name == ORDERS_TABLE)
             return (
                 [SchemaContextObject(schema_object=schema_object, position=1)],
-                {
-                    "question_context": {"text": question},
-                    "context_counts": {"available_objects": 1},
-                },
+                {"context_counts": {"available_objects": 1}},
             )
         return (
             [
                 SchemaContextObject(schema_object=index.objects[0], position=1),
                 SchemaContextObject(schema_object=index.objects[1], position=2),
             ],
-            {"question_context": {"text": question}, "context_counts": {"available_objects": 2}},
+            {"context_counts": {"available_objects": 2}},
         )
 
     monkeypatch.setattr(
@@ -490,16 +500,11 @@ def test_schema_expansion_selects_context_for_missing_column(
         config=RuntimeConfig(api_key="test-key"),
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
-        initial_candidates=1,
-        max_attempts=2,
-        semantic_repairs=0,
+        policy=_policy(initial_candidates=1, max_attempts=2, semantic_repairs=0),
     )
 
     assert answer.status == "success"
-    assert len(queries) == 1
-    assert "Original question: Show order totals." in queries[0]
-    assert f"Failed SQL: SELECT MISSING_COLUMN FROM {SALES_TABLE}" in queries[0]
-    assert f"Current selected object ids: table:{SALES_TABLE}" in queries[0]
+    assert call_count == 2
     trace = json.loads(
         (run_paths.traces_dir / "sf_context_expand.json").read_text(encoding="utf-8")
     )
@@ -509,6 +514,9 @@ def test_schema_expansion_selects_context_for_missing_column(
     assert expansion["selected_additions"][0]["object_id"] == f"table:{ORDERS_TABLE}"
     assert expansion["added_tables"] == [ORDERS_TABLE]
     assert expansion["resolver"]["warnings"] == []
+    assert "Original question: Show order totals." in prompts["planning"][1]
+    assert f"Failed SQL: SELECT MISSING_COLUMN FROM {SALES_TABLE}" in prompts["planning"][1]
+    assert f"Current selected object ids: table:{SALES_TABLE}" in prompts["planning"][1]
     assert "All available tables" not in prompts["planning"][1]
     assert "Available schema metadata evidence" in prompts["planning"][1]
     assert trace["schema_context"]["expansions"][0]["outcome"] == "expanded"
@@ -547,9 +555,7 @@ def test_schema_expansion_recovers_unambiguous_table_from_execution_error(
         config=RuntimeConfig(api_key="test-key"),
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
-        initial_candidates=1,
-        max_attempts=2,
-        semantic_repairs=0,
+        policy=_policy(initial_candidates=1, max_attempts=2, semantic_repairs=0),
     )
 
     assert answer.status == "success"
@@ -585,9 +591,7 @@ def test_schema_expansion_rejects_hallucinated_context_selection(
         config=RuntimeConfig(api_key="test-key"),
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
-        initial_candidates=1,
-        max_attempts=2,
-        semantic_repairs=0,
+        policy=_policy(initial_candidates=1, max_attempts=2, semantic_repairs=0),
     )
 
     assert answer.status == "failed"

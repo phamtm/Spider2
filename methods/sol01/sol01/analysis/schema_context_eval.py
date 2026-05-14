@@ -159,12 +159,8 @@ def run_schema_context_eval(
 
         db_index = dict(db_index_loader(task.db))
         schema_context_cache = schema_context_cache_loader(task.db, db_index, config)
-        linked_docs = _task_linked_docs(task, document_loader)
         schema_context_objects, context_diagnostics = build_available_schema_context(
-            schema_context_cache,
-            task.question,
-            linked_docs=linked_docs,
-            config=config,
+            schema_context_cache
         )
         cutoff_objects = list(schema_context_objects[:object_cutoff])
         selected_objects = [

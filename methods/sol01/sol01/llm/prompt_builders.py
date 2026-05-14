@@ -7,6 +7,7 @@ import re
 from collections.abc import Sequence
 from typing import Any
 
+from sol01.infra.config import SchemaContextConfig
 from sol01.infra.strings import column_looks_string_like
 from sol01.models import (
     AttemptRecord,
@@ -31,8 +32,6 @@ _EXEC_TABLE_MISSING_SUBSTRINGS = (
     "002003",
     "000904",
 )
-_SCHEMA_CONTEXT_PLANNING_DOCS_CHAR_LIMIT = 6000
-_SCHEMA_CONTEXT_PLANNING_EVIDENCE_CHAR_LIMIT = 16000
 
 
 class PromptBudgetExceededError(ValueError):
@@ -149,14 +148,23 @@ def schema_context_planning_user_prompt(
     docs_context: str | None,
     schema_context_objects: Sequence[SchemaContextObject],
     *,
-    max_docs_chars: int = _SCHEMA_CONTEXT_PLANNING_DOCS_CHAR_LIMIT,
-    max_evidence_chars: int = _SCHEMA_CONTEXT_PLANNING_EVIDENCE_CHAR_LIMIT,
+    schema_context_config: SchemaContextConfig | None = None,
+    max_docs_chars: int | None = None,
+    max_evidence_chars: int | None = None,
     max_total_chars: int | None = None,
 ) -> str:
     """Build a planner prompt from deterministic schema metadata objects."""
 
-    docs_limit = max(0, max_docs_chars)
-    evidence_limit = max(0, max_evidence_chars)
+    config = schema_context_config or SchemaContextConfig()
+    docs_limit = max(
+        0,
+        config.max_linked_doc_chars if max_docs_chars is None else max_docs_chars,
+    )
+    evidence_limit = max(
+        0,
+        config.planning_evidence_chars if max_evidence_chars is None else max_evidence_chars,
+    )
+    total_limit = config.max_schema_prompt_chars if max_total_chars is None else max_total_chars
     prompt = _format_schema_context_planning_user_prompt(
         task,
         db,
@@ -165,12 +173,12 @@ def schema_context_planning_user_prompt(
         max_docs_chars=docs_limit,
         max_evidence_chars=evidence_limit,
     )
-    if max_total_chars is None or len(prompt) <= max_total_chars:
+    if len(prompt) <= total_limit:
         return prompt
 
     # Keep exact object ids available, then shrink lossy evidence before docs.
     for _ in range(12):
-        overflow = len(prompt) - max_total_chars
+        overflow = len(prompt) - total_limit
         if evidence_limit > 0:
             evidence_limit = max(0, evidence_limit - overflow - 256)
         elif docs_limit > 0:
@@ -185,10 +193,10 @@ def schema_context_planning_user_prompt(
             max_docs_chars=docs_limit,
             max_evidence_chars=evidence_limit,
         )
-        if len(prompt) <= max_total_chars:
+        if len(prompt) <= total_limit:
             return prompt
 
-    return enforce_prompt_budget("planning", prompt, max_total_chars)
+    return enforce_prompt_budget("planning", prompt, total_limit)
 
 
 def _format_schema_context_planning_user_prompt(
