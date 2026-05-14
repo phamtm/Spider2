@@ -169,7 +169,9 @@ def test_profile_dataframe_handles_duplicate_column_names():
         ),
     ],
 )
-def test_profile_dataframe_serializes_special_types(dataframe, expected_sample, expected_min, expected_max):
+def test_profile_dataframe_serializes_special_types(
+    dataframe, expected_sample, expected_min, expected_max
+):
     profile = profile_dataframe(dataframe, top_k=2)
 
     assert profile["sample_rows"] == expected_sample
@@ -192,7 +194,6 @@ def _write_credentials(path: Path, **extra: Any) -> Path:
 
 
 class FakeConnector:
-
     def __init__(self, dataframe: pd.DataFrame) -> None:
         self.dataframe = dataframe
         self.connect_kwargs: dict[str, Any] = {}
@@ -204,14 +205,12 @@ class FakeConnector:
 
 
 class FailingConnector(FakeConnector):
-
     def __init__(self, error: str) -> None:
         super().__init__(pd.DataFrame())
         self.error = error
 
 
 class FakeConnection:
-
     def __init__(self, connector: FakeConnector) -> None:
         self.connector = connector
         self.closed = False
@@ -224,7 +223,6 @@ class FakeConnection:
 
 
 class FakeCursor:
-
     def __init__(self, connector: FakeConnector) -> None:
         self.connector = connector
         self.closed = False

@@ -279,7 +279,7 @@ def test_make_progress_frame_returns_empty_for_empty_slice():
     assert progress.empty
 
 
-def test_should_show_all_questions_turns_on_for_tier_or_tag_filters():
+def test_prepare_question_table_sorts_unanswered_first_and_truncates_instruction():
     frame = pd.DataFrame(
         [
             {

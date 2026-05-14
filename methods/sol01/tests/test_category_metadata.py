@@ -30,7 +30,14 @@ def _setup_single_task_batch(
     dataset = tmp_path / "spider2-snow.jsonl"
     _write_jsonl(
         dataset,
-        [{"instance_id": instance_id, "instruction": "q", "db_id": "DB", "external_knowledge": None}],
+        [
+            {
+                "instance_id": instance_id,
+                "instruction": "q",
+                "db_id": "DB",
+                "external_knowledge": None,
+            }
+        ],
     )
     batch_dir = tmp_path / "batches"
     batch_dir.mkdir()

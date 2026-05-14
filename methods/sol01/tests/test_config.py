@@ -150,18 +150,22 @@ def test_fallbacks_remain_disabled_by_default_even_with_truthy_env(monkeypatch):
         ),
     ],
 )
-def test_dotenv_fallback(monkeypatch, tmp_path, shell_env, expected_key, expected_url, expected_model):
+def test_dotenv_fallback(
+    monkeypatch, tmp_path, shell_env, expected_key, expected_url, expected_model
+):
     _clear_llm_env(monkeypatch)
     for k, v in shell_env.items():
         monkeypatch.setenv(k, v)
 
     dotenv_path = tmp_path / ".env"
     dotenv_path.write_text(
-        "\n".join([
-            "OPENROUTER_API_KEY=dotenv-key",
-            "OPENROUTER_BASE_URL=https://dotenv.example/v1",
-            "OPENROUTER_MODEL=deepseek/dotenv",
-        ])
+        "\n".join(
+            [
+                "OPENROUTER_API_KEY=dotenv-key",
+                "OPENROUTER_BASE_URL=https://dotenv.example/v1",
+                "OPENROUTER_MODEL=deepseek/dotenv",
+            ]
+        )
         + "\n",
         encoding="utf-8",
     )
@@ -246,7 +250,10 @@ def test_schema_context_env_overrides(monkeypatch, env_overrides, expected):
             id="zero-cutoff",
         ),
         pytest.param(
-            {"SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF": "3", "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD": "1.1"},
+            {
+                "SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF": "3",
+                "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD": "1.1",
+            },
             "between 0 and 1",
             id="threshold-above-one",
         ),

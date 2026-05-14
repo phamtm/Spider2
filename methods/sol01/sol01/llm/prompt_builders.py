@@ -552,5 +552,3 @@ def schema_expansion_trigger(attempt: AttemptRecord) -> str | None:
             return f"critic_issue: {issue}"
 
     return None
-
-

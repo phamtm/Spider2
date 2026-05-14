@@ -28,9 +28,9 @@ from sol01.llm.prompt_builders import (
     schema_context_planning_user_prompt,
     semantic_repair_prompt,
     sql_generation_batch_prompt,
+    sql_reference_context,
     sql_repair_prompt,
 )
-from sol01.llm.prompt_builders import sql_reference_context
 from sol01.loading.docs import load_document_text
 from sol01.models import (
     AttemptRecord,
@@ -776,5 +776,3 @@ def trace_attempt(attempt: AttemptRecord) -> dict[str, Any]:
     """Drop non-serializable internal fields before writing the trace."""
 
     return attempt.model_dump(mode="json")
-
-

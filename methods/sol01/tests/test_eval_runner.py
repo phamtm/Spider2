@@ -369,6 +369,3 @@ def test_run_official_eval_stages_local_credentials_without_mutating_suite(
     ).exists()
     after = suite_credential.read_text(encoding="utf-8") if suite_credential.exists() else None
     assert after == before
-
-
-
