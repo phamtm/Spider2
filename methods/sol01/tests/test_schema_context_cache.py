@@ -118,25 +118,16 @@ def test_cache_key_changes_for_schema_versions_model_metadata_family_threshold_a
     base = {
         "db": "DB",
         "source_schema_hash": source_hash,
-        "object_builder_version": "objects-v1",
-        "chunk_render_version": "chunks-v1",
         "family_similarity_threshold": 0.82,
         "curated_summary_registry_hash": "summary-hash-v1",
-        "curated_summary_registry_version": "summaries-v1",
     }
 
     baseline = schema_context_cache_key(**base)
 
     assert schema_context_cache_key(**{**base, "source_schema_hash": "different"}) != baseline
-    assert schema_context_cache_key(**{**base, "object_builder_version": "objects-v2"}) != baseline
-    assert schema_context_cache_key(**{**base, "chunk_render_version": "chunks-v2"}) != baseline
     assert schema_context_cache_key(**{**base, "family_similarity_threshold": 0.9}) != baseline
     assert (
         schema_context_cache_key(**{**base, "curated_summary_registry_hash": "summary-hash-v2"})
-        != baseline
-    )
-    assert (
-        schema_context_cache_key(**{**base, "curated_summary_registry_version": "summaries-v2"})
         != baseline
     )
 
@@ -178,38 +169,37 @@ def test_missing_current_pointer_is_reported(tmp_path):
         load_current_schema_context_cache("DB", cache_root=tmp_path)
 
 
-def test_changed_builder_version_publishes_separate_version_directory(tmp_path):
-    first = _build(tmp_path, object_builder_version="objects-v1")
-    second = _build(tmp_path, object_builder_version="objects-v2")
+def test_changed_schema_source_publishes_separate_version_directory(tmp_path):
+    first = _build(tmp_path)
+    second = build_schema_context_cache(
+        "DB",
+        db_index=_db_index(extra_column=True),
+        cache_root=tmp_path,
+        lock_timeout_seconds=0.1,
+        lock_poll_seconds=0.01,
+    )
 
     assert first.cache_key != second.cache_key
     assert _version_dir(tmp_path, "DB", first.cache_key).exists()
     assert _version_dir(tmp_path, "DB", second.cache_key).exists()
 
 
-def test_changed_summary_registry_version_publishes_separate_version_directory(tmp_path):
+def test_changed_summary_registry_content_publishes_separate_version_directory(tmp_path):
     registry_path = tmp_path / "large_schema_summaries.json"
     registry_path.write_text('{"summaries": []}\n', encoding="utf-8")
     cache_root = tmp_path / "cache"
 
-    first = _build(
-        cache_root,
-        curated_summary_registry_path=registry_path,
-        curated_summary_registry_version="summaries-v1",
-    )
-    second = _build(
-        cache_root,
-        curated_summary_registry_path=registry_path,
-        curated_summary_registry_version="summaries-v2",
-    )
+    first = _build(cache_root, curated_summary_registry_path=registry_path)
+    _write_custom_summary_registry(registry_path)
+    second = _build(cache_root, curated_summary_registry_path=registry_path)
 
     assert first.cache_key != second.cache_key
     assert (
         first.manifest["curated_summary_registry_hash"]
-        == second.manifest["curated_summary_registry_hash"]
+        != second.manifest["curated_summary_registry_hash"]
     )
-    assert first.manifest["curated_summary_registry_version"] == "summaries-v1"
-    assert second.manifest["curated_summary_registry_version"] == "summaries-v2"
+    assert first.manifest["curated_summary_registry_version"] == "large-schema-summaries-v1"
+    assert second.manifest["curated_summary_registry_version"] == "large-schema-summaries-v1"
     assert _version_dir(cache_root, "DB", first.cache_key).exists()
     assert _version_dir(cache_root, "DB", second.cache_key).exists()
 

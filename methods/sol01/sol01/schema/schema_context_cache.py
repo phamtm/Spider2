@@ -91,10 +91,7 @@ def build_schema_context_cache(
     db_index: Mapping[str, TableSchema] | None = None,
     config: SchemaContextConfig | None = None,
     cache_root: Path = DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT,
-    object_builder_version: str = OBJECT_BUILDER_VERSION,
-    chunk_render_version: str = CHUNK_RENDER_VERSION,
     curated_summary_registry_path: Path = DEFAULT_LARGE_SCHEMA_SUMMARY_PATH,
-    curated_summary_registry_version: str = LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
     lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
     lock_poll_seconds: float = DEFAULT_LOCK_POLL_SECONDS,
 ) -> SchemaContextCache:
@@ -110,11 +107,8 @@ def build_schema_context_cache(
     cache_key = schema_context_cache_key(
         db=db,
         source_schema_hash=source_hash,
-        object_builder_version=object_builder_version,
-        chunk_render_version=chunk_render_version,
         family_similarity_threshold=config.family_similarity_threshold,
         curated_summary_registry_hash=curated_summary_registry_hash,
-        curated_summary_registry_version=curated_summary_registry_version,
     )
     version_dir = _version_dir(cache_root, db, cache_key)
     current_path = _current_pointer_path(cache_root, db)
@@ -250,11 +244,8 @@ def build_schema_context_cache(
                 db=db,
                 cache_key=cache_key,
                 source_hash=source_hash,
-                object_builder_version=object_builder_version,
-                chunk_render_version=chunk_render_version,
                 family_similarity_threshold=config.family_similarity_threshold,
                 curated_summary_registry_hash=curated_summary_registry_hash,
-                curated_summary_registry_version=curated_summary_registry_version,
                 objects=objects,
                 chunks=chunks,
             )
@@ -383,23 +374,20 @@ def schema_context_cache_key(
     *,
     db: str,
     source_schema_hash: str,
-    object_builder_version: str,
-    chunk_render_version: str,
     family_similarity_threshold: float,
     curated_summary_registry_hash: str,
-    curated_summary_registry_version: str,
 ) -> str:
     """Return a deterministic cache key for all inputs that affect schema context artifacts."""
 
     return stable_hash(
         {
             "cache_schema": MANIFEST_VERSION,
-            "chunk_render_version": chunk_render_version,
+            "chunk_render_version": CHUNK_RENDER_VERSION,
             "curated_summary_registry_hash": curated_summary_registry_hash,
-            "curated_summary_registry_version": curated_summary_registry_version,
+            "curated_summary_registry_version": LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
             "db": db,
             "family_similarity_threshold": family_similarity_threshold,
-            "object_builder_version": object_builder_version,
+            "object_builder_version": OBJECT_BUILDER_VERSION,
             "source_schema_hash": source_schema_hash,
         }
     )
@@ -411,11 +399,8 @@ def _write_cache_artifacts(
     db: str,
     cache_key: str,
     source_hash: str,
-    object_builder_version: str,
-    chunk_render_version: str,
     family_similarity_threshold: float,
     curated_summary_registry_hash: str,
-    curated_summary_registry_version: str,
     objects: Sequence[SchemaObject],
     chunks: Sequence[SchemaContextChunk],
 ) -> None:
@@ -425,10 +410,10 @@ def _write_cache_artifacts(
         "db": db,
         "cache_key": cache_key,
         "source_schema_hash": source_hash,
-        "object_builder_version": object_builder_version,
-        "chunk_render_version": chunk_render_version,
+        "object_builder_version": OBJECT_BUILDER_VERSION,
+        "chunk_render_version": CHUNK_RENDER_VERSION,
         "curated_summary_registry_hash": curated_summary_registry_hash,
-        "curated_summary_registry_version": curated_summary_registry_version,
+        "curated_summary_registry_version": LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
         "family_similarity_threshold": family_similarity_threshold,
         "object_count": len(objects),
         "chunk_count": len(chunks),
