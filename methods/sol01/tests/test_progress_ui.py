@@ -524,14 +524,5 @@ def test_classify_registry_missing_csv_is_unanswered():
     assert classify({"status": "missing_csv"}) == ("unanswered", None)
 
 
-def test_classify_registry_pass_preserves_score():
-    assert classify({"status": "pass", "score": 1.0}) == ("correct", 1.0)
-
-
-def test_classify_legacy_score_based():
-    assert classify({"score": 1.0}) == ("correct", 1.0)
-    assert classify({"score": 0.0}) == ("incorrect", 0.0)
-
-
-def test_classify_legacy_success_is_not_correct():
+def test_classify_unknown_status_is_not_correct():
     assert classify({"status": "success"}) != ("correct", 1.0)

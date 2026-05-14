@@ -109,7 +109,6 @@ def check_skip(
     *,
     force: bool,
     skip_failed: bool,
-    expected_schema_context_version: str,
 ) -> FinalAnswer | None:
     """Return an existing FinalAnswer if the task should be skipped, else None."""
 
@@ -118,15 +117,6 @@ def check_skip(
     ):
         return None
     existing_trace = json.loads(task_trace_path.read_text(encoding="utf-8"))
-    if existing_trace.get("schema_context_version") != expected_schema_context_version:
-        logger.info(
-            "task rerun: schema context version changed",
-            instance_id=task.instance_id,
-            db=task.db,
-            expected_schema_context_version=expected_schema_context_version,
-            existing_schema_context_version=existing_trace.get("schema_context_version"),
-        )
-        return None
     logger.info(
         "task skipped",
         instance_id=task.instance_id,

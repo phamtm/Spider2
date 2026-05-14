@@ -119,17 +119,6 @@ def classify(item: dict[str, Any]) -> tuple[str, float | None]:
         score = as_float(item.get("score"))
         return display_status, score if score is not None else default_score
 
-    # Legacy eval-summary rows (no registry status field)
-    score = as_float(item.get("score"))
-    if score is not None:
-        return ("correct" if score >= 1 else "incorrect"), score
-    passed = item.get("passed")
-    if passed is True:
-        return "correct", 1.0
-    if passed is False:
-        return "incorrect", 0.0
-    if item.get("eval_error") or item.get("failure_reason"):
-        return "incorrect", 0.0
     if item.get("csv_path") or item.get("sql_path") or item.get("csv_present"):
         return "answered", None
     return "unanswered", None

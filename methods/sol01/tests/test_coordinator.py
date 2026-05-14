@@ -28,7 +28,7 @@ from sol01.models import (
     TableSchema,
     Task,
 )
-from sol01.output.output import csv_path_for, ensure_run_paths
+from sol01.output.output import ensure_run_paths
 
 SALES_TABLE = "TEST_DB.PUBLIC.SALES"
 ORDERS_TABLE = "TEST_DB.PUBLIC.ORDERS"
@@ -287,64 +287,6 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
     assert set(prompts) == {"planning", "sql_generation_batch", "candidate_review"}
     assert "Schema summary:" not in prompts["planning"][0]
     assert "Available schema metadata evidence:" in prompts["planning"][0]
-
-
-def test_run_task_reruns_old_trace_without_schema_context_version(
-    tmp_path: Path,
-    fake_snowflake: None,
-    db_index: dict[str, TableSchema],
-):
-    task = Task(instance_id="sf_stale", db="TEST_DB", question="Show customer totals.")
-    run_paths = ensure_run_paths("stale-run", outputs_root=tmp_path)
-    csv_path = csv_path_for(run_paths, instance_id=task.instance_id)
-    csv_path.parent.mkdir(parents=True, exist_ok=True)
-    csv_path.write_text("old\n", encoding="utf-8")
-    (run_paths.traces_dir / "sf_stale.json").write_text(
-        json.dumps(
-            {
-                "instance_id": task.instance_id,
-                "status": "success",
-                "final_sql": "SELECT 1",
-                "csv_path": str(csv_path),
-            }
-        ),
-        encoding="utf-8",
-    )
-    llm = FakeLLMClient(
-        outputs={
-            "planning": [_planning()],
-            "sql_generation_batch": [
-                SQLCandidateBatch(
-                    candidates=[_candidate(f"SELECT CUSTOMER, AMOUNT FROM {SALES_TABLE}")]
-                )
-            ],
-            "candidate_review": [
-                CandidateReviewReport(
-                    baseline_stage="initial_1",
-                    preferred_stage="initial_1",
-                    compared_stages=["initial_1"],
-                    reasons=["The rerun candidate matches the request."],
-                    confidence=0.9,
-                    issues=[],
-                    should_repair=False,
-                )
-            ],
-        }
-    )
-
-    answer = run_task(
-        task,
-        run_paths=run_paths,
-        config=RuntimeConfig(api_key="test-key"),
-        schema_context_config=SchemaContextConfig(),
-        llm_client=llm,
-        initial_candidates=1,
-    )
-
-    assert answer.status == "success"
-    assert answer.sql != "SELECT 1"
-    trace = json.loads((run_paths.traces_dir / "sf_stale.json").read_text(encoding="utf-8"))
-    assert trace["schema_context_version"] == "schema_context_v1"
 
 
 def test_close_executable_candidates_use_one_candidate_review(

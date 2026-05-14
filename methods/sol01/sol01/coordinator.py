@@ -9,11 +9,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel
 
-from sol01.infra.config import (
-    DEFAULT_SCHEMA_CONTEXT_VERSION,
-    RuntimeConfig,
-    SchemaContextConfig,
-)
+from sol01.infra.config import RuntimeConfig, SchemaContextConfig
 from sol01.infra.logging import get_logger
 from sol01.llm.client import LLMClient, PromptSpec
 from sol01.llm.llm_logging import LLMCallLogger
@@ -303,7 +299,6 @@ def run_task(
         task_trace_path,
         force=force,
         skip_failed=skip_failed,
-        expected_schema_context_version=DEFAULT_SCHEMA_CONTEXT_VERSION,
     )
     if skipped is not None:
         return skipped

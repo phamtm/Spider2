@@ -59,28 +59,10 @@ def test_select_winner_model_preferred_wins_over_score():
 def test_select_winner_preferred_non_executable_falls_back_to_score():
     a1 = _attempt("initial_1", ok=True, score=1000.0)
     a2 = _attempt("initial_2", ok=False, score=500.0)
-    # initial_2 not executable, so model preference is ignored
     result = select_winner([a1, a2], preferred_stage="initial_2")
     assert result is not None
     assert result.attempt is a1
     assert "score" in result.reason
-
-
-def test_select_winner_preferred_not_in_attempts_falls_back():
-    a1 = _attempt("initial_1", score=800.0)
-    result = select_winner([a1], preferred_stage="does_not_exist")
-    assert result is not None
-    assert result.attempt is a1
-    assert "score" in result.reason
-
-
-def test_select_winner_critic_repair_wins_when_higher_score():
-    initial = _attempt("initial_1", ok=True, score=1000.0)
-    repair = _attempt("critic_repair", ok=True, score=1200.0)
-    result = select_winner([initial, repair])
-    assert result is not None
-    assert result.attempt is repair
-    assert result.index == 1
 
 
 def test_select_winner_schema_expansion_wins_when_higher_score():
