@@ -12,6 +12,11 @@ from sol01.schema.large_schema_summaries import (
     LargeSchemaSummary,
     load_large_schema_summary_registry,
 )
+from sol01.schema.summary_rendering import (
+    render_summary_payload,
+    render_summary_search_terms,
+    render_summary_text,
+)
 from sol01.schema.utils import _metadata_text, _string_list
 
 MAX_COLUMNS_IN_CHUNK = 30
@@ -292,7 +297,7 @@ def _summary_table_chunk(
     summaries: list[LargeSchemaSummary],
 ) -> SchemaContextChunk:
     table_ref = obj.table_name or _metadata_text(obj, "full_name") or obj.name
-    summary_text = _summary_text(summaries)
+    summary_text = render_summary_text(summaries)
     metadata = {**_base_metadata(obj), **_summary_chunk_metadata(summaries)}
     return SchemaContextChunk(
         chunk_id=f"{obj.object_id}::table",
@@ -302,7 +307,7 @@ def _summary_table_chunk(
             [
                 *_identifier_terms(obj),
                 table_ref,
-                *_summary_search_terms(summaries),
+                *render_summary_search_terms(summaries),
             ]
         ),
         prompt_text=_join_sentences(
@@ -329,7 +334,7 @@ def _summary_table_family_chunk(
     members = _string_list(obj.metadata.get("member_table_refs"))
     common_columns = _string_list(obj.metadata.get("common_columns"))
     canonical = _metadata_text(obj, "canonical_member")
-    summary_text = _summary_text(summaries)
+    summary_text = render_summary_text(summaries)
     metadata = {**_base_metadata(obj), **_summary_chunk_metadata(summaries)}
     return SchemaContextChunk(
         chunk_id=f"{obj.object_id}::table_family",
@@ -339,7 +344,7 @@ def _summary_table_family_chunk(
         evidence_text=_join_text(
             [
                 *_identifier_terms(obj, extra=[canonical, *common_columns]),
-                *_summary_search_terms(summaries),
+                *render_summary_search_terms(summaries),
             ]
         ),
         prompt_text=_join_sentences(
@@ -419,64 +424,12 @@ def _table_ref_candidates(obj: SchemaObject) -> list[str]:
 
 def _summary_chunk_metadata(summaries: list[LargeSchemaSummary]) -> dict[str, object]:
     return {
-        "large_schema_summaries": [_summary_payload(summary) for summary in summaries],
+        "large_schema_summaries": [render_summary_payload(summary) for summary in summaries],
         "summary_ids": [summary.summary_id for summary in summaries],
         "summary_aliases": _stable_unique(
             alias for summary in summaries for alias in summary.aliases
         ),
     }
-
-
-def _summary_payload(summary: LargeSchemaSummary) -> dict[str, object]:
-    return {
-        "summary_id": summary.summary_id,
-        "purpose": summary.purpose,
-        "grain": summary.grain,
-        "stable_columns": summary.stable_columns,
-        "repeated_column_rules": summary.repeated_column_rules,
-        "inclusive_ranges": summary.inclusive_ranges,
-        "quote_spelling_rules": summary.quote_spelling_rules,
-        "examples": summary.examples,
-        "aliases": summary.aliases,
-    }
-
-
-def _summary_text(summaries: list[LargeSchemaSummary]) -> str:
-    lines: list[str] = []
-    for summary in summaries:
-        lines.extend(
-            [
-                f"Large-schema summary: {summary.summary_id}.",
-                f"Purpose: {summary.purpose}",
-                f"Grain: {summary.grain}",
-                _field_list("Stable exact columns", summary.stable_columns),
-                _field_list("Repeated or partition column rules", summary.repeated_column_rules),
-                _field_list("Inclusive ranges", summary.inclusive_ranges),
-                _field_list("Quote and spelling rules", summary.quote_spelling_rules),
-                _field_list("Exact safe examples", summary.examples),
-                _field_list("Aliases", summary.aliases),
-            ]
-        )
-    return _join_sentences(lines)
-
-
-def _summary_search_terms(summaries: list[LargeSchemaSummary]) -> list[str]:
-    terms: list[str] = []
-    for summary in summaries:
-        terms.extend(
-            [
-                summary.summary_id,
-                summary.purpose,
-                summary.grain,
-                *summary.stable_columns,
-                *summary.repeated_column_rules,
-                *summary.inclusive_ranges,
-                *summary.quote_spelling_rules,
-                *summary.examples,
-                *summary.aliases,
-            ]
-        )
-    return terms
 
 
 def _column_summaries(raw_columns: object) -> list[dict[str, str]]:
