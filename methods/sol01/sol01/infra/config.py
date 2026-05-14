@@ -79,6 +79,14 @@ class RuntimeConfig(BaseModel):
         return self
 
 
+DEFAULT_TOP_K_SPARSE = 80
+DEFAULT_TOP_K_DENSE = 80
+DEFAULT_TOP_K_OBJECTS = 30
+DEFAULT_OLLAMA_BASE_URL = "http://localhost:11434"
+DEFAULT_EMBEDDING_MODEL = "qwen3-embedding:4b"
+DEFAULT_RERANKER_MODEL = "qwen3-reranker:4b"
+
+
 class SchemaContextConfig(BaseModel):
     """Schema-context settings used before LLM planning."""
 
@@ -89,6 +97,12 @@ class SchemaContextConfig(BaseModel):
     )
     max_linked_doc_chars: int = Field(default=DEFAULT_MAX_LINKED_DOC_CHARS, ge=1)
     max_schema_prompt_chars: int = Field(default=DEFAULT_MAX_SCHEMA_PROMPT_CHARS, ge=1)
+    top_k_sparse: int = Field(default=DEFAULT_TOP_K_SPARSE, ge=1)
+    top_k_dense: int = Field(default=DEFAULT_TOP_K_DENSE, ge=1)
+    top_k_objects: int = Field(default=DEFAULT_TOP_K_OBJECTS, ge=1)
+    ollama_base_url: str = DEFAULT_OLLAMA_BASE_URL
+    embedding_model: str = DEFAULT_EMBEDDING_MODEL
+    reranker_model: str = DEFAULT_RERANKER_MODEL
 
     @classmethod
     def from_env(cls, *, dotenv_path: Path | None = None) -> "SchemaContextConfig":
@@ -109,6 +123,21 @@ class SchemaContextConfig(BaseModel):
                 "SOL01_SCHEMA_MAX_PROMPT_CHARS",
                 default=DEFAULT_MAX_SCHEMA_PROMPT_CHARS,
             ),
+            top_k_sparse=_env_positive_int(
+                "SOL01_SCHEMA_TOP_K_SPARSE",
+                default=DEFAULT_TOP_K_SPARSE,
+            ),
+            top_k_dense=_env_positive_int(
+                "SOL01_SCHEMA_TOP_K_DENSE",
+                default=DEFAULT_TOP_K_DENSE,
+            ),
+            top_k_objects=_env_positive_int(
+                "SOL01_SCHEMA_TOP_K_OBJECTS",
+                default=DEFAULT_TOP_K_OBJECTS,
+            ),
+            ollama_base_url=_env_first("SOL01_OLLAMA_BASE_URL") or DEFAULT_OLLAMA_BASE_URL,
+            embedding_model=_env_first("SOL01_EMBEDDING_MODEL") or DEFAULT_EMBEDDING_MODEL,
+            reranker_model=_env_first("SOL01_RERANKER_MODEL") or DEFAULT_RERANKER_MODEL,
         )
 
 

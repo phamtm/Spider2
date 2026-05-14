@@ -45,7 +45,7 @@ def test_query_construction_extracts_signals_and_clips_linked_docs_by_overlap():
     assert clipped == "target revenue status paragraph."
 
 
-def test_full_database_metadata_context_returns_all_schema_objects_without_ranking():
+def test_hybrid_retrieval_returns_all_objects_for_small_database():
     index = _fake_index()
 
     objects, diagnostics = build_available_schema_context(
@@ -53,8 +53,8 @@ def test_full_database_metadata_context_returns_all_schema_objects_without_ranki
         "Find ORDERS where status is 'closed'",
     )
 
-    selected_ids = [obj.schema_object.object_id for obj in objects]
-    assert selected_ids == [
+    selected_ids = {obj.schema_object.object_id for obj in objects}
+    assert selected_ids == {
         "family:DB.PUBLIC:orders_family:deadbeef",
         "table:DB.PUBLIC.CUSTOMERS",
         "table:DB.PUBLIC.ORDERS",
@@ -62,13 +62,17 @@ def test_full_database_metadata_context_returns_all_schema_objects_without_ranki
         "column:DB.PUBLIC.ORDERS#STATUS",
         "join_candidate:DB.PUBLIC.ORDERS#CUSTOMER_ID->DB.PUBLIC.CUSTOMERS#CUSTOMER_ID:abcdef12",
         "sample_value:DB.PUBLIC.ORDERS#STATUS:11111111",
-    ]
-    assert diagnostics["context_mode"] == "full_database_metadata"
+    }
+    assert diagnostics["context_mode"] == "hybrid_retrieval"
     assert diagnostics["context_counts"] == {
         "objects_total": 7,
         "chunks_total": 7,
         "available_objects": 7,
     }
+
+    # ORDERS-related objects should rank above CUSTOMERS-only
+    id_to_pos = {obj.schema_object.object_id: obj.position for obj in objects}
+    assert id_to_pos["table:DB.PUBLIC.ORDERS"] < id_to_pos["table:DB.PUBLIC.CUSTOMERS"]
 
 
 def test_summary_backed_context_uses_only_curated_large_schema_objects():

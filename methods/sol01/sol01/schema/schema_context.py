@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
@@ -12,6 +13,7 @@ from sol01.models import (
     SchemaContextObject,
     SchemaObject,
 )
+from sol01.schema.embedding import BM25Index
 from sol01.schema.schema_context_cache import SchemaContextCache
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
@@ -150,10 +152,12 @@ def build_available_schema_context(
     exact_literals: Sequence[str] = (),
     config: SchemaContextConfig | None = None,
 ) -> tuple[list[SchemaContextObject], dict[str, object]]:
-    """Return schema objects available to the planner.
+    """Return schema objects ranked by BM25 relevance to the planning question.
 
     Curated large-schema summaries replace raw metadata for the tables they
-    cover. Uncovered tables still flow through as normal database metadata.
+    cover, and their containing objects are pre-filtered before BM25 ranking.
+    For databases with more objects than top_k_objects, only the top-ranked
+    objects are returned.
     """
 
     config = config or SchemaContextConfig()
@@ -163,7 +167,13 @@ def build_available_schema_context(
         exact_literals=exact_literals,
         max_doc_chars=config.max_linked_doc_chars,
     )
-    context_mode, context_objects = _available_schema_objects(cache.objects, cache.chunks)
+    context_mode, context_objects = _available_schema_objects(
+        cache.objects,
+        cache.chunks,
+        inputs.text,
+        top_k=config.top_k_objects,
+        top_k_sparse=config.top_k_sparse,
+    )
     schema_context_objects = _schema_context_objects(
         context_objects,
         chunks=cache.chunks,
@@ -182,7 +192,13 @@ def build_available_schema_context(
 def _available_schema_objects(
     objects: Sequence[SchemaObject],
     chunks: Sequence[SchemaContextChunk],
+    query_text: str,
+    *,
+    top_k: int,
+    top_k_sparse: int,
 ) -> tuple[str, list[SchemaObject]]:
+    """Return BM25-ranked schema objects, respecting large-schema-summary pre-filtering."""
+
     summary_object_ids = {
         chunk.object_id
         for chunk in chunks
@@ -190,16 +206,139 @@ def _available_schema_objects(
     }
     if summary_object_ids:
         covered_table_ids = _covered_table_ids(chunks, summary_object_ids)
-        return (
-            "large_schema_summary",
-            _sort_schema_objects(
-                obj
-                for obj in objects
-                if obj.object_id in summary_object_ids
-                or not _is_covered_by_summary(obj, covered_table_ids)
-            ),
+        pre_filtered = list(
+            obj
+            for obj in objects
+            if obj.object_id in summary_object_ids
+            or not _is_covered_by_summary(obj, covered_table_ids)
         )
-    return "full_database_metadata", _sort_schema_objects(objects)
+        if len(pre_filtered) <= top_k:
+            return "large_schema_summary", _sort_schema_objects(pre_filtered)
+        filtered_ids = {obj.object_id for obj in pre_filtered}
+        filtered_chunks = [c for c in chunks if c.object_id in filtered_ids]
+        return "large_schema_summary", _bm25_rank(
+            pre_filtered, filtered_chunks, query_text, top_k=top_k, top_k_sparse=top_k_sparse
+        )
+
+    if len(objects) <= top_k:
+        return "hybrid_retrieval", _bm25_rank(
+            objects, chunks, query_text, top_k=len(objects), top_k_sparse=len(chunks)
+        )
+
+    return "hybrid_retrieval", _bm25_rank(
+        objects, chunks, query_text, top_k=top_k, top_k_sparse=top_k_sparse
+    )
+
+
+_CHUNK_TYPE_TO_OBJECT_TYPE: dict[str, str] = {
+    "table": "table",
+    "table_family": "family",
+    "column_group": "column_group",
+    "column": "column",
+    "join_candidate": "join_candidate",
+    "sample_value": "sample_value",
+}
+_PER_TYPE_QUOTAS: dict[str, int] = {
+    "family": 20,
+    "table": 30,
+    "column_group": 20,
+    "column": 40,
+    "join_candidate": 20,
+    "sample_value": 20,
+}
+_DIRECT_WEIGHTS: dict[str, float] = {
+    "family": 2.0,
+    "table": 1.5,
+    "column_group": 1.0,
+    "column": 1.0,
+    "join_candidate": 0.8,
+    "sample_value": 0.5,
+}
+_PARENT_PROPAGATION: dict[str, float] = {
+    "column": 0.4,
+    "column_group": 0.4,
+    "join_candidate": 0.3,
+    "sample_value": 0.3,
+}
+
+
+def _bm25_rank(
+    objects: Sequence[SchemaObject],
+    chunks: Sequence[SchemaContextChunk],
+    query_text: str,
+    *,
+    top_k: int,
+    top_k_sparse: int,
+) -> list[SchemaObject]:
+    """Return up to top_k schema objects ranked by BM25 relevance."""
+
+    if not chunks or not objects:
+        return list(objects)[:top_k]
+
+    evidence_texts = [c.evidence_text or c.text for c in chunks]
+    bm25 = BM25Index(evidence_texts)
+
+    sparse_ranked = bm25.scores(query_text, top_k=top_k_sparse)
+    exact_boosts = bm25.exact_match_boosts(_extract_exact_tokens(query_text))
+
+    chunk_scores: dict[int, float] = {}
+    for doc_id, score in sparse_ranked:
+        chunk_scores[doc_id] = score + exact_boosts.get(doc_id, 0.0)
+    for doc_id, boost in exact_boosts.items():
+        chunk_scores.setdefault(doc_id, boost)
+
+    type_counts: dict[str, int] = defaultdict(int)
+    selected_ids: set[int] = set()
+    for doc_id, _ in sorted(chunk_scores.items(), key=lambda x: -x[1]):
+        ct = _CHUNK_TYPE_TO_OBJECT_TYPE.get(chunks[doc_id].chunk_type, "table")
+        if type_counts[ct] < _PER_TYPE_QUOTAS.get(ct, 40):
+            selected_ids.add(doc_id)
+            type_counts[ct] += 1
+
+    object_by_id = {obj.object_id: obj for obj in objects}
+    object_scores: dict[str, float] = defaultdict(float)
+    for doc_id in selected_ids:
+        chunk = chunks[doc_id]
+        score = chunk_scores[doc_id]
+        ot = object_by_id.get(chunk.object_id)
+        if ot is not None:
+            weight = _DIRECT_WEIGHTS.get(ot.object_type, 1.0)
+            object_scores[chunk.object_id] += score * weight
+        prop_weight = _PARENT_PROPAGATION.get(chunk.chunk_type, 0.2)
+        for parent_id in chunk.parent_object_ids:
+            if parent_id in object_by_id:
+                object_scores[parent_id] += score * prop_weight
+
+    ranked_ids = sorted(object_scores.items(), key=lambda x: -x[1])
+    top_ids = {obj_id for obj_id, _ in ranked_ids[:top_k]}
+    top_ids.update(obj_id for obj_id, _ in ranked_ids if obj_id in top_ids)
+
+    result = [
+        obj for obj_id, _ in ranked_ids[:top_k] if (obj := object_by_id.get(obj_id)) is not None
+    ]
+    seen = {obj.object_id for obj in result}
+    if len(result) < top_k:
+        for obj in objects:
+            if len(result) >= top_k:
+                break
+            if obj.object_id not in seen:
+                result.append(obj)
+                seen.add(obj.object_id)
+    return result
+
+
+def _extract_exact_tokens(text: str) -> list[str]:
+    """Extract quoted literals, dotted names, uppercase codes, years, and dates."""
+    tokens: list[str] = []
+    for match in re.finditer(r"'([^']+)'|\"([^\"]+)\"", text):
+        literal = match.group(1) or match.group(2)
+        if literal:
+            tokens.append(literal.strip())
+    tokens.extend(re.findall(r"\b[A-Za-z][A-Za-z0-9]*(?:[._][A-Za-z0-9]+)+\b", text))
+    tokens.extend(re.findall(r"\b[A-Z][A-Z0-9_]{1,}\b", text))
+    tokens.extend(re.findall(r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b", text))
+    tokens.extend(re.findall(r"\b(?:19|20)\d{2}\b", text))
+    return list(dict.fromkeys(filter(None, tokens)))
 
 
 def _covered_table_ids(
