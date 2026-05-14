@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import sqlglot
@@ -21,6 +22,12 @@ from sol01.models import (
     Task,
     ValidationReport,
 )
+
+_LOOKUP_TABLE_HINTS = frozenset(
+    {"code", "country", "dim", "label", "lookup", "map", "ref", "summary"}
+)
+_LABEL_COLUMN_HINTS = frozenset({"desc", "description", "display", "label", "name", "title"})
+_KEY_COLUMN_HINTS = frozenset({"code", "id", "key"})
 
 
 def infer_filter_grounding_report(
@@ -332,24 +339,37 @@ def _table_looks_like_lookup(table_schema: TableSchema) -> bool:
 def _table_looks_like_lookup_name(table_name: str) -> bool:
     """Return True when a table name suggests a lookup or code table."""
 
-    return any(token in table_name for token in DEFAULT_FILTER_GROUNDING_POLICY.lookup_table_tokens)
+    return _name_has_hint(table_name, _LOOKUP_TABLE_HINTS)
 
 
 def _column_looks_label_like(column_name: str) -> bool:
     """Return True when a column name looks like a human-readable label."""
 
-    lowered = column_name.lower()
-    return any(token in lowered for token in DEFAULT_FILTER_GROUNDING_POLICY.label_column_tokens)
+    return _name_has_hint(column_name, _LABEL_COLUMN_HINTS)
 
 
 def _column_looks_key_like(column_name: str) -> bool:
     """Return True when a column name looks like a stored key."""
 
     lowered = column_name.lower()
-    return any(token in lowered for token in DEFAULT_FILTER_GROUNDING_POLICY.key_column_tokens)
+    return (
+        lowered == "id" or lowered.endswith("_id") or _name_has_hint(column_name, _KEY_COLUMN_HINTS)
+    )
 
 
 def _literal_looks_label_like(literal: str) -> bool:
     """Return True when a filter literal looks like a display label."""
 
     return (any(part.isalpha() for part in literal) and " " in literal) or literal[:1].isupper()
+
+
+def _name_has_hint(name: str, hints: frozenset[str]) -> bool:
+    """Return True when a table or column name contains one of the known role hints."""
+
+    return any(part in hints for part in _name_parts(name))
+
+
+def _name_parts(name: str) -> tuple[str, ...]:
+    """Split one identifier into comparable lowercase name parts."""
+
+    return tuple(part for part in re.split(r"[^a-z0-9]+", name.lower()) if part)

@@ -74,25 +74,11 @@ class SchemaRenderPolicy:
 
 @dataclass(frozen=True)
 class FilterGroundingPolicy:
-    """Caps and naming hints for empty-result filter grounding."""
+    """Caps for empty-result filter grounding probes."""
 
     max_probe_targets: int = 4
     fallback_string_columns: int = 2
     probe_match_limit: int = 5
-    lookup_table_tokens: tuple[str, ...] = (
-        "summary",
-        "lookup",
-        "ref_",
-        "_ref",
-        "dim_",
-        "_dim",
-        "map",
-        "code",
-        "label",
-        "country",
-    )
-    label_column_tokens: tuple[str, ...] = ("name", "label", "display", "title", "desc")
-    key_column_tokens: tuple[str, ...] = ("key", "code", "id")
 
 
 @dataclass(frozen=True)
@@ -100,15 +86,6 @@ class RecoverySignalPolicy:
     """Signals that trigger schema-aware recovery decisions."""
 
     priority_order: tuple[str, ...] = ("schema", "sql", "semantic")
-    execution_missing_table_substrings: tuple[str, ...] = (
-        "does not exist",
-        "invalid identifier",
-        "object does not exist",
-        "table not found",
-        "unknown table",
-        "002003",
-        "000904",
-    )
     execution_error_preview_chars: int = 300
 
 
