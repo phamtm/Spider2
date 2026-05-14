@@ -9,15 +9,15 @@ from typing import Any
 from typer.testing import CliRunner
 
 from sol01 import cli
-from sol01.cli import schema_context as cli_schema_context
-from sol01.infra.config import SchemaContextConfig
-from sol01.models import ColumnSchema, SchemaContextChunk, SchemaObject, TableSchema, Task
-from sol01.schema.schema_context_cache import SchemaContextCache
-from sol01.schema.schema_context_eval import (
+from sol01.analysis.schema_context_eval import (
     load_gold_tables,
     run_schema_context_eval,
     write_schema_context_eval_report,
 )
+from sol01.cli import schema_context as cli_schema_context
+from sol01.infra.config import SchemaContextConfig
+from sol01.models import ColumnSchema, SchemaContextChunk, SchemaObject, TableSchema, Task
+from sol01.schema.schema_context_cache import SchemaContextCache
 
 
 def test_load_gold_tables_reads_offline_jsonl(tmp_path: Path):
@@ -101,7 +101,7 @@ def test_schema_context_eval_filters_covered_schemas_and_compares_baseline(monke
             return [Summary()] if table_ref.startswith("DB.PUBLIC.") else []
 
     monkeypatch.setattr(
-        "sol01.schema.schema_context_eval.load_large_schema_summary_registry",
+        "sol01.analysis.schema_context_eval.load_large_schema_summary_registry",
         lambda: FakeRegistry(),
     )
 

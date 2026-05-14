@@ -9,6 +9,13 @@ from typing import Annotated, Any
 
 import typer
 
+from sol01.analysis.schema_context_eval import (
+    DEFAULT_GOLD_TABLE_PATH,
+    load_gold_tables,
+    load_schema_context_eval_task_rows,
+    run_schema_context_eval,
+    write_schema_context_eval_report,
+)
 from sol01.cli.common import format_rate
 from sol01.cli.run import load_run_tasks
 from sol01.infra.config import DEFAULT_DOTENV_PATH, SchemaContextConfig
@@ -16,13 +23,6 @@ from sol01.output.output import OUTPUTS_ROOT, ensure_run_paths
 from sol01.schema.schema_context_cache import (
     DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT,
     prewarm_schema_context_caches,
-)
-from sol01.schema.schema_context_eval import (
-    DEFAULT_GOLD_TABLE_PATH,
-    load_gold_tables,
-    load_schema_context_eval_task_rows,
-    run_schema_context_eval,
-    write_schema_context_eval_report,
 )
 
 
