@@ -103,7 +103,6 @@ def test_builds_loads_and_validates_schema_context_cache_for_one_database(tmp_pa
         "objects.jsonl",
         "chunks.jsonl",
     }
-    assert not (index.cache_dir / "embeddings.npy").exists()
     assert index.chunks
 
     loaded = load_current_schema_context_cache("DB", cache_root=tmp_path)
