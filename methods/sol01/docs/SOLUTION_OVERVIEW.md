@@ -107,8 +107,7 @@ The solver preserves fully qualified Snowflake table names when they are
 available, because table identity matters during validation and execution.
 
 The schema-context cache is built per database from the base metadata cache. It
-contains canonical schema objects, rendered schema chunks, and a version
-manifest:
+contains canonical schema objects and a version manifest:
 
 ```text
 methods/sol01/.cache/schema_context_cache/<DB>/
@@ -116,7 +115,6 @@ methods/sol01/.cache/schema_context_cache/<DB>/
   versions/<cache_key>/
     manifest.json
     objects.jsonl
-    chunks.jsonl
 ```
 
 Build schema-context caches before a batch run with either command:
@@ -127,7 +125,7 @@ uv run sol01 run --db E_COMMERCE
 ```
 
 The schema-context cache key includes the source schema hash, schema-object
-builder version, chunk renderer version, curated summary registry hash/version,
+builder version, curated summary registry hash/version,
 and family similarity threshold. If one of those inputs changes, a new version
 directory is created and `current.json` is updated.
 

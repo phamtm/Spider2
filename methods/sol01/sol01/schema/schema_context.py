@@ -8,12 +8,15 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from sol01.infra.config import SchemaContextConfig
-from sol01.models import (
-    SchemaContextChunk,
-    SchemaContextObject,
-    SchemaObject,
-)
+from sol01.models import SchemaContextObject, SchemaObject
 from sol01.schema.embedding import BM25Index
+from sol01.schema.object_text import (
+    build_object_planning_text,
+    build_object_search_text,
+    covered_table_ids_for_summary_object,
+    object_has_large_schema_summary,
+    object_parent_ids,
+)
 from sol01.schema.schema_context_cache import SchemaContextCache
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
@@ -143,21 +146,16 @@ def build_available_schema_context(
     )
     context_mode, context_objects = _available_schema_objects(
         cache.objects,
-        cache.chunks,
         context.text,
         top_k=config.top_k_objects,
         top_k_sparse=config.top_k_sparse,
     )
-    schema_context_objects = _schema_context_objects(
-        context_objects,
-        chunks=cache.chunks,
-    )
+    schema_context_objects = _schema_context_objects(context_objects)
     diagnostics = _diagnostics(
         context,
         context_mode=context_mode,
         schema_context_objects=schema_context_objects,
         object_count=len(cache.objects),
-        chunk_count=len(cache.chunks),
         context_object_count=len(context_objects),
     )
     return schema_context_objects, diagnostics
@@ -165,7 +163,6 @@ def build_available_schema_context(
 
 def _available_schema_objects(
     objects: Sequence[SchemaObject],
-    chunks: Sequence[SchemaContextChunk],
     query_text: str,
     *,
     top_k: int,
@@ -173,13 +170,9 @@ def _available_schema_objects(
 ) -> tuple[str, list[SchemaObject]]:
     """Return ranked schema objects, respecting large-schema-summary pre-filtering."""
 
-    summary_object_ids = {
-        chunk.object_id
-        for chunk in chunks
-        if chunk.metadata.get("large_schema_summaries") or chunk.metadata.get("summary_ids")
-    }
+    summary_object_ids = {obj.object_id for obj in objects if object_has_large_schema_summary(obj)}
     if summary_object_ids:
-        covered_table_ids = _covered_table_ids(chunks, summary_object_ids)
+        covered_table_ids = _covered_table_ids(objects, summary_object_ids)
         pre_filtered = list(
             obj
             for obj in objects
@@ -188,30 +181,18 @@ def _available_schema_objects(
         )
         if len(pre_filtered) <= top_k:
             return "large_schema_summary", _sort_schema_objects(pre_filtered)
-        filtered_ids = {obj.object_id for obj in pre_filtered}
-        filtered_chunks = [c for c in chunks if c.object_id in filtered_ids]
         return "large_schema_summary", _bm25_rank(
-            pre_filtered, filtered_chunks, query_text, top_k=top_k, top_k_sparse=top_k_sparse
+            pre_filtered, query_text, top_k=top_k, top_k_sparse=top_k_sparse
         )
 
     if len(objects) <= top_k:
         return "schema_objects", _bm25_rank(
-            objects, chunks, query_text, top_k=len(objects), top_k_sparse=len(chunks)
+            objects, query_text, top_k=len(objects), top_k_sparse=len(objects)
         )
 
-    return "schema_objects", _bm25_rank(
-        objects, chunks, query_text, top_k=top_k, top_k_sparse=top_k_sparse
-    )
+    return "schema_objects", _bm25_rank(objects, query_text, top_k=top_k, top_k_sparse=top_k_sparse)
 
 
-_CHUNK_TYPE_TO_OBJECT_TYPE: dict[str, str] = {
-    "table": "table",
-    "table_family": "family",
-    "column_group": "column_group",
-    "column": "column",
-    "join_candidate": "join_candidate",
-    "sample_value": "sample_value",
-}
 _PER_TYPE_QUOTAS: dict[str, int] = {
     "family": 20,
     "table": 30,
@@ -238,7 +219,6 @@ _PARENT_PROPAGATION: dict[str, float] = {
 
 def _bm25_rank(
     objects: Sequence[SchemaObject],
-    chunks: Sequence[SchemaContextChunk],
     query_text: str,
     *,
     top_k: int,
@@ -246,10 +226,10 @@ def _bm25_rank(
 ) -> list[SchemaObject]:
     """Return up to top_k schema objects ranked by BM25 relevance."""
 
-    if not chunks or not objects:
+    if not objects:
         return list(objects)[:top_k]
 
-    evidence_texts = [c.evidence_text or c.text for c in chunks]
+    evidence_texts = [build_object_search_text(obj) for obj in objects]
     bm25 = BM25Index(evidence_texts)
 
     sparse_ranked = bm25.scores(query_text, top_k=top_k_sparse)
@@ -264,22 +244,20 @@ def _bm25_rank(
     type_counts: dict[str, int] = defaultdict(int)
     selected_ids: set[int] = set()
     for doc_id, _ in sorted(chunk_scores.items(), key=lambda x: -x[1]):
-        ct = _CHUNK_TYPE_TO_OBJECT_TYPE.get(chunks[doc_id].chunk_type, "table")
-        if type_counts[ct] < _PER_TYPE_QUOTAS.get(ct, 40):
+        object_type = objects[doc_id].object_type
+        if type_counts[object_type] < _PER_TYPE_QUOTAS.get(object_type, 40):
             selected_ids.add(doc_id)
-            type_counts[ct] += 1
+            type_counts[object_type] += 1
 
     object_by_id = {obj.object_id: obj for obj in objects}
     object_scores: dict[str, float] = defaultdict(float)
     for doc_id in selected_ids:
-        chunk = chunks[doc_id]
+        schema_object = objects[doc_id]
         score = chunk_scores[doc_id]
-        ot = object_by_id.get(chunk.object_id)
-        if ot is not None:
-            weight = _DIRECT_WEIGHTS.get(ot.object_type, 1.0)
-            object_scores[chunk.object_id] += score * weight
-        prop_weight = _PARENT_PROPAGATION.get(chunk.chunk_type, 0.2)
-        for parent_id in chunk.parent_object_ids:
+        weight = _DIRECT_WEIGHTS.get(schema_object.object_type, 1.0)
+        object_scores[schema_object.object_id] += score * weight
+        prop_weight = _PARENT_PROPAGATION.get(schema_object.object_type, 0.2)
+        for parent_id in object_parent_ids(schema_object):
             if parent_id in object_by_id:
                 object_scores[parent_id] += score * prop_weight
 
@@ -316,18 +294,14 @@ def _extract_exact_tokens(text: str) -> list[str]:
 
 
 def _covered_table_ids(
-    chunks: Sequence[SchemaContextChunk],
+    objects: Sequence[SchemaObject],
     summary_object_ids: set[str],
 ) -> set[str]:
     table_ids: set[str] = set()
-    for chunk in chunks:
-        if chunk.object_id not in summary_object_ids:
+    for schema_object in objects:
+        if schema_object.object_id not in summary_object_ids:
             continue
-        if chunk.object_id.startswith("table:"):
-            table_ids.add(chunk.object_id)
-        table_ids.update(
-            parent_id for parent_id in chunk.parent_object_ids if parent_id.startswith("table:")
-        )
+        table_ids.update(covered_table_ids_for_summary_object(schema_object))
     return table_ids
 
 
@@ -351,25 +325,15 @@ def _is_covered_by_summary(schema_object: SchemaObject, covered_table_ids: set[s
 
 def _schema_context_objects(
     objects: Sequence[SchemaObject],
-    *,
-    chunks: Sequence[SchemaContextChunk],
 ) -> list[SchemaContextObject]:
-    chunks_by_object: dict[str, SchemaContextChunk] = {chunk.object_id: chunk for chunk in chunks}
-
     return [
         SchemaContextObject(
             schema_object=schema_object,
-            planning_text=_chunk_planning_text(chunks_by_object.get(schema_object.object_id)),
+            planning_text=build_object_planning_text(schema_object),
             position=rank,
         )
         for rank, schema_object in enumerate(objects, start=1)
     ]
-
-
-def _chunk_planning_text(chunk: SchemaContextChunk | None) -> str:
-    if chunk is None:
-        return ""
-    return chunk.prompt_text or chunk.source_definition or chunk.inferred_usage or chunk.text
 
 
 def _diagnostics(
@@ -378,7 +342,6 @@ def _diagnostics(
     context_mode: str,
     schema_context_objects: Sequence[SchemaContextObject],
     object_count: int,
-    chunk_count: int,
     context_object_count: int,
 ) -> dict[str, object]:
     return {
@@ -389,7 +352,6 @@ def _diagnostics(
         },
         "context_counts": {
             "objects_total": object_count,
-            "chunks_total": chunk_count,
             "available_objects": context_object_count,
         },
         "schema_context_objects": [

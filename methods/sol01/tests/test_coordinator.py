@@ -164,7 +164,6 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
         db="TEST_DB",
         cache_key="test-cache-key",
         objects=schema_objects,
-        chunks=[],
     )
     monkeypatch.setattr(
         "sol01.coordinator.build_schema_context_cache",

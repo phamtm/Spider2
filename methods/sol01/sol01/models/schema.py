@@ -17,15 +17,6 @@ SchemaObjectKind = Literal[
     "join_candidate",
     "family",
 ]
-SchemaContextChunkType = Literal[
-    "schema_object",
-    "table",
-    "column",
-    "column_group",
-    "join_candidate",
-    "sample_value",
-    "table_family",
-]
 SelectedSchemaRole = Literal[
     "primary",
     "supporting",
@@ -120,43 +111,6 @@ class SchemaObject(BaseModel):
         object_type = schema_object_id_kind(self.object_id)
         if object_type != self.object_type:
             raise ValueError("object_type must match object_id prefix")
-        return self
-
-
-class SchemaContextChunk(BaseModel):
-    """Prompt text derived from one schema object or linked document."""
-
-    chunk_id: str
-    object_id: str
-    text: str = ""
-    chunk_type: SchemaContextChunkType = "schema_object"
-    parent_object_ids: list[str] = Field(default_factory=list)
-    evidence_text: str = ""
-    prompt_text: str = ""
-    source_definition: str = ""
-    inferred_usage: str = ""
-    source: Literal["schema", "sample", "join", "family"] = "schema"
-    metadata: dict[str, object] = Field(default_factory=dict)
-
-    @field_validator("object_id")
-    @classmethod
-    def _validate_object_id(cls, object_id: str) -> str:
-        return validate_schema_object_id(object_id)
-
-    @field_validator("parent_object_ids")
-    @classmethod
-    def _validate_parent_object_ids(cls, object_ids: list[str]) -> list[str]:
-        return [validate_schema_object_id(object_id) for object_id in object_ids]
-
-    @model_validator(mode="after")
-    def _derive_text(self) -> SchemaContextChunk:
-        if not self.text:
-            self.text = (
-                self.prompt_text
-                or self.source_definition
-                or self.inferred_usage
-                or self.evidence_text
-            )
         return self
 
 

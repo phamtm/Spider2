@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from sol01.models import ColumnSchema, SchemaContextChunk, SchemaObject, TableSchema
-from sol01.schema.chunks import render_schema_chunks
+from sol01.models import ColumnSchema, SchemaObject, TableSchema
+from sol01.schema.object_text import annotate_summary_metadata
 from sol01.schema.objects import build_schema_objects
 from sol01.schema.schema_context import (
     build_available_schema_context,
@@ -65,7 +65,6 @@ def test_hybrid_retrieval_returns_all_objects_for_small_database():
     assert diagnostics["context_mode"] == "schema_objects"
     assert diagnostics["context_counts"] == {
         "objects_total": 7,
-        "chunks_total": 7,
         "available_objects": 7,
     }
     assert diagnostics["question_context"]["linked_doc_chars"] == 0
@@ -113,14 +112,12 @@ def test_summary_backed_context_uses_only_curated_large_schema_objects():
             "GITHUB_REPOS_DATE.DAY.REPOSITORIES": uncovered_table,
         }
     )
-    chunks = render_schema_chunks(objects)
     index = SchemaContextCache(
         db="GITHUB_REPOS_DATE",
         cache_key="summary-rendered",
         cache_dir=Path("/tmp/test-schema-context-summary-rendered"),
         manifest={},
-        objects=objects,
-        chunks=chunks,
+        objects=annotate_summary_metadata(objects),
     )
 
     schema_context_objects, diagnostics = build_available_schema_context(
@@ -204,68 +201,10 @@ def _fake_index() -> SchemaContextCache:
             metadata={"member_table_refs": ["DB.PUBLIC.ORDERS"]},
         ),
     ]
-    chunks = [
-        SchemaContextChunk(
-            chunk_id="table:DB.PUBLIC.ORDERS::table",
-            object_id="table:DB.PUBLIC.ORDERS",
-            chunk_type="table",
-            prompt_text="Orders table with status and customer fields.",
-        ),
-        SchemaContextChunk(
-            chunk_id="table:DB.PUBLIC.CUSTOMERS::table",
-            object_id="table:DB.PUBLIC.CUSTOMERS",
-            chunk_type="table",
-            prompt_text="Customers table.",
-        ),
-        SchemaContextChunk(
-            chunk_id="column:DB.PUBLIC.ORDERS#STATUS::column",
-            object_id="column:DB.PUBLIC.ORDERS#STATUS",
-            chunk_type="column",
-            parent_object_ids=["table:DB.PUBLIC.ORDERS"],
-            prompt_text="Order status column.",
-        ),
-        SchemaContextChunk(
-            chunk_id="column:DB.PUBLIC.ORDERS#AMOUNT::column",
-            object_id="column:DB.PUBLIC.ORDERS#AMOUNT",
-            chunk_type="column",
-            parent_object_ids=["table:DB.PUBLIC.ORDERS"],
-            prompt_text="Order amount column.",
-        ),
-        SchemaContextChunk(
-            chunk_id="sample_value:DB.PUBLIC.ORDERS#STATUS:11111111::sample_value",
-            object_id="sample_value:DB.PUBLIC.ORDERS#STATUS:11111111",
-            chunk_type="sample_value",
-            parent_object_ids=[
-                "table:DB.PUBLIC.ORDERS",
-                "column:DB.PUBLIC.ORDERS#STATUS",
-            ],
-            prompt_text="Sample value closed for order status.",
-        ),
-        SchemaContextChunk(
-            chunk_id="join_candidate:DB.PUBLIC.ORDERS#CUSTOMER_ID->DB.PUBLIC.CUSTOMERS#CUSTOMER_ID:abcdef12::join_candidate",
-            object_id="join_candidate:DB.PUBLIC.ORDERS#CUSTOMER_ID->DB.PUBLIC.CUSTOMERS#CUSTOMER_ID:abcdef12",
-            chunk_type="join_candidate",
-            parent_object_ids=[
-                "table:DB.PUBLIC.ORDERS",
-                "column:DB.PUBLIC.ORDERS#CUSTOMER_ID",
-                "table:DB.PUBLIC.CUSTOMERS",
-                "column:DB.PUBLIC.CUSTOMERS#CUSTOMER_ID",
-            ],
-            prompt_text="Join orders to customers on customer id.",
-        ),
-        SchemaContextChunk(
-            chunk_id="family:DB.PUBLIC:orders_family:deadbeef::table_family",
-            object_id="family:DB.PUBLIC:orders_family:deadbeef",
-            chunk_type="table_family",
-            parent_object_ids=["table:DB.PUBLIC.ORDERS"],
-            prompt_text="Orders table family.",
-        ),
-    ]
     return SchemaContextCache(
         db="DB",
         cache_key="test",
         cache_dir=Path("/tmp/test-schema-index"),
         manifest={},
         objects=objects,
-        chunks=chunks,
     )

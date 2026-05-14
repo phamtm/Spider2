@@ -98,12 +98,7 @@ def test_builds_loads_and_validates_schema_context_cache_for_one_database(tmp_pa
     index = _build(tmp_path)
 
     assert index.cache_dir.exists()
-    assert {path.name for path in index.cache_dir.iterdir()} == {
-        "manifest.json",
-        "objects.jsonl",
-        "chunks.jsonl",
-    }
-    assert index.chunks
+    assert {path.name for path in index.cache_dir.iterdir()} == {"manifest.json", "objects.jsonl"}
 
     loaded = load_current_schema_context_cache("DB", cache_root=tmp_path)
 
@@ -134,12 +129,12 @@ def test_cache_key_changes_for_schema_versions_model_metadata_family_threshold_a
 
 def test_stale_missing_cache_artifact_is_rebuilt_under_same_key(tmp_path):
     first = _build(tmp_path)
-    (first.cache_dir / "chunks.jsonl").unlink()
+    (first.cache_dir / "objects.jsonl").unlink()
 
     rebuilt = _build(tmp_path)
 
     assert rebuilt.cache_key == first.cache_key
-    assert (rebuilt.cache_dir / "chunks.jsonl").exists()
+    assert (rebuilt.cache_dir / "objects.jsonl").exists()
     assert list(rebuilt.cache_dir.parent.glob(".*.invalid.*"))
 
 
@@ -204,20 +199,19 @@ def test_changed_summary_registry_content_publishes_separate_version_directory(t
     assert _version_dir(cache_root, "DB", second.cache_key).exists()
 
 
-def test_custom_summary_registry_drives_coverage_and_chunk_rendering(tmp_path):
+def test_custom_summary_registry_drives_coverage_and_object_metadata(tmp_path):
     registry_path = _write_custom_summary_registry(tmp_path / "custom_summaries.json")
     cache = _build(tmp_path / "cache", curated_summary_registry_path=registry_path)
 
     object_ids = {obj.object_id for obj in cache.objects}
-    orders_chunk = next(
-        chunk for chunk in cache.chunks if chunk.object_id == "table:DB.PUBLIC.ORDERS"
-    )
+    orders_object = next(obj for obj in cache.objects if obj.object_id == "table:DB.PUBLIC.ORDERS")
 
     assert "column:DB.PUBLIC.ORDERS#STATUS" not in object_ids
     assert "column:DB.PUBLIC.CUSTOMERS#CUSTOMER_ID" in object_ids
-    assert "Large-schema summary: orders_custom_summary." in orders_chunk.prompt_text
-    assert "Custom order lifecycle fact table." in orders_chunk.prompt_text
-    assert orders_chunk.metadata["summary_ids"] == ["orders_custom_summary"]
+    assert orders_object.metadata["summary_ids"] == ["orders_custom_summary"]
+    assert orders_object.metadata["large_schema_summaries"][0]["text"].startswith(
+        "Large-schema summary: orders_custom_summary."
+    )
 
 
 def test_covered_tables_skip_child_objects_while_uncovered_tables_keep_them(tmp_path):
@@ -279,12 +273,10 @@ def test_covered_tables_skip_child_objects_while_uncovered_tables_keep_them(tmp_
         obj_id.startswith("column:GITHUB_REPOS_DATE.DAY._20240103#") for obj_id in covered_table_ids
     )
 
-    summary_chunk = next(
-        chunk
-        for chunk in cache.chunks
-        if chunk.object_id == "table:GITHUB_REPOS_DATE.DAY._20240103"
+    summary_object = next(
+        obj for obj in cache.objects if obj.object_id == "table:GITHUB_REPOS_DATE.DAY._20240103"
     )
-    assert summary_chunk.metadata.get("large_schema_summaries")
+    assert summary_object.metadata.get("large_schema_summaries")
 
 
 def test_covered_table_keys_matches_tables_against_summary_registry():

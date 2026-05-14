@@ -156,7 +156,7 @@ Cache layout:
 - `methods/sol01/.cache/schema_context_cache/<DB>/current.json`: pointer to
   the active schema-context version
 - `methods/sol01/.cache/schema_context_cache/<DB>/versions/<cache_key>/`:
-  `manifest.json`, `objects.jsonl`, and `chunks.jsonl`
+  `manifest.json` and `objects.jsonl`
 
 Large-schema summaries live in
 `methods/sol01/metadata/large_schema_summaries.json`. Add or edit one summary

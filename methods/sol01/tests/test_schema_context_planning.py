@@ -26,7 +26,7 @@ from sol01.models import (
     Task,
     ValidationReport,
 )
-from sol01.schema.chunks import render_schema_chunks
+from sol01.schema.object_text import annotate_summary_metadata, build_object_planning_text
 from sol01.schema.objects import build_schema_objects
 
 
@@ -116,12 +116,7 @@ def test_schema_context_planning_prompt_uses_curated_summary_evidence_for_covere
         for obj in build_schema_objects({"GITHUB_REPOS_DATE.DAY._20240103": table})
         if obj.object_type == "table"
     )
-    chunk = next(
-        chunk for chunk in render_schema_chunks([schema_object]) if chunk.chunk_type == "table"
-    )
-    planning_text = (
-        chunk.prompt_text or chunk.source_definition or chunk.inferred_usage or chunk.text
-    )
+    planning_text = build_object_planning_text(annotate_summary_metadata([schema_object])[0])
     prompt = schema_context_planning_user_prompt(
         Task(
             instance_id="sf_bq_test",

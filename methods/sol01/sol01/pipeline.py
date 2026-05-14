@@ -231,7 +231,6 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
             "db": schema_context_cache.db,
             "cache_key": schema_context_cache.cache_key,
             "object_count": len(schema_context_cache.objects),
-            "chunk_count": len(schema_context_cache.chunks),
         },
         "available_context": context_diagnostics,
         "schema_context_objects": [

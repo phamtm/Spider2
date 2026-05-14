@@ -26,8 +26,7 @@ from sol01.infra.fs_cache import (
 )
 from sol01.infra.logging import get_logger
 from sol01.infra.paths import REPO_ROOT
-from sol01.models import SchemaContextChunk, SchemaObject, TableSchema
-from sol01.schema.chunks import render_schema_chunks
+from sol01.models import SchemaObject, TableSchema
 from sol01.schema.db_index import load_db_index
 from sol01.schema.large_schema_summaries import (
     DEFAULT_LARGE_SCHEMA_SUMMARY_PATH,
@@ -36,12 +35,12 @@ from sol01.schema.large_schema_summaries import (
     large_schema_summary_registry_hash,
     load_large_schema_summary_registry,
 )
+from sol01.schema.object_text import annotate_summary_metadata
 from sol01.schema.objects import build_schema_objects
 
 OBJECT_BUILDER_VERSION = "schema-objects-v3"
-CHUNK_RENDER_VERSION = "schema-chunks-v2"
-MANIFEST_VERSION = 2
-REQUIRED_CACHE_ARTIFACTS = frozenset({"objects.jsonl", "chunks.jsonl", "manifest.json"})
+MANIFEST_VERSION = 3
+REQUIRED_CACHE_ARTIFACTS = frozenset({"objects.jsonl", "manifest.json"})
 REQUIRED_MANIFEST_FIELDS = frozenset(
     {
         "manifest_version",
@@ -49,12 +48,10 @@ REQUIRED_MANIFEST_FIELDS = frozenset(
         "cache_key",
         "source_schema_hash",
         "object_builder_version",
-        "chunk_render_version",
         "curated_summary_registry_hash",
         "curated_summary_registry_version",
         "family_similarity_threshold",
         "object_count",
-        "chunk_count",
     }
 )
 DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT = (
@@ -82,7 +79,6 @@ class SchemaContextCache:
     cache_dir: Path
     manifest: dict[str, Any]
     objects: list[SchemaObject]
-    chunks: list[SchemaContextChunk]
 
 
 def build_schema_context_cache(
@@ -227,13 +223,12 @@ def build_schema_context_cache(
             family_similarity_threshold=config.family_similarity_threshold,
             covered_table_keys=covered_table_keys,
         )
-        chunks = render_schema_chunks(objects, large_schema_summary_registry=registry)
+        objects = annotate_summary_metadata(objects, large_schema_summary_registry=registry)
         logger.info(
             "schema context cache objects rendered",
             db=db,
             cache_key=cache_key,
             object_count=len(objects),
-            chunk_count=len(chunks),
             covered_table_count=len(covered_table_keys),
         )
 
@@ -247,7 +242,6 @@ def build_schema_context_cache(
                 family_similarity_threshold=config.family_similarity_threshold,
                 curated_summary_registry_hash=curated_summary_registry_hash,
                 objects=objects,
-                chunks=chunks,
             )
             loaded_temp = _load_valid_cache(
                 db=db,
@@ -304,7 +298,6 @@ def build_schema_context_cache(
             cache_key=cache_key,
             cache_dir=str(version_dir),
             object_count=len(objects),
-            chunk_count=len(chunks),
             elapsed_seconds=round(time.perf_counter() - started_at, 3),
         )
         return loaded
@@ -382,7 +375,6 @@ def schema_context_cache_key(
     return stable_hash(
         {
             "cache_schema": MANIFEST_VERSION,
-            "chunk_render_version": CHUNK_RENDER_VERSION,
             "curated_summary_registry_hash": curated_summary_registry_hash,
             "curated_summary_registry_version": LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
             "db": db,
@@ -402,7 +394,6 @@ def _write_cache_artifacts(
     family_similarity_threshold: float,
     curated_summary_registry_hash: str,
     objects: Sequence[SchemaObject],
-    chunks: Sequence[SchemaContextChunk],
 ) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
     manifest = {
@@ -411,16 +402,13 @@ def _write_cache_artifacts(
         "cache_key": cache_key,
         "source_schema_hash": source_hash,
         "object_builder_version": OBJECT_BUILDER_VERSION,
-        "chunk_render_version": CHUNK_RENDER_VERSION,
         "curated_summary_registry_hash": curated_summary_registry_hash,
         "curated_summary_registry_version": LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
         "family_similarity_threshold": family_similarity_threshold,
         "object_count": len(objects),
-        "chunk_count": len(chunks),
     }
 
     write_jsonl(cache_dir / "objects.jsonl", [obj.model_dump(mode="json") for obj in objects])
-    write_jsonl(cache_dir / "chunks.jsonl", [chunk.model_dump(mode="json") for chunk in chunks])
     write_json(cache_dir / "manifest.json", manifest)
     logger.info(
         "schema context artifacts written",
@@ -428,7 +416,6 @@ def _write_cache_artifacts(
         cache_key=cache_key,
         cache_dir=str(cache_dir),
         object_count=len(objects),
-        chunk_count=len(chunks),
     )
 
 
@@ -457,16 +444,10 @@ def _load_valid_cache(
         objects = [
             SchemaObject.model_validate(row) for row in read_jsonl(cache_dir / "objects.jsonl")
         ]
-        chunks = [
-            SchemaContextChunk.model_validate(row) for row in read_jsonl(cache_dir / "chunks.jsonl")
-        ]
     except (FileNotFoundError, ImportError, OSError, ValueError):
         return None
 
-    if manifest.get("object_count") != len(objects) or manifest.get("chunk_count") != len(chunks):
-        return None
-    object_ids = {obj.object_id for obj in objects}
-    if any(chunk.object_id not in object_ids for chunk in chunks):
+    if manifest.get("object_count") != len(objects):
         return None
 
     return SchemaContextCache(
@@ -475,7 +456,6 @@ def _load_valid_cache(
         cache_dir=cache_dir,
         manifest=manifest,
         objects=objects,
-        chunks=chunks,
     )
 
 

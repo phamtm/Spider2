@@ -15,7 +15,7 @@ from sol01.analysis.schema_context_eval import (
     write_schema_context_eval_report,
 )
 from sol01.cli import schema_context as cli_schema_context
-from sol01.models import ColumnSchema, SchemaContextChunk, SchemaObject, TableSchema, Task
+from sol01.models import ColumnSchema, SchemaObject, TableSchema, Task
 from sol01.schema.schema_context_cache import SchemaContextCache
 
 
@@ -295,38 +295,10 @@ def _schema_context_cache() -> SchemaContextCache:
             },
         ),
     ]
-    chunks = [
-        SchemaContextChunk(
-            chunk_id="family:DB.PUBLIC:exact_sales:11111111::table_family",
-            object_id="family:DB.PUBLIC:exact_sales:11111111",
-            chunk_type="table_family",
-            parent_object_ids=[
-                "table:DB.PUBLIC.SALES_2022",
-                "table:DB.PUBLIC.SALES_2023",
-            ],
-            evidence_text="historical sales table family 2022 2023",
-            prompt_text="Sales table family with annual physical members.",
-        ),
-        SchemaContextChunk(
-            chunk_id="table:DB.PUBLIC.SALES_2022::table",
-            object_id="table:DB.PUBLIC.SALES_2022",
-            chunk_type="table",
-            evidence_text="sales table 2022 amount",
-            prompt_text="Sales table for 2022.",
-        ),
-        SchemaContextChunk(
-            chunk_id="table:DB.PUBLIC.SALES_2023::table",
-            object_id="table:DB.PUBLIC.SALES_2023",
-            chunk_type="table",
-            evidence_text="sales table 2023 amount",
-            prompt_text="Sales table for 2023.",
-        ),
-    ]
     return SchemaContextCache(
         db="DB",
         cache_key="test",
         cache_dir=Path("/tmp/test-schema-context-eval"),
         manifest={},
         objects=objects,
-        chunks=chunks,
     )

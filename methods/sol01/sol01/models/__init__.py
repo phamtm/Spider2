@@ -14,8 +14,6 @@ from sol01.models.candidate import (
 from sol01.models.schema import (
     ColumnSchema,
     ResolvedSchemaContext,
-    SchemaContextChunk,
-    SchemaContextChunkType,
     SchemaContextObject,
     SchemaObject,
     SchemaPlanningConstraints,
@@ -48,8 +46,6 @@ __all__ = [
     "Intent",
     "OutputShapeReport",
     "ResolvedSchemaContext",
-    "SchemaContextChunk",
-    "SchemaContextChunkType",
     "SchemaContextObject",
     "SchemaObject",
     "SchemaPlanningConstraints",

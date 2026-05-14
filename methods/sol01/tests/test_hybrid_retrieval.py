@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from sol01.infra.config import SchemaContextConfig
-from sol01.models import SchemaContextChunk, SchemaObject
+from sol01.models import SchemaObject
 from sol01.schema.embedding import BM25Index, FakeEmbeddingProvider, normalize_vector
 from sol01.schema.schema_context import build_available_schema_context
 from sol01.schema.schema_context_cache import SchemaContextCache
@@ -184,34 +184,12 @@ def test_bm25_retrieval_prefers_question_relevant_objects():
             searchable_text="status closed open pending",
         ),
     ]
-    chunks = [
-        SchemaContextChunk(
-            chunk_id="table:DB.PUBLIC.ORDERS::table",
-            object_id="table:DB.PUBLIC.ORDERS",
-            chunk_type="table",
-            evidence_text="DB.PUBLIC.ORDERS orders status customer amount table",
-        ),
-        SchemaContextChunk(
-            chunk_id="table:DB.PUBLIC.WEATHER::table",
-            object_id="table:DB.PUBLIC.WEATHER",
-            chunk_type="table",
-            evidence_text="DB.PUBLIC.WEATHER weather temperature precipitation forecast table",
-        ),
-        SchemaContextChunk(
-            chunk_id="column:DB.PUBLIC.ORDERS#STATUS::column",
-            object_id="column:DB.PUBLIC.ORDERS#STATUS",
-            chunk_type="column",
-            parent_object_ids=["table:DB.PUBLIC.ORDERS"],
-            evidence_text="DB.PUBLIC.ORDERS STATUS status closed open pending column",
-        ),
-    ]
     cache = SchemaContextCache(
         db="DB",
         cache_key="test",
         cache_dir=Path("/tmp/test"),
         manifest={},
         objects=objects,
-        chunks=chunks,
     )
 
     result_objects, diagnostics = build_available_schema_context(
@@ -240,22 +218,12 @@ def test_bm25_retrieval_top_k_limits_returned_objects():
         )
         for i in range(20)
     ]
-    chunks = [
-        SchemaContextChunk(
-            chunk_id=f"table:DB.T{i}::table",
-            object_id=f"table:DB.T{i}",
-            chunk_type="table",
-            evidence_text=f"T{i} col_a col_b" + (" orders status amount" if i == 3 else ""),
-        )
-        for i in range(20)
-    ]
     cache = SchemaContextCache(
         db="DB",
         cache_key="test",
         cache_dir=Path("/tmp/test"),
         manifest={},
         objects=objects,
-        chunks=chunks,
     )
 
     config = SchemaContextConfig(top_k_objects=5)
@@ -293,30 +261,12 @@ def test_per_type_quotas_prevent_single_type_domination():
         )
         for i in range(50)
     ]
-    chunks = [
-        SchemaContextChunk(
-            chunk_id="table:DB.ORDERS::table",
-            object_id="table:DB.ORDERS",
-            chunk_type="table",
-            evidence_text="orders DB.ORDERS table status amount",
-        ),
-    ] + [
-        SchemaContextChunk(
-            chunk_id=f"column:DB.ORDERS#COL{i}::column",
-            object_id=f"column:DB.ORDERS#COL{i}",
-            chunk_type="column",
-            parent_object_ids=["table:DB.ORDERS"],
-            evidence_text=f"col{i} orders column status amount",
-        )
-        for i in range(50)
-    ]
     cache = SchemaContextCache(
         db="DB",
         cache_key="test",
         cache_dir=Path("/tmp/test"),
         manifest={},
         objects=objects,
-        chunks=chunks,
     )
 
     config = SchemaContextConfig(top_k_objects=30)
