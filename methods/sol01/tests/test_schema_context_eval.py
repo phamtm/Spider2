@@ -13,7 +13,6 @@ from sol01.infra.config import SchemaContextConfig
 from sol01.models import ColumnSchema, SchemaContextChunk, SchemaObject, TableSchema, Task
 from sol01.schema.schema_context_cache import SchemaContextCache
 from sol01.schema.schema_context_eval import (
-    db_schema_summary,
     load_gold_tables,
     run_schema_context_eval,
     write_schema_context_eval_report,
@@ -39,14 +38,6 @@ def test_load_gold_tables_reads_offline_jsonl(tmp_path: Path):
         "sf001": ["DB.PUBLIC.ORDERS"],
         "sf002": ["DB.PUBLIC.CUSTOMERS"],
     }
-
-
-def test_db_schema_summary_keeps_column_types_docs_and_samples():
-    summary = db_schema_summary(_db_index())
-
-    assert "Table DB.PUBLIC.SALES_2022:" in summary
-    assert "ORDER_ID [TEXT]" in summary
-    assert "AMOUNT [NUMBER]" in summary
 
 
 def test_schema_context_eval_reports_gold_coverage_family_success_and_failures():

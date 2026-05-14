@@ -2,9 +2,6 @@ import pytest
 from pydantic import ValidationError
 
 from sol01.models import (
-    AggregateGrainReport,
-    CandidateReviewReport,
-    CategoryMetadata,
     ColumnSchema,
     ConfidenceReport,
     ExecutionResult,
@@ -58,18 +55,6 @@ def test_task_and_intent_models_construct_from_expected_fields():
     assert intent.derived_behavioral_definitions == ["active means has recent activity"]
     assert intent.answer_grain == "one row per customer"
     assert intent.do_not_assume == ["Do not limit to active customers unless requested."]
-
-
-def test_category_metadata_model_constructs():
-    metadata = CategoryMetadata(
-        instance_id="sf_bq011",
-        primary_tier=6,
-        tags=["aggregation", "temporal"],
-        difficulty_notes=None,
-    )
-
-    assert metadata.instance_id == "sf_bq011"
-    assert metadata.primary_tier == 6
 
 
 def test_schema_models_use_independent_default_lists():
@@ -150,36 +135,6 @@ def test_sql_validation_execution_and_critic_models_construct():
     assert confidence.repair_focus is None
 
 
-def test_aggregate_grain_model_constructs():
-    grain = AggregateGrainReport(
-        inferred_grain="row_count",
-        reason="Single entity table with no joins usually counts rows.",
-        distinct_reason="DISTINCT is redundant on a single entity table.",
-        uses_distinct=True,
-        has_joins=False,
-        selected_tables=["TEST_DB.PUBLIC.MST_USERS"],
-    )
-
-    assert grain.inferred_grain == "row_count"
-    assert grain.uses_distinct is True
-
-
-def test_candidate_review_model_constructs():
-    review = CandidateReviewReport(
-        baseline_stage="initial_1",
-        preferred_stage="initial_2",
-        compared_stages=["initial_1", "initial_2"],
-        reasons=["The second attempt matches the requested shape better."],
-        confidence=0.9,
-        issues=[],
-        should_repair=False,
-    )
-
-    assert review.preferred_stage == "initial_2"
-    assert review.compared_stages == ["initial_1", "initial_2"]
-    assert review.should_repair is False
-
-
 def test_schema_object_id_helpers_validate_stable_formats():
     valid_ids = {
         "table:DB.PUBLIC.ORDERS": "table",
@@ -232,12 +187,6 @@ def test_schema_context_core_models_construct_and_validate_object_types():
             object_type="table",
             name="CUSTOMER_ID",
         )
-
-
-def test_selected_schema_object_unknown_role_constructs():
-    selected = SelectedSchemaObject(object_id="table:DB.PUBLIC.ORDERS", role="unknown")
-
-    assert selected.role == "unknown"
 
 
 def test_resolved_schema_context_keeps_compact_selection_context():

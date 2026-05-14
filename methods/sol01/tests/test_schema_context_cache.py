@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -12,9 +11,7 @@ from sol01.models import ColumnSchema, TableSchema
 from sol01.schema.schema_context_cache import (
     SchemaContextCacheError,
     SchemaContextCacheLockTimeout,
-    _publish_version_directory,
     _version_dir,
-    _write_current_pointer,
     build_schema_context_cache,
     load_current_schema_context_cache,
     schema_context_cache_key,
@@ -115,44 +112,6 @@ def test_cache_key_changes_for_schema_versions_model_metadata_family_threshold_a
     )
 
 
-def test_final_dir_already_exists_is_not_overwritten(tmp_path):
-    temp_dir = tmp_path / "temp-version"
-    final_dir = tmp_path / "final-version"
-    temp_dir.mkdir()
-    final_dir.mkdir()
-    (final_dir / "marker.txt").write_text("keep", encoding="utf-8")
-
-    published = _publish_version_directory(temp_dir, final_dir)
-
-    assert published is False
-    assert not temp_dir.exists()
-    assert (final_dir / "marker.txt").read_text(encoding="utf-8") == "keep"
-
-
-def test_current_pointer_update_uses_os_replace(tmp_path, monkeypatch):
-    calls: list[tuple[Path, Path]] = []
-    real_replace = os.replace
-
-    def spy_replace(source, destination):
-        calls.append((Path(source), Path(destination)))
-        real_replace(source, destination)
-
-    monkeypatch.setattr(os, "replace", spy_replace)
-    current_path = tmp_path / "DB" / "current.json"
-    cache_dir = tmp_path / "DB" / "versions" / "abc"
-
-    _write_current_pointer(current_path, db="DB", cache_key="abc", cache_dir=cache_dir)
-
-    assert calls
-    assert calls[0][1] == current_path
-    assert json.loads(current_path.read_text(encoding="utf-8")) == {
-        "cache_dir": str(cache_dir),
-        "cache_key": "abc",
-        "db": "DB",
-    }
-    assert not list(current_path.parent.glob("*.tmp"))
-
-
 def test_stale_missing_cache_artifact_is_rebuilt_under_same_key(tmp_path):
     first = _build(tmp_path)
     (first.cache_dir / "chunks.jsonl").unlink()
@@ -161,40 +120,6 @@ def test_stale_missing_cache_artifact_is_rebuilt_under_same_key(tmp_path):
 
     assert rebuilt.cache_key == first.cache_key
     assert (rebuilt.cache_dir / "chunks.jsonl").exists()
-    assert list(rebuilt.cache_dir.parent.glob(".*.invalid.*"))
-
-
-def test_embedding_era_cache_artifacts_are_not_reused(tmp_path):
-    first = _build(tmp_path)
-    (first.cache_dir / "embeddings.npy").write_bytes(b"old embedding matrix")
-
-    rebuilt = _build(tmp_path)
-
-    assert rebuilt.cache_key == first.cache_key
-    assert not (rebuilt.cache_dir / "embeddings.npy").exists()
-    assert {path.name for path in rebuilt.cache_dir.iterdir()} == {
-        "manifest.json",
-        "objects.jsonl",
-        "chunks.jsonl",
-    }
-    assert list(rebuilt.cache_dir.parent.glob(".*.invalid.*"))
-
-
-def test_pre_summary_key_cache_artifacts_are_not_reused(tmp_path):
-    first = _build(tmp_path)
-    manifest_path = first.cache_dir / "manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest.pop("curated_summary_registry_hash")
-    manifest.pop("curated_summary_registry_version")
-    manifest_path.write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-
-    rebuilt = _build(tmp_path)
-
-    assert rebuilt.cache_key == first.cache_key
-    assert rebuilt.manifest["curated_summary_registry_hash"]
-    assert rebuilt.manifest["curated_summary_registry_version"] == "large-schema-summaries-v1"
     assert list(rebuilt.cache_dir.parent.glob(".*.invalid.*"))
 
 

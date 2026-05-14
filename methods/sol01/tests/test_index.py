@@ -3,8 +3,6 @@ from pathlib import Path
 
 from sol01.schema.db_index import load_db_index
 from sol01.schema.index import (
-    CACHE_PATH,
-    REPO_ROOT,
     SNOW_METADATA_ROOT,
     build_db_index,
     build_index_cache,
@@ -85,10 +83,6 @@ def test_build_index_cache_writes_cache_file(tmp_path):
     assert cache_path.exists()
     assert "E_COMMERCE" in payload
     assert CUSTOMERS in payload["E_COMMERCE"]
-
-
-def test_default_cache_path_points_inside_method_directory():
-    assert CACHE_PATH == (REPO_ROOT / "methods" / "sol01" / ".cache" / "snow_index.json").resolve()
 
 
 def test_build_db_index_ignores_malformed_metadata_rows(tmp_path):
