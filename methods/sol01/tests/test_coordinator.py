@@ -175,13 +175,16 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
         lambda *args, **kwargs: schema_context_cache,
     )
     monkeypatch.setattr(
-        "sol01.pipeline.select_schema_context_objects",
+        "sol01.pipeline.build_available_schema_context",
         lambda *args, **kwargs: (
             [
                 SchemaContextObject(schema_object=schema_objects[0], rank=1, score=0.9),
                 SchemaContextObject(schema_object=schema_objects[1], rank=2, score=0.8),
             ],
-            {"query": {"text": "test query"}, "candidate_count": 2},
+            {
+                "question_context": {"text": "test query"},
+                "context_counts": {"available_objects": 2},
+            },
         ),
     )
     return schema
@@ -437,25 +440,28 @@ def test_schema_expansion_selects_context_for_missing_column(
 ):
     queries: list[str] = []
 
-    def fake_select_schema_context_objects(index: Any, question: str, **kwargs: Any):
+    def fake_build_available_schema_context(index: Any, question: str, **kwargs: Any):
         if "Schema expansion trigger:" in question:
             queries.append(question)
             schema_object = next(obj for obj in index.objects if obj.table_name == ORDERS_TABLE)
             return (
                 [SchemaContextObject(schema_object=schema_object, rank=1, score=0.9)],
-                {"query": {"text": question}, "candidate_count": 1},
+                {
+                    "question_context": {"text": question},
+                    "context_counts": {"available_objects": 1},
+                },
             )
         return (
             [
                 SchemaContextObject(schema_object=index.objects[0], rank=1, score=0.9),
                 SchemaContextObject(schema_object=index.objects[1], rank=2, score=0.8),
             ],
-            {"query": {"text": question}, "candidate_count": 2},
+            {"question_context": {"text": question}, "context_counts": {"available_objects": 2}},
         )
 
     monkeypatch.setattr(
-        "sol01.pipeline.select_schema_context_objects",
-        fake_select_schema_context_objects,
+        "sol01.pipeline.build_available_schema_context",
+        fake_build_available_schema_context,
     )
     task = Task(instance_id="sf_context_expand", db="TEST_DB", question="Show order totals.")
     run_paths = ensure_run_paths("context-expand-run", outputs_root=tmp_path)

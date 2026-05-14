@@ -1,4 +1,4 @@
-"""Deterministic schema context selection over versioned schema chunks."""
+"""Build planner-visible schema context from available metadata."""
 
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ _OBJECT_TYPE_ORDER = {
 
 
 @dataclass(frozen=True)
-class SchemaContextQuestion:
+class SchemaContextInputs:
     """Question-derived context kept for diagnostics and linked-document clipping."""
 
     text: str
@@ -48,13 +48,13 @@ class SchemaContextQuestion:
     normalized_tokens: tuple[str, ...]
 
 
-def build_schema_context_query(
+def build_schema_context_inputs(
     question: str,
     *,
     linked_docs: Sequence[str] = (),
     exact_literals: Sequence[str] = (),
     max_doc_chars: int = 6000,
-) -> SchemaContextQuestion:
+) -> SchemaContextInputs:
     """Build normalized question context without ranking schema objects."""
 
     clean_question = _clean_text(question)
@@ -85,7 +85,7 @@ def build_schema_context_query(
         " ".join(uppercase_codes),
         " ".join(normalized_tokens),
     ]
-    return SchemaContextQuestion(
+    return SchemaContextInputs(
         text=_join_text(parts),
         question=clean_question,
         linked_doc_context=linked_doc_context,
@@ -144,36 +144,34 @@ def clip_linked_docs(
     return "\n\n".join(selected)[:max_doc_chars].rstrip()
 
 
-def select_schema_context_objects(
+def build_available_schema_context(
     cache: SchemaContextCache,
     question: str,
     *,
     linked_docs: Sequence[str] = (),
     exact_literals: Sequence[str] = (),
     config: SchemaContextConfig | None = None,
-    top_k_objects: int | None = None,
 ) -> tuple[list[SchemaContextObject], dict[str, object]]:
-    """Return available schema objects without BM25, embeddings, or exact-match ranking.
+    """Return schema objects available to the planner.
 
     Curated large-schema summaries replace raw metadata for the tables they
     cover. Uncovered tables still flow through as normal database metadata.
     """
 
     config = config or SchemaContextConfig()
-    query = build_schema_context_query(
+    inputs = build_schema_context_inputs(
         question,
         linked_docs=linked_docs,
         exact_literals=exact_literals,
         max_doc_chars=config.max_linked_doc_chars,
     )
-    context_mode, context_objects = _context_objects(cache.objects, cache.chunks)
+    context_mode, context_objects = _available_schema_objects(cache.objects, cache.chunks)
     schema_context_objects = _schema_context_objects(
         context_objects,
         chunks=cache.chunks,
-        top_k=top_k_objects,
     )
     diagnostics = _diagnostics(
-        query,
+        inputs,
         context_mode=context_mode,
         schema_context_objects=schema_context_objects,
         object_count=len(cache.objects),
@@ -183,7 +181,7 @@ def select_schema_context_objects(
     return schema_context_objects, diagnostics
 
 
-def _context_objects(
+def _available_schema_objects(
     objects: Sequence[SchemaObject],
     chunks: Sequence[SchemaContextChunk],
 ) -> tuple[str, list[SchemaObject]]:
@@ -244,13 +242,11 @@ def _schema_context_objects(
     objects: Sequence[SchemaObject],
     *,
     chunks: Sequence[SchemaContextChunk],
-    top_k: int | None,
 ) -> list[SchemaContextObject]:
     chunks_by_object: dict[str, list[SchemaContextChunk]] = defaultdict(list)
     for chunk in chunks:
         chunks_by_object[chunk.object_id].append(chunk)
 
-    selected_objects = list(objects[:top_k] if top_k is not None else objects)
     return [
         SchemaContextObject(
             schema_object=schema_object,
@@ -266,12 +262,12 @@ def _schema_context_objects(
             ],
             rank=rank,
         )
-        for rank, schema_object in enumerate(selected_objects, start=1)
+        for rank, schema_object in enumerate(objects, start=1)
     ]
 
 
 def _diagnostics(
-    query: SchemaContextQuestion,
+    inputs: SchemaContextInputs,
     *,
     context_mode: str,
     schema_context_objects: Sequence[SchemaContextObject],
@@ -280,16 +276,16 @@ def _diagnostics(
     context_object_count: int,
 ) -> dict[str, object]:
     return {
-        "mode": context_mode,
-        "query": {
-            "text": query.text,
-            "exact_literals": list(query.exact_literals),
-            "dates": list(query.dates),
-            "years": list(query.years),
-            "identifiers": list(query.identifiers),
-            "uppercase_codes": list(query.uppercase_codes),
-            "normalized_tokens": list(query.normalized_tokens[:50]),
-            "linked_doc_chars": len(query.linked_doc_context),
+        "context_mode": context_mode,
+        "question_context": {
+            "text": inputs.text,
+            "exact_literals": list(inputs.exact_literals),
+            "dates": list(inputs.dates),
+            "years": list(inputs.years),
+            "identifiers": list(inputs.identifiers),
+            "uppercase_codes": list(inputs.uppercase_codes),
+            "normalized_tokens": list(inputs.normalized_tokens[:50]),
+            "linked_doc_chars": len(inputs.linked_doc_context),
         },
         "context_counts": {
             "objects_total": object_count,
@@ -300,8 +296,7 @@ def _diagnostics(
             {
                 "object_id": obj.schema_object.object_id,
                 "object_type": obj.schema_object.object_type,
-                "rank": obj.rank,
-                "score": obj.score,
+                "position": obj.rank,
                 "evidence_chunk_ids": [chunk.chunk.chunk_id for chunk in obj.chunks],
             }
             for obj in schema_context_objects

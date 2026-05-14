@@ -1,4 +1,4 @@
-"""Tests for deterministic schema context selection."""
+"""Tests for deterministic schema context availability."""
 
 from __future__ import annotations
 
@@ -9,15 +9,15 @@ from sol01.models import ColumnSchema, SchemaContextChunk, SchemaObject, TableSc
 from sol01.schema.chunks import render_schema_chunks
 from sol01.schema.objects import build_schema_objects
 from sol01.schema.schema_context import (
-    build_schema_context_query,
+    build_available_schema_context,
+    build_schema_context_inputs,
     clip_linked_docs,
-    select_schema_context_objects,
 )
 from sol01.schema.schema_context_cache import SchemaContextCache
 
 
 def test_query_construction_extracts_signals_and_clips_linked_docs_by_overlap():
-    query = build_schema_context_query(
+    query = build_schema_context_inputs(
         "Show DB.PUBLIC.ORDERS where STATUS = 'closed' in FY_2024 and 2024-01-03",
         linked_docs=[
             "Irrelevant billing policy paragraph.\n\n"
@@ -49,7 +49,7 @@ def test_query_construction_extracts_signals_and_clips_linked_docs_by_overlap():
 def test_full_database_metadata_context_returns_all_schema_objects_without_ranking():
     index = _fake_index()
 
-    objects, diagnostics = select_schema_context_objects(
+    objects, diagnostics = build_available_schema_context(
         index,
         "Find ORDERS where status is 'closed'",
         config=SchemaContextConfig(object_cutoff=2),
@@ -65,7 +65,7 @@ def test_full_database_metadata_context_returns_all_schema_objects_without_ranki
         "join_candidate:DB.PUBLIC.ORDERS#CUSTOMER_ID->DB.PUBLIC.CUSTOMERS#CUSTOMER_ID:abcdef12",
         "sample_value:DB.PUBLIC.ORDERS#STATUS:11111111",
     ]
-    assert diagnostics["mode"] == "full_database_metadata"
+    assert diagnostics["context_mode"] == "full_database_metadata"
     assert diagnostics["context_counts"] == {
         "objects_total": 7,
         "chunks_total": 7,
@@ -74,20 +74,16 @@ def test_full_database_metadata_context_returns_all_schema_objects_without_ranki
     assert all(obj.score is None for obj in objects)
 
 
-def test_top_k_is_explicit_only_and_does_not_use_config_object_limit():
+def test_object_cutoff_does_not_limit_available_schema_context():
     index = _fake_index()
 
-    objects, _ = select_schema_context_objects(
+    objects, _ = build_available_schema_context(
         index,
         "orders status customer amount",
         config=SchemaContextConfig(object_cutoff=1),
-        top_k_objects=2,
     )
 
-    assert [obj.schema_object.object_id for obj in objects] == [
-        "family:DB.PUBLIC:orders_family:deadbeef",
-        "table:DB.PUBLIC.CUSTOMERS",
-    ]
+    assert len(objects) == len(index.objects)
 
 
 def test_summary_backed_context_uses_only_curated_large_schema_objects():
@@ -137,13 +133,13 @@ def test_summary_backed_context_uses_only_curated_large_schema_objects():
         chunks=chunks,
     )
 
-    schema_context_objects, diagnostics = select_schema_context_objects(
+    schema_context_objects, diagnostics = build_available_schema_context(
         index,
         "Count daily github archive repository events",
         config=SchemaContextConfig(object_cutoff=1),
     )
 
-    assert diagnostics["mode"] == "large_schema_summary"
+    assert diagnostics["context_mode"] == "large_schema_summary"
     schema_context_ids = [item.schema_object.object_id for item in schema_context_objects]
     assert "table:GITHUB_REPOS_DATE.DAY._20240103" in schema_context_ids
     assert "column:GITHUB_REPOS_DATE.DAY._20240103#payload" not in schema_context_ids

@@ -62,7 +62,7 @@ from sol01.schema.expansion import (
     schema_expansion_query,
 )
 from sol01.schema.resolver import resolve_schema_context
-from sol01.schema.schema_context import select_schema_context_objects
+from sol01.schema.schema_context import build_available_schema_context
 from sol01.schema.schema_context_cache import build_schema_context_cache
 
 logger = get_logger(__name__)
@@ -156,7 +156,7 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
         config=run.schema_context_config,
     )
     linked_docs = [] if run.docs_context is None else [run.docs_context]
-    schema_context_objects, context_diagnostics = select_schema_context_objects(
+    schema_context_objects, context_diagnostics = build_available_schema_context(
         schema_context_cache,
         run.task.question,
         linked_docs=linked_docs,
@@ -205,7 +205,6 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
         rationale=sanitized_decision.rationale,
         confidence=sanitized_decision.confidence,
         diagnostics={
-            "selection_prompt_chars": len(planning_prompt),
             "planning_prompt_chars": len(planning_prompt),
             "sql_reference_context_chars": len(sql_ref_context),
             "max_schema_prompt_chars": run.schema_context_config.max_schema_prompt_chars,
@@ -234,15 +233,14 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
             "object_count": len(schema_context_cache.objects),
             "chunk_count": len(schema_context_cache.chunks),
         },
-        "selection": context_diagnostics,
+        "available_context": context_diagnostics,
         "schema_context_objects": [
             {
                 "object_id": item.schema_object.object_id,
                 "object_type": item.schema_object.object_type,
                 "name": item.schema_object.name,
                 "table_name": item.schema_object.table_name,
-                "rank": item.rank,
-                "score": item.score,
+                "position": item.rank,
             }
             for item in schema_context_objects
         ],
@@ -729,7 +727,7 @@ def _select_expansion_objects(
     """Select and sanitize schema objects for one expansion attempt."""
 
     linked_docs = [] if run.docs_context is None else [run.docs_context]
-    schema_context_objects, context_diagnostics = select_schema_context_objects(
+    schema_context_objects, context_diagnostics = build_available_schema_context(
         schema_context_cache,
         expansion_query,
         linked_docs=linked_docs,
@@ -759,7 +757,7 @@ def _select_expansion_objects(
         s for s in sanitized_decision.selected_objects if s.object_id not in current_ids
     ]
     diagnostics: dict[str, object] = {
-        "selection": context_diagnostics,
+        "available_context": context_diagnostics,
         "planner": planner_diagnostics,
         "prompt_budget": _prompt_budget_diagnostics(
             planning_prompt=planning_prompt,

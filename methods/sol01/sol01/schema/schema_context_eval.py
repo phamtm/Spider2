@@ -21,7 +21,7 @@ from sol01.models import (
 from sol01.schema.db_index import load_db_index
 from sol01.schema.large_schema_summaries import load_large_schema_summary_registry
 from sol01.schema.resolver import resolve_schema_context
-from sol01.schema.schema_context import select_schema_context_objects
+from sol01.schema.schema_context import build_available_schema_context
 from sol01.schema.schema_context_cache import SchemaContextCache, build_schema_context_cache
 
 DEFAULT_GOLD_TABLE_PATH = REPO_ROOT / "methods" / "gold-tables" / "spider2-snow-gold-tables.jsonl"
@@ -158,7 +158,7 @@ def run_schema_context_eval(
         db_index = dict(db_index_loader(task.db))
         schema_context_cache = schema_context_cache_loader(task.db, db_index, config)
         linked_docs = _task_linked_docs(task, document_loader)
-        schema_context_objects, context_diagnostics = select_schema_context_objects(
+        schema_context_objects, context_diagnostics = build_available_schema_context(
             schema_context_cache,
             task.question,
             linked_docs=linked_docs,

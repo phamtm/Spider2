@@ -81,12 +81,12 @@ def test_schema_selection_model_validates_confidence_range():
         expanded_tables=["orders", "customers"],
         rationale="Question mentions customers and orders.",
         confidence=0.8,
-        diagnostics={"selection_prompt_chars": 100, "candidate_table_count": 2},
+        diagnostics={"planning_prompt_chars": 100, "candidate_table_count": 2},
     )
     assert selection.confidence == 0.8
     assert selection.selected_object_ids == ["table:orders"]
     assert selection.expanded_tables == ["orders", "customers"]
-    assert selection.diagnostics["selection_prompt_chars"] == 100
+    assert selection.diagnostics["planning_prompt_chars"] == 100
 
     with pytest.raises(ValidationError):
         SchemaSelection(
