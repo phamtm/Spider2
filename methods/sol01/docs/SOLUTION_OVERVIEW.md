@@ -455,8 +455,7 @@ and final execution summary.
 
 Schema-context traces also include:
 
-- `schema_context_version`
-- effective `schema_context_config`
+- `schema_context.cache.cache_key`
 - context mode and object counts
 - available object IDs and ranked planning evidence
 - planner sanitization diagnostics

@@ -44,7 +44,6 @@ class RuntimeProfile:
 class SchemaContextPolicy:
     """Defaults for schema planning and prompt context sizing."""
 
-    version: str = "schema_context_v1"
     family_similarity_threshold: float = 0.82
     max_linked_doc_chars: int = 6000
     max_schema_prompt_chars: int = 24000

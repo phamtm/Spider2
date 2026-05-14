@@ -302,7 +302,6 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
         "candidate_review": "hash-candidate_review",
     }
     assert trace["schema_selection"]["expanded_tables"] == [SALES_TABLE]
-    assert trace["schema_context_version"] == "schema_context_v1"
     assert trace["schema_context"]["cache"]["cache_key"] == "test-cache-key"
     assert trace["solver_policy"] == _policy(initial_candidates=1).as_dict()
     prompt_budget = trace["schema_selection"]["diagnostics"]["prompt_budget"]

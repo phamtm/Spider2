@@ -225,10 +225,11 @@ evidence. High-cardinality, opaque, free-text, numeric, temporal,
 semi-structured, URL, email, UUID, hash, key-like, and raw text values are
 excluded so arbitrary literals are not promoted into SQL prompts.
 
-Each task trace records `schema_context_version`, effective schema-context
-config, planner-visible schema-object evidence, context diagnostics, planner
-sanitization diagnostics, resolver entries, allowed tables, and recovery
-diagnostics when schema recovery adds schema context.
+Each task trace records cache-backed schema-context provenance, including
+`schema_context.cache.cache_key`, planner-visible schema-object evidence,
+context diagnostics, planner sanitization diagnostics, resolver entries,
+allowed tables, and recovery diagnostics when schema recovery adds schema
+context.
 
 To verify prompt size, inspect `schema_context.prompt_budget` in
 `traces/<instance_id>.json`, or run:

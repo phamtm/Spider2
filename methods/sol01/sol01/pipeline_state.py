@@ -7,7 +7,7 @@ from typing import Any
 
 from sol01.candidates.selection import select_winner
 from sol01.infra.config import SchemaContextConfig
-from sol01.infra.policy import DEFAULT_SCHEMA_CONTEXT_POLICY, DEFAULT_SOLVER_POLICY, SolverPolicy
+from sol01.infra.policy import DEFAULT_SOLVER_POLICY, SolverPolicy
 from sol01.llm.client import LLMClient
 from sol01.models import AttemptRecord, Intent, SchemaSelection, Task
 
@@ -20,7 +20,6 @@ class TaskRun:
     client: LLMClient
     schema_context_config: SchemaContextConfig
     policy: SolverPolicy = dataclasses.field(default_factory=lambda: DEFAULT_SOLVER_POLICY)
-    schema_context_version: str = DEFAULT_SCHEMA_CONTEXT_POLICY.version
 
     # Set during plan_schema
     intent: Intent | None = None

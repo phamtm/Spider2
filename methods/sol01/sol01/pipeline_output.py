@@ -36,7 +36,6 @@ def write_task_output(
         "db": task.db,
         "question": task.question,
         "schema_selection": run.schema.model_dump(mode="json"),
-        "schema_context_version": run.schema_context_version,
         "schema_context": run.schema_context,
         "solver_policy": run.policy.as_dict(),
         "intent": run.intent.model_dump(mode="json"),
