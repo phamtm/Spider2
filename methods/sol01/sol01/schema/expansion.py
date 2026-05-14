@@ -9,7 +9,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from sol01.candidates.evaluator import evaluate_candidate
-from sol01.candidates.scoring import best_attempt as choose_best_attempt
+from sol01.candidates.selection import select_winner
 from sol01.llm.client import LLMClient
 from sol01.llm.prompt_builders import (
     sanitize_schema_planning_decision,
@@ -34,6 +34,11 @@ BuildPlanningPrompt = Callable[..., str]
 PromptBudgetDiagnostics = Callable[..., dict[str, object]]
 LogCandidate = Callable[[str, AttemptRecord], None]
 RebuildContext = Callable[..., TaskContext]
+
+
+def _winner_attempt(attempts: list[AttemptRecord]) -> AttemptRecord | None:
+    sel = select_winner(attempts)
+    return sel.attempt if sel is not None else None
 
 
 def attempt_schema_expansion(
@@ -161,7 +166,7 @@ def attempt_schema_expansion(
             ctx.schema_context,
             expansion_payload,
         )
-        return choose_best_attempt(attempts), expansion_payload, expanded_ctx
+        return _winner_attempt(attempts), expansion_payload, expanded_ctx
 
     expansion_attempt = evaluate_candidate(
         task=expanded_ctx.task,
@@ -181,7 +186,7 @@ def attempt_schema_expansion(
         ctx.schema_context,
         expansion_payload,
     )
-    return choose_best_attempt(attempts), expansion_payload, expanded_ctx
+    return _winner_attempt(attempts), expansion_payload, expanded_ctx
 
 
 def _select_expansion_objects(

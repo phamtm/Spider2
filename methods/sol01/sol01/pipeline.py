@@ -11,7 +11,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from sol01.candidates.evaluator import evaluate_candidate
-from sol01.candidates.scoring import best_attempt
+from sol01.candidates.selection import final_winner_reason, select_winner
 from sol01.candidates.verification import (
     augment_intent_with_value_groundings,
     table_schemas_for_selection,
@@ -58,6 +58,15 @@ from sol01.schema.schema_context import select_schema_context_objects
 from sol01.schema.schema_context_cache import build_schema_context_cache
 
 logger = get_logger(__name__)
+
+
+def _winner_attempt(
+    attempts: list[AttemptRecord],
+    *,
+    preferred_stage: str | None = None,
+) -> AttemptRecord | None:
+    sel = select_winner(attempts, preferred_stage=preferred_stage)
+    return sel.attempt if sel is not None else None
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +404,7 @@ def generate_initial_candidates(
     )
     candidate_limit = min(initial_candidates, max_attempts - len(attempts))
     if candidate_limit <= 0:
-        return best_attempt(attempts)
+        return _winner_attempt(attempts)
 
     batch = run_prompt(
         ctx.client,
@@ -422,7 +431,7 @@ def generate_initial_candidates(
         )
         attempts.append(attempt)
         log_candidate(ctx.task.instance_id, attempt)
-    return best_attempt(attempts)
+    return _winner_attempt(attempts)
 
 
 def repair_failed_execution(
@@ -466,7 +475,7 @@ def repair_failed_execution(
     )
     attempts.append(attempt)
     log_candidate(ctx.task.instance_id, attempt)
-    return best_attempt(attempts)
+    return _winner_attempt(attempts)
 
 
 def review_and_repair(
@@ -511,13 +520,7 @@ def review_and_repair(
         "review_reason": review_reason,
         **review.model_dump(mode="json"),
     }
-    if review.preferred_stage:
-        preferred_attempt = next(
-            (attempt for attempt in executable_attempts if attempt.stage == review.preferred_stage),
-            None,
-        )
-        if preferred_attempt is not None:
-            current_best = preferred_attempt
+    current_best = _winner_attempt(attempts, preferred_stage=review.preferred_stage) or current_best
 
     current_best.critic = {
         "confidence": review.confidence,
@@ -584,7 +587,7 @@ def review_and_repair(
     attempts.append(attempt)
     log_candidate(ctx.task.instance_id, attempt)
 
-    new_best = attempt if attempt.execution_result.ok else best_attempt(attempts)
+    new_best = _winner_attempt(attempts)
     return new_best, review_payload
 
 
@@ -652,11 +655,8 @@ def write_task_output(
 
     task = ctx.task
     final_ctx = expanded_ctx if expanded_ctx is not None else ctx
-    final_attempt_index = (
-        next((i for i, a in enumerate(attempts) if a is current_best), None)
-        if current_best is not None
-        else None
-    )
+    final_selection = select_winner(attempts) if current_best is not None else None
+    final_attempt_index = final_selection.index if final_selection is not None else None
     trace_payload: dict[str, Any] = {
         "instance_id": task.instance_id,
         "db": task.db,
@@ -667,6 +667,10 @@ def write_task_output(
         "intent": final_ctx.intent.model_dump(mode="json"),
         "prompt_hashes": ctx.prompt_hashes,
         "final_attempt_index": final_attempt_index,
+        "final_attempt_reason": final_winner_reason(
+            current_best,
+            candidate_review_payload=candidate_review_payload,
+        ),
         "attempts": attempts,
     }
     if candidate_review_payload is not None:
