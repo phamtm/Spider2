@@ -134,22 +134,22 @@ The local registry lives in `methods/sol01/outputs/registry/` with:
 
 ## Schema Context
 
-`sol01` uses deterministic schema objects plus a sparse BM25 ranker. If a
-database has curated large-schema summary coverage, planning sees the
-summary-backed logical objects instead of the covered raw tables. Otherwise,
-planning ranks the database metadata objects directly.
+`sol01` uses deterministic schema objects with no question-time retrieval or
+ranking. If a database has curated large-schema summary coverage, planning sees
+only those summary-backed logical objects. Otherwise, planning sees the full
+logical metadata object set for the database.
 
 The runtime path is:
 
 ```text
-question -> schema metadata context -> sparse BM25 ranking
+question -> schema metadata context
   -> planner object selection
   -> resolver expansion -> compact schema context -> SQL generation
 ```
 
 Large-schema summaries keep very wide or repeated schemas compact. For ordinary
-schemas, the ranker narrows the planner-visible evidence to the strongest
-matches before the model chooses from those objects.
+schemas, the planner works from the full logical metadata object set instead of
+from a ranked shortlist.
 
 Cache layout:
 
@@ -182,8 +182,6 @@ Runtime schema-context settings can be set in the shell or `methods/sol01/.env`:
 - `SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD`, default `0.82`
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
 - `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
-- `SOL01_SCHEMA_TOP_K_SPARSE`, default `80`
-- `SOL01_SCHEMA_TOP_K_OBJECTS`, default `30`
 
 `SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF` is not a runtime setting. It is an
 offline `sol01 schema-context-eval` option, exposed as `--object-cutoff`.
@@ -193,10 +191,10 @@ evidence. High-cardinality, opaque, free-text, numeric, temporal,
 semi-structured, URL, email, UUID, hash, key-like, and raw text values are
 excluded so arbitrary literals are not promoted into SQL prompts.
 
-Each task trace records `schema_context_version`, effective schema-context config,
-available schema-object evidence, context diagnostics, planner sanitization
-diagnostics, resolver entries, allowed tables, and recovery diagnostics when
-schema recovery adds schema context.
+Each task trace records `schema_context_version`, effective schema-context
+config, planner-visible schema-object evidence, context diagnostics, planner
+sanitization diagnostics, resolver entries, allowed tables, and recovery
+diagnostics when schema recovery adds schema context.
 
 To verify prompt size, inspect `schema_context.prompt_budget` in
 `traces/<instance_id>.json`, or run:

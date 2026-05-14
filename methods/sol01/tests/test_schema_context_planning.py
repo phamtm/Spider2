@@ -45,6 +45,7 @@ def test_schema_context_planning_prompt_uses_schema_context_objects_without_full
     assert "Available object ids:" in prompt
     assert "table:DB.PUBLIC.ORDERS" in prompt
     assert "column:DB.PUBLIC.ORDERS#AMOUNT" in prompt
+    assert "complete selector input for this database" in prompt
     assert "Do not invent object ids" in prompt
     assert "Return a SchemaPlanningDecision" in prompt
     assert "Schema summary:" not in prompt
@@ -137,6 +138,7 @@ def test_schema_context_planning_prompt_uses_curated_summary_evidence_for_covere
     assert "Available object ids:" in prompt
     assert "table:GITHUB_REPOS_DATE.DAY._20240103" in prompt
     assert "Large-schema summary: github_repos_day_events." in prompt
+    assert "rely on them instead of raw wide-schema DDL" in prompt
     assert "daily github archive" in prompt
     assert "CREATE TABLE" not in prompt
     assert "SECRET_DDL_MARKER" not in prompt

@@ -389,18 +389,6 @@ def _schema_object_tables(schema_object: SchemaObject) -> list[str]:
     return tables
 
 
-def _tables_from_chunk_id(object_id: str) -> list[str]:
-    if object_id.startswith("table:"):
-        return [object_id.removeprefix("table:")]
-    if object_id.startswith(("column:", "sample_value:")):
-        return [object_id.split(":", 1)[1].split("#", 1)[0]]
-    if object_id.startswith("join_candidate:"):
-        body = object_id.split(":", 1)[1]
-        left, _, right = body.partition("->")
-        return [left.split("#", 1)[0], right.split("#", 1)[0]]
-    return []
-
-
 def _covered_summary_ids(gold_tables: Sequence[str]) -> list[str]:
     registry = load_large_schema_summary_registry()
     return sorted(

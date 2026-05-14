@@ -11,9 +11,11 @@ This note records verification for the schema-context selection work tracked by
   versioned schema-context cache, selects available schema objects, calls
   `_schema_context_planning_user_prompt()`, sanitizes selected object IDs, and
   resolves selected logical objects to physical tables.
-- Runtime schema context uses deterministic schema objects plus sparse BM25
-  ranking in `sol01/schema/schema_context.py`. It does not use dense
-  embeddings or a separate model-backed search service.
+- Runtime schema context uses deterministic schema objects in
+  `sol01/schema/schema_context.py`. For databases with curated summary
+  coverage, the planner sees summary-backed objects only. Otherwise, it sees
+  the full logical metadata object set. It does not use dense embeddings, BM25,
+  or a separate model-backed search service.
 - The legacy full-schema planning and schema-expansion prompt builders were
   removed from `sol01/llm/prompt_builders.py`.
 - Remaining `db_schema_summary` usage is limited to offline schema-context-eval
@@ -33,15 +35,15 @@ This note records verification for the schema-context selection work tracked by
 uv run pytest tests/test_schema_context_planning.py tests/test_coordinator.py \
   tests/test_schema_context_eval.py tests/test_schema_resolver.py \
   tests/test_schema_context.py tests/test_schema_context_cache.py \
-  tests/test_schema_objects.py tests/test_hybrid_retrieval.py -q
+  tests/test_schema_objects.py -q
 ```
 
 Result: `48 passed`.
 
 These tests cover schema-context planning prompts, planner sanitization, trace
 `schema_context_version` and `schema_context` diagnostics, schema recovery,
-offline schema-context-eval accounting, resolver expansion, large-schema summaries,
-schema-context caching, schema objects, and chunk rendering.
+offline schema-context-eval accounting, resolver expansion, large-schema
+summaries, schema-context caching, and schema objects.
 
 ## Full Quality Gates
 

@@ -44,7 +44,7 @@ def test_question_context_clips_linked_docs_and_keeps_compact_query_text():
     assert clipped == "target revenue status paragraph."
 
 
-def test_hybrid_retrieval_returns_all_objects_for_small_database():
+def test_full_metadata_context_returns_all_objects_in_stable_order():
     index = _fake_index()
 
     objects, diagnostics = build_available_schema_context(
@@ -62,17 +62,20 @@ def test_hybrid_retrieval_returns_all_objects_for_small_database():
         "join_candidate:DB.PUBLIC.ORDERS#CUSTOMER_ID->DB.PUBLIC.CUSTOMERS#CUSTOMER_ID:abcdef12",
         "sample_value:DB.PUBLIC.ORDERS#STATUS:11111111",
     }
-    assert diagnostics["context_mode"] == "schema_objects"
+    assert diagnostics["context_mode"] == "full_metadata"
     assert diagnostics["context_counts"] == {
         "objects_total": 7,
         "available_objects": 7,
     }
-    assert diagnostics["question_context"]["linked_doc_chars"] == 0
-    assert "exact_literals" not in diagnostics["question_context"]
-
-    # ORDERS-related objects should rank above CUSTOMERS-only
-    id_to_pos = {obj.schema_object.object_id: obj.position for obj in objects}
-    assert id_to_pos["table:DB.PUBLIC.ORDERS"] < id_to_pos["table:DB.PUBLIC.CUSTOMERS"]
+    assert [obj.schema_object.object_id for obj in objects] == [
+        "family:DB.PUBLIC:orders_family:deadbeef",
+        "table:DB.PUBLIC.CUSTOMERS",
+        "table:DB.PUBLIC.ORDERS",
+        "column:DB.PUBLIC.ORDERS#AMOUNT",
+        "column:DB.PUBLIC.ORDERS#STATUS",
+        "join_candidate:DB.PUBLIC.ORDERS#CUSTOMER_ID->DB.PUBLIC.CUSTOMERS#CUSTOMER_ID:abcdef12",
+        "sample_value:DB.PUBLIC.ORDERS#STATUS:11111111",
+    ]
 
 
 def test_summary_backed_context_uses_only_curated_large_schema_objects():
@@ -125,12 +128,12 @@ def test_summary_backed_context_uses_only_curated_large_schema_objects():
         "Count daily github archive repository events",
     )
 
-    assert diagnostics["context_mode"] == "large_schema_summary"
+    assert diagnostics["context_mode"] == "summary_only"
     schema_context_ids = [item.schema_object.object_id for item in schema_context_objects]
     assert "table:GITHUB_REPOS_DATE.DAY._20240103" in schema_context_ids
     assert "column:GITHUB_REPOS_DATE.DAY._20240103#payload" not in schema_context_ids
-    assert "table:GITHUB_REPOS_DATE.DAY.REPOSITORIES" in schema_context_ids
-    assert "column:GITHUB_REPOS_DATE.DAY.REPOSITORIES#NAME" in schema_context_ids
+    assert "table:GITHUB_REPOS_DATE.DAY.REPOSITORIES" not in schema_context_ids
+    assert "column:GITHUB_REPOS_DATE.DAY.REPOSITORIES#NAME" not in schema_context_ids
     summary_object = next(
         item
         for item in schema_context_objects

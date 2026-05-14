@@ -131,24 +131,22 @@ directory is created and `current.json` is updated.
 
 ## Schema Context Planning
 
-Runtime schema context uses deterministic schema objects plus a sparse BM25
-ranker. Curated large-schema summary objects replace covered raw metadata
-before ranking, so repeated table families and very wide schemas stay compact.
-For databases without summary coverage, the ranker works directly over the
-built schema objects. There is no dense embedding or separate model-backed
-search service in the runtime path.
+Runtime schema context uses deterministic schema objects with no question-time
+retrieval or ranking. Curated large-schema summaries switch the planner into a
+summary-only mode, so repeated table families and very wide schemas stay
+compact. For databases without summary coverage, the planner sees the full
+built logical object set. There is no dense embedding, BM25, or separate
+model-backed search service in the runtime path.
 
-This keeps planning grounded without dumping a whole database into the prompt.
-Large Spider2-Snow databases can have hundreds of tables or very wide tables,
-so narrowing the planner-visible evidence first keeps selection noise and
-prompt size under control.
+This keeps planning grounded while removing retrieval-era complexity. Large
+Spider2-Snow databases can still stay compact through curated summaries, while
+ordinary databases no longer depend on a ranked shortlist.
 
 The runtime pipeline is:
 
 ```text
 question
   -> deterministic schema metadata context
-  -> sparse BM25 ranking of available schema objects
   -> LLM planner selects available logical objects
   -> resolver expands logical families to physical tables
   -> compact schema context is rendered
@@ -167,9 +165,10 @@ Schema objects are logical, not just physical tables. They include:
 Linked markdown documents are clipped to passages that overlap with the
 question before planning, rather than being sent wholesale.
 
-For each question, the planner sees available schema metadata evidence. It returns
-selected object IDs, object roles, constraints, and the answer contract in one
-structured response.
+For each question, the planner sees planner-visible schema metadata evidence.
+That evidence is either curated summaries only or the full logical object set
+for the database. It returns selected object IDs, object roles, constraints,
+and the answer contract in one structured response.
 
 The solver sanitizes the planner output:
 
@@ -227,7 +226,7 @@ instead of converting it into an invented rule.
 
 Curated summaries live in
 `methods/sol01/metadata/large_schema_summaries.json`. They compact repeated
-table families and wide repeated column groups before runtime ranking and
+table families and wide repeated column groups before planner selection and
 resolver expansion.
 
 Add or edit a summary when a schema family has a stable shape that should be
@@ -251,14 +250,12 @@ Relevant runtime settings:
 - `SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD`, default `0.82`
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
 - `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
-- `SOL01_SCHEMA_TOP_K_SPARSE`, default `80`
-- `SOL01_SCHEMA_TOP_K_OBJECTS`, default `30`
 
 These can be set in the shell or in `methods/sol01/.env`.
 
 `SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF` is eval-only. Use
 `uv run sol01 schema-context-eval --object-cutoff <n>` when you want to change
-how many ranked objects the offline coverage report measures.
+how many planner-visible objects the offline coverage report measures.
 
 ## Schema Context Evaluation
 

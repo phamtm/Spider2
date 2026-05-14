@@ -15,8 +15,6 @@ DEFAULT_SCHEMA_CONTEXT_VERSION = "schema_context_v1"
 DEFAULT_FAMILY_SIMILARITY_THRESHOLD = 0.82
 DEFAULT_MAX_LINKED_DOC_CHARS = 6000
 DEFAULT_MAX_SCHEMA_PROMPT_CHARS = 24000
-DEFAULT_TOP_K_SPARSE = 80
-DEFAULT_TOP_K_OBJECTS = 30
 METHOD_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DOTENV_PATH = METHOD_ROOT / ".env"
 
@@ -91,8 +89,6 @@ class SchemaContextConfig(BaseModel):
     )
     max_linked_doc_chars: int = Field(default=DEFAULT_MAX_LINKED_DOC_CHARS, ge=1)
     max_schema_prompt_chars: int = Field(default=DEFAULT_MAX_SCHEMA_PROMPT_CHARS, ge=1)
-    top_k_sparse: int = Field(default=DEFAULT_TOP_K_SPARSE, ge=1)
-    top_k_objects: int = Field(default=DEFAULT_TOP_K_OBJECTS, ge=1)
 
     @classmethod
     def from_env(cls, *, dotenv_path: Path | None = None) -> "SchemaContextConfig":
@@ -112,14 +108,6 @@ class SchemaContextConfig(BaseModel):
             max_schema_prompt_chars=_env_positive_int(
                 "SOL01_SCHEMA_MAX_PROMPT_CHARS",
                 default=DEFAULT_MAX_SCHEMA_PROMPT_CHARS,
-            ),
-            top_k_sparse=_env_positive_int(
-                "SOL01_SCHEMA_TOP_K_SPARSE",
-                default=DEFAULT_TOP_K_SPARSE,
-            ),
-            top_k_objects=_env_positive_int(
-                "SOL01_SCHEMA_TOP_K_OBJECTS",
-                default=DEFAULT_TOP_K_OBJECTS,
             ),
         )
 
