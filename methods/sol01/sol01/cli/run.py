@@ -38,17 +38,13 @@ def run(
         str | None,
         typer.Option(help="Run ID used for outputs/<run_id>."),
     ] = None,
-    instance_id: Annotated[
-        str | None,
-        typer.Option(help="Run one exact Spider2-snow instance."),
-    ] = None,
     db: Annotated[
         str | None,
-        typer.Option(help="Limit tasks to one database."),
+        typer.Option(help="Narrow selected tasks to one database."),
     ] = None,
     question_contains: Annotated[
         str | None,
-        typer.Option(help="Keep tasks whose question contains this text."),
+        typer.Option(help="Narrow selected tasks by question text."),
     ] = None,
     limit: Annotated[
         int | None,
@@ -65,9 +61,7 @@ def run(
     selectors: Annotated[
         list[str] | None,
         typer.Argument(
-            help=(
-                "Optional task/category selectors: exact IDs, globs, tier:<n>, tag:<name>, or all."
-            ),
+            help=("Task/category selectors: exact IDs, globs, tier:<n>, tag:<name>, or all."),
         ),
     ] = None,
 ) -> None:
@@ -76,8 +70,6 @@ def run(
     started_at = perf_counter()
     logger.info(
         "run command",
-        run_id=run_id,
-        instance_id=instance_id,
         db=db,
         question_contains=question_contains,
         limit=limit,
@@ -88,7 +80,6 @@ def run(
     kwargs: dict[str, Any] = {
         "run_id": run_id,
         "selectors": selectors or [],
-        "instance_id": instance_id,
         "db": db,
         "question_contains": question_contains,
         "limit": limit,
@@ -119,7 +110,6 @@ def handle_run(
     *,
     concurrency: int | None = None,
     run_id: str | None,
-    instance_id: str | None,
     db: str | None,
     question_contains: str | None,
     limit: int | None,
@@ -132,7 +122,6 @@ def handle_run(
 
     tasks = load_run_tasks(
         selectors=selectors,
-        instance_id=instance_id,
         db=db,
         question_contains=question_contains,
         limit=limit,
@@ -245,45 +234,33 @@ def build_registry_records(
     return records
 
 
-def load_filtered_tasks(
-    *,
-    instance_id: str | None,
-    db: str | None,
-    question_contains: str | None,
-    limit: int | None,
-) -> list[Task]:
-    """Keep legacy filter parsing in one place."""
-
-    return load_tasks(
-        instance_id=instance_id,
-        db=db,
-        question_contains=question_contains,
-        limit=limit,
-    )
-
-
 def load_run_tasks(
     *,
     selectors: Iterable[str] | None,
-    instance_id: str | None,
+    instance_id: str | None = None,
     db: str | None,
     question_contains: str | None,
     limit: int | None,
 ) -> list[Task]:
-    """Load tasks from selectors or from the older filter options."""
+    """Load tasks via selectors, with optional narrowing filters.
 
-    normalized_selectors = [selector.strip() for selector in selectors or [] if selector.strip()]
-    if not normalized_selectors:
-        return load_filtered_tasks(
-            instance_id=instance_id,
-            db=db,
-            question_contains=question_contains,
-            limit=limit,
-        )
+    When selectors are provided they are the canonical task source.  An
+    instance_id (used by schema-context commands) is treated as a single
+    exact-ID selector.  With neither, all tasks are loaded so that plain
+    ``sol01 run`` and ``sol01 run --db X`` still work.
+    """
+
+    normalized_selectors = [s.strip() for s in selectors or [] if s.strip()]
     if instance_id is not None:
-        raise typer.BadParameter("positional selectors cannot be combined with --instance-id")
+        if normalized_selectors:
+            raise typer.BadParameter("positional selectors cannot be combined with --instance-id")
+        normalized_selectors = [instance_id]
 
-    tasks = select_tasks(normalized_selectors)
+    if normalized_selectors:
+        tasks = select_tasks(normalized_selectors)
+    else:
+        tasks = load_tasks()
+
     if db is not None:
         tasks = [task for task in tasks if task.db == db]
     if question_contains:

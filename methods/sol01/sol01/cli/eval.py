@@ -10,8 +10,8 @@ import typer
 
 from sol01.analysis.eval_runner import run_official_eval
 from sol01.cli.common import slug
-from sol01.cli.run import load_filtered_tasks
 from sol01.infra.logging import get_logger
+from sol01.loading.tasks import load_tasks
 from sol01.output.output import ensure_run_paths, eval_input_csv_dir_for
 
 logger = get_logger(__name__)
@@ -95,7 +95,7 @@ def handle_eval(
         )
         task_ids = [
             task.instance_id
-            for task in load_filtered_tasks(
+            for task in load_tasks(
                 instance_id=instance_id,
                 db=db,
                 question_contains=question_contains,

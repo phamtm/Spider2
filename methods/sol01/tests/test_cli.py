@@ -68,8 +68,8 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch, tmp_path: Path):
 
     monkeypatch.setattr(
         cli_run,
-        "load_filtered_tasks",
-        lambda **kwargs: [Task(instance_id="local003", db="db", question="q")],
+        "select_tasks",
+        lambda selectors: [Task(instance_id="local003", db="db", question="q")],
     )
 
     def fake_from_env(cls, require_api_key=False, dotenv_path=None, concurrency=None):
@@ -123,8 +123,7 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch, tmp_path: Path):
     result = cli_run.handle_run(
         concurrency=None,
         run_id="smoke-local003",
-        selectors=None,
-        instance_id="local003",
+        selectors=["local003"],
         db=None,
         question_contains=None,
         limit=None,
@@ -184,7 +183,6 @@ def test_handle_run_leaves_schema_prewarm_to_batch_coordinator(monkeypatch, tmp_
         concurrency=None,
         run_id="prewarm",
         selectors=None,
-        instance_id=None,
         db=None,
         question_contains=None,
         limit=None,
@@ -203,7 +201,7 @@ def test_handle_run_forwards_all_expected_ids_to_persisted_eval(monkeypatch, tmp
 
     monkeypatch.setattr(
         cli_run,
-        "load_filtered_tasks",
+        "load_tasks",
         lambda **kwargs: [
             Task(instance_id="local003", db="db", question="q1"),
             Task(instance_id="local004", db="db", question="q2"),
@@ -254,7 +252,6 @@ def test_handle_run_forwards_all_expected_ids_to_persisted_eval(monkeypatch, tmp
         concurrency=None,
         run_id="smoke-local003",
         selectors=None,
-        instance_id=None,
         db=None,
         question_contains=None,
         limit=None,
@@ -309,7 +306,6 @@ def test_handle_run_uses_positional_selectors(monkeypatch, tmp_path: Path):
         concurrency=None,
         run_id="selected-bugs",
         selectors=["sf035", "sf_bq135"],
-        instance_id=None,
         db=None,
         question_contains=None,
         limit=None,
@@ -327,7 +323,7 @@ def test_handle_run_writes_registry_records_for_default_ui_source(monkeypatch, t
 
     monkeypatch.setattr(
         cli_run,
-        "load_filtered_tasks",
+        "load_tasks",
         lambda **kwargs: [
             Task(instance_id="local003", db="DB_A", question="q1"),
             Task(instance_id="local004", db="DB_B", question="q2"),
@@ -392,7 +388,6 @@ def test_handle_run_writes_registry_records_for_default_ui_source(monkeypatch, t
         concurrency=None,
         run_id="ui-default",
         selectors=None,
-        instance_id=None,
         db=None,
         question_contains=None,
         limit=None,
@@ -432,7 +427,7 @@ def test_handle_eval_passes_filtered_ids_without_rewriting_manifest(monkeypatch,
 
     monkeypatch.setattr(
         cli_eval,
-        "load_filtered_tasks",
+        "load_tasks",
         lambda **kwargs: [Task(instance_id="local003", db="db", question="q")],
     )
     monkeypatch.setattr(cli_eval, "ensure_run_paths", lambda run_id: run_paths)
@@ -497,7 +492,7 @@ def test_handle_eval_rejects_missing_filtered_csv(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(cli_eval, "ensure_run_paths", lambda run_id: run_paths)
     monkeypatch.setattr(
         cli_eval,
-        "load_filtered_tasks",
+        "load_tasks",
         lambda **kwargs: [Task(instance_id="local003", db="db", question="q")],
     )
 
