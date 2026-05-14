@@ -57,7 +57,7 @@ def test_run_command_dispatches_positional_selectors(monkeypatch):
     assert called["force"] is True
 
 
-def test_handle_run_passes_default_dotenv_path(monkeypatch):
+def test_handle_run_passes_default_dotenv_path(monkeypatch, tmp_path: Path):
     """The run handler should opt into the method-local dotenv file."""
 
     called: dict[str, Any] = {}
@@ -121,6 +121,7 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
         limit=None,
         force=False,
         skip_failed=False,
+        outputs_root=tmp_path,
     )
 
     assert called["require_api_key"] is True
@@ -133,7 +134,7 @@ def test_handle_run_passes_default_dotenv_path(monkeypatch):
     assert result["eval_summary"]["correct_tasks"] == 1
 
 
-def test_handle_run_leaves_schema_prewarm_to_batch_coordinator(monkeypatch):
+def test_handle_run_leaves_schema_prewarm_to_batch_coordinator(monkeypatch, tmp_path: Path):
     """The run handler should not duplicate schema index prewarm work."""
 
     events: list[tuple[str, Any]] = []
@@ -179,6 +180,7 @@ def test_handle_run_leaves_schema_prewarm_to_batch_coordinator(monkeypatch):
         limit=None,
         force=False,
         skip_failed=False,
+        outputs_root=tmp_path,
     )
 
     assert events[:2] == [("config", True), ("run_tasks", ["one", "two", "three"])]
@@ -248,12 +250,13 @@ def test_handle_run_forwards_all_expected_ids_to_persisted_eval(monkeypatch, tmp
         limit=None,
         force=False,
         skip_failed=False,
+        outputs_root=tmp_path,
     )
 
     assert called["expected_instance_ids"] == ["local003", "local004"]
 
 
-def test_handle_run_uses_positional_selectors(monkeypatch):
+def test_handle_run_uses_positional_selectors(monkeypatch, tmp_path: Path):
     """Selector runs should use select_tasks and preserve expected eval IDs."""
 
     called: dict[str, Any] = {}
@@ -302,10 +305,98 @@ def test_handle_run_uses_positional_selectors(monkeypatch):
         limit=None,
         force=True,
         skip_failed=False,
+        outputs_root=tmp_path,
     )
 
     assert called["task_ids"] == ["sf035", "sf_bq135"]
     assert called["expected_instance_ids"] == ["sf035", "sf_bq135"]
+
+
+def test_handle_run_writes_registry_records_for_default_ui_source(monkeypatch, tmp_path: Path):
+    """Production handle_run should populate the registry the progress UI defaults to."""
+
+    monkeypatch.setattr(
+        cli,
+        "_load_filtered_tasks",
+        lambda **kwargs: [
+            Task(instance_id="local003", db="DB_A", question="q1"),
+            Task(instance_id="local004", db="DB_B", question="q2"),
+        ],
+    )
+    monkeypatch.setattr(
+        cli.RuntimeConfig,
+        "from_env",
+        classmethod(
+            lambda cls, require_api_key=False, dotenv_path=None, concurrency=None: RuntimeConfig(
+                api_key="k"
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_tasks",
+        lambda *args, **kwargs: [
+            FinalAnswer(
+                instance_id="local003",
+                status="success",
+                sql="SELECT 1",
+                csv_path=str(tmp_path / "local003.csv"),
+                trace_path=str(tmp_path / "local003.json"),
+            ),
+            FinalAnswer(
+                instance_id="local004",
+                status="failed",
+                sql=None,
+                csv_path=None,
+                trace_path=str(tmp_path / "local004.json"),
+            ),
+        ],
+    )
+    monkeypatch.setattr(
+        cli,
+        "run_persisted_eval",
+        lambda *args, **kwargs: {
+            "correct_tasks": 1,
+            "attempted_tasks": 1,
+            "missing_csv_count": 1,
+            "per_instance": [
+                {
+                    "instance_id": "local003",
+                    "score": 1,
+                    "passed": True,
+                    "csv_present": True,
+                    "failure_reason": None,
+                },
+                {
+                    "instance_id": "local004",
+                    "score": None,
+                    "passed": False,
+                    "csv_present": False,
+                    "failure_reason": "missing_csv",
+                },
+            ],
+        },
+    )
+
+    cli.handle_run(
+        concurrency=None,
+        run_id="ui-default",
+        selectors=None,
+        instance_id=None,
+        db=None,
+        question_contains=None,
+        limit=None,
+        force=False,
+        skip_failed=False,
+        outputs_root=tmp_path,
+    )
+
+    latest_path = tmp_path / "registry" / "latest.json"
+    payload = json.loads(latest_path.read_text(encoding="utf-8"))
+    statuses = {row["instance_id"]: row["status"] for row in payload["task_results"]}
+    assert statuses == {"local003": "pass", "local004": "solver_failed"}
+    dbs = {row["instance_id"]: row["db"] for row in payload["task_results"]}
+    assert dbs == {"local003": "DB_A", "local004": "DB_B"}
 
 
 def test_selector_run_rejects_instance_id_filter_combo():

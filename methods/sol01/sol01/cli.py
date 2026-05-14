@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from shutil import rmtree
 from time import perf_counter
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import typer
 
@@ -32,11 +32,16 @@ from sol01.loading.tasks import load_tasks, select_tasks
 from sol01.models import FinalAnswer, Task
 from sol01.output.output import (
     OUTPUTS_ROOT,
+    RunPaths,
     ensure_ask_paths,
     ensure_run_paths,
     eval_input_csv_dir_for,
 )
-from sol01.output.registry import resolve_llm_call_log_path
+from sol01.output.registry import (
+    RegistryTaskRecord,
+    record_registry_batch,
+    resolve_llm_call_log_path,
+)
 from sol01.schema.index import CACHE_PATH, build_index_cache
 from sol01.schema.schema_context_cache import (
     DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT,
@@ -529,6 +534,7 @@ def handle_run(
     force: bool,
     skip_failed: bool,
     selectors: list[str] | None = None,
+    outputs_root: Path | None = None,
 ) -> dict[str, Any]:
     """Load tasks, then pass them to the batch coordinator."""
 
@@ -549,6 +555,7 @@ def handle_run(
         **({"concurrency": concurrency} if concurrency is not None else {}),
     )
     effective_run_id = run_id or _default_run_id("run")
+    effective_outputs_root = outputs_root or OUTPUTS_ROOT
     logger.info(
         "run start",
         run_id=effective_run_id,
@@ -565,12 +572,93 @@ def handle_run(
     eval_summary = run_persisted_eval(
         effective_run_id,
         expected_instance_ids=[task.instance_id for task in tasks],
+        outputs_root=effective_outputs_root,
     )
+    run_paths = ensure_run_paths(effective_run_id, outputs_root=effective_outputs_root)
+    registry_records = _build_registry_records(
+        run_id=effective_run_id,
+        tasks=tasks,
+        results=results,
+        eval_summary=eval_summary,
+        run_paths=run_paths,
+    )
+    if registry_records:
+        record_registry_batch(registry_records, outputs_root=effective_outputs_root)
     return {
         "tasks": tasks,
         "results": results,
         "eval_summary": eval_summary,
     }
+
+
+def _build_registry_records(
+    *,
+    run_id: str,
+    tasks: list[Task],
+    results: list[FinalAnswer],
+    eval_summary: dict[str, Any],
+    run_paths: RunPaths,
+) -> list[RegistryTaskRecord]:
+    """Translate one solver+eval round into registry-ready task records."""
+
+    timestamp = datetime.now(UTC).isoformat()
+    overall_eval_error = eval_summary.get("eval_error")
+    answers_by_id = {answer.instance_id: answer for answer in results}
+    per_instance_by_id = {
+        row["instance_id"]: row
+        for row in eval_summary.get("per_instance", [])
+        if isinstance(row, dict) and isinstance(row.get("instance_id"), str)
+    }
+    run_path = str(run_paths.root)
+    eval_path = str(run_paths.eval_dir / "summary.json")
+
+    records: list[RegistryTaskRecord] = []
+    for task in tasks:
+        answer = answers_by_id.get(task.instance_id)
+        per_row = per_instance_by_id.get(task.instance_id)
+        failure_reason = per_row.get("failure_reason") if per_row else None
+        csv_present = per_row.get("csv_present") if per_row else None
+
+        if csv_present is False:
+            csv_path: str | None = None
+        elif answer is not None:
+            csv_path = answer.csv_path
+        else:
+            csv_path = None
+
+        if overall_eval_error:
+            eval_status: Literal["success", "failed"] | None = "failed"
+            eval_error: str | None = str(overall_eval_error)
+        elif failure_reason == "eval_failed":
+            eval_status = "failed"
+            eval_error = "eval_failed"
+        elif per_row is not None:
+            eval_status = "success"
+            eval_error = None
+        else:
+            eval_status = None
+            eval_error = None
+
+        records.append(
+            RegistryTaskRecord(
+                run_id=run_id,
+                instance_id=task.instance_id,
+                db=task.db,
+                timestamp=timestamp,
+                score=per_row.get("score") if per_row else None,
+                run_path=run_path,
+                csv_path=csv_path,
+                trace_path=answer.trace_path if answer else None,
+                eval_path=eval_path,
+                solver_status=answer.status if answer else None,
+                eval_status=eval_status,
+                eval_error=eval_error,
+                extra_artifacts={
+                    "llm_call_log_path": str(run_paths.llm_calls_dir / f"{task.instance_id}.jsonl"),
+                },
+            )
+        )
+    return records
 
 
 def handle_eval(
