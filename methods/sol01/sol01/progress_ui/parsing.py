@@ -103,30 +103,36 @@ def find_instance_id(item: dict[str, Any], fallback: str | None = None) -> str |
     return fallback
 
 
-def classify(item: dict[str, Any]) -> tuple[str, float | None]:
-    score = as_float(item.get("score"))
-    passed = item.get("passed")
-    status = str(item.get("status") or item.get("eval_status") or "").lower()
+_REGISTRY_STATUS_MAP: dict[str, tuple[str, float | None]] = {
+    "pass": ("correct", 1.0),
+    "official_fail": ("incorrect", 0.0),
+    "eval_failed": ("incorrect", 0.0),
+    "solver_failed": ("unanswered", None),
+    "missing_csv": ("unanswered", None),
+}
 
+
+def classify(item: dict[str, Any]) -> tuple[str, float | None]:
+    status = str(item.get("status") or "")
+    if status in _REGISTRY_STATUS_MAP:
+        display_status, default_score = _REGISTRY_STATUS_MAP[status]
+        score = as_float(item.get("score"))
+        return display_status, score if score is not None else default_score
+
+    # Legacy eval-summary rows (no registry status field)
+    score = as_float(item.get("score"))
     if score is not None:
         return ("correct" if score >= 1 else "incorrect"), score
+    passed = item.get("passed")
     if passed is True:
         return "correct", 1.0
     if passed is False:
         return "incorrect", 0.0
-    if status in {"pass", "passed", "correct", "success"} and item.get("eval_status") != "failed":
-        return "correct", 1.0
-    if status in {"fail", "failed", "incorrect", "eval_failed", "error"}:
-        return "incorrect", 0.0
-    if status in {"solver_failed", "not_answered", "missing"} and not (
-        item.get("csv_path") or item.get("sql_path")
-    ):
-        return "unanswered", None
     if item.get("eval_error") or item.get("failure_reason"):
         return "incorrect", 0.0
     if item.get("csv_path") or item.get("sql_path") or item.get("csv_present"):
         return "answered", None
-    return "answered", None
+    return "unanswered", None
 
 
 def normalize_item(

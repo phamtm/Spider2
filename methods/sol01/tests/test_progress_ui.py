@@ -16,6 +16,7 @@ from sol01.progress_ui import (
     select_question_row,
     should_show_all_questions,
 )
+from sol01.progress_ui.parsing import classify
 
 
 def test_build_status_frame_joins_category_metadata():
@@ -498,3 +499,37 @@ def test_load_records_extracts_trace_diagnostics_from_trace_json(tmp_path: Path)
         "critic: Result is missing the customer breakdown. | "
         "ranking: execution_status=-1000, validation=-180, shape=-28"
     )
+
+
+def test_classify_registry_pass_is_correct():
+    assert classify({"status": "pass", "score": 1.0}) == ("correct", 1.0)
+
+
+def test_classify_registry_official_fail_is_incorrect():
+    assert classify({"status": "official_fail", "score": 0.0}) == ("incorrect", 0.0)
+    assert classify({"status": "official_fail"}) == ("incorrect", 0.0)
+
+
+def test_classify_registry_eval_failed_is_incorrect():
+    assert classify({"status": "eval_failed"}) == ("incorrect", 0.0)
+
+
+def test_classify_registry_solver_failed_is_unanswered():
+    assert classify({"status": "solver_failed"}) == ("unanswered", None)
+
+
+def test_classify_registry_missing_csv_is_unanswered():
+    assert classify({"status": "missing_csv"}) == ("unanswered", None)
+
+
+def test_classify_registry_pass_preserves_score():
+    assert classify({"status": "pass", "score": 1.0}) == ("correct", 1.0)
+
+
+def test_classify_legacy_score_based():
+    assert classify({"score": 1.0}) == ("correct", 1.0)
+    assert classify({"score": 0.0}) == ("incorrect", 0.0)
+
+
+def test_classify_legacy_success_is_not_correct():
+    assert classify({"status": "success"}) != ("correct", 1.0)
