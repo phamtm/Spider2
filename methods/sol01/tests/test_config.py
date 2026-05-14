@@ -2,13 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from sol01.infra.config import (
-    DEFAULT_BASE_URL,
-    DEFAULT_DOTENV_PATH,
-    DEFAULT_MODEL,
-    RuntimeConfig,
-    SchemaContextConfig,
-)
+from sol01.infra.config import DEFAULT_DOTENV_PATH, RuntimeConfig, SchemaContextConfig
+from sol01.infra.policy import DEFAULT_RUNTIME_PROFILE
 
 SCHEMA_CONTEXT_ENV_VARS = [
     "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD",
@@ -48,12 +43,17 @@ def test_default_config_uses_deepseek_openrouter_policy(monkeypatch):
     config = RuntimeConfig.from_env()
 
     assert config.api_key is None
-    assert config.base_url == DEFAULT_BASE_URL
-    assert config.model == DEFAULT_MODEL
-    assert config.provider_only == "deepseek"
-    assert config.allow_fallbacks is False
-    assert config.concurrency == 4
-    assert config.provider_routing == {"provider": {"only": ["deepseek"], "allow_fallbacks": False}}
+    assert config.base_url == DEFAULT_RUNTIME_PROFILE.base_url
+    assert config.model == DEFAULT_RUNTIME_PROFILE.model
+    assert config.provider_only == DEFAULT_RUNTIME_PROFILE.provider_only
+    assert config.allow_fallbacks == DEFAULT_RUNTIME_PROFILE.allow_fallbacks
+    assert config.concurrency == DEFAULT_RUNTIME_PROFILE.concurrency
+    assert config.provider_routing == {
+        "provider": {
+            "only": [DEFAULT_RUNTIME_PROFILE.provider_only],
+            "allow_fallbacks": DEFAULT_RUNTIME_PROFILE.allow_fallbacks,
+        }
+    }
 
 
 @pytest.mark.parametrize(

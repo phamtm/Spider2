@@ -2,10 +2,11 @@
 
 import pytest
 
-from sol01.infra.config import DEFAULT_MAX_SCHEMA_PROMPT_CHARS
+from sol01.infra.policy import DEFAULT_PROMPT_BUDGET_POLICY, DEFAULT_SCHEMA_CONTEXT_POLICY
 from sol01.llm.prompt_builders import (
     PromptBudgetExceededError,
     enforce_prompt_budget,
+    fit_prompt_budget,
     sanitize_schema_planning_decision,
     schema_context_planning_user_prompt,
     sql_reference_context,
@@ -143,7 +144,7 @@ def test_schema_context_planning_prompt_uses_curated_summary_evidence_for_covere
     assert "CREATE TABLE" not in prompt
     assert "SECRET_DDL_MARKER" not in prompt
     assert "SECRET_SAMPLE_MARKER" not in prompt
-    assert len(prompt) <= DEFAULT_MAX_SCHEMA_PROMPT_CHARS
+    assert len(prompt) <= DEFAULT_SCHEMA_CONTEXT_POLICY.max_schema_prompt_chars
 
 
 def test_schema_planning_decision_constraints_have_defaults_and_parse_values():
@@ -254,7 +255,7 @@ def test_sql_reference_and_repair_prompts_use_large_schema_summary_context():
     )
 
     assert "Large-schema summary: covid19_usafacts_wide_daily_counts" in reference_context
-    assert len(reference_context) <= DEFAULT_MAX_SCHEMA_PROMPT_CHARS
+    assert len(reference_context) <= DEFAULT_SCHEMA_CONTEXT_POLICY.max_schema_prompt_chars
     assert "CONFIRMED_CASES" in reference_context
     assert "CREATE TABLE" not in reference_context
     assert "SECRET_DDL_MARKER" not in reference_context
@@ -304,6 +305,26 @@ def test_sql_reference_budget_enforcement_preserves_large_schema_rules():
             reference_context,
             len(reference_context) - 1,
         )
+
+
+def test_fit_prompt_budget_shrinks_evidence_before_docs():
+    base = "HEADER\n"
+
+    def render_prompt(docs_limit: int, evidence_limit: int) -> str:
+        return base + ("D" * docs_limit) + ("E" * evidence_limit)
+
+    fit = fit_prompt_budget(
+        prompt_name="planning",
+        total_limit=len(base) + 10,
+        docs_limit=40,
+        evidence_limit=40,
+        render_prompt=render_prompt,
+    )
+
+    assert fit.evidence_limit == 0
+    assert fit.docs_limit < 40
+    assert fit.rounds <= DEFAULT_PROMPT_BUDGET_POLICY.max_shrink_rounds
+    assert len(fit.prompt) <= len(base) + 10
 
 
 def _intent() -> Intent:

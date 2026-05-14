@@ -12,12 +12,8 @@ import pandas as pd
 import pytest
 
 from sol01.coordinator import run_task
-from sol01.infra.config import (
-    DEFAULT_SOLVER_POLICY,
-    RuntimeConfig,
-    SchemaContextConfig,
-    SolverPolicy,
-)
+from sol01.infra.config import RuntimeConfig, SchemaContextConfig
+from sol01.infra.policy import DEFAULT_SOLVER_POLICY, SolverPolicy
 from sol01.llm.client import PromptSpec
 from sol01.models import (
     CandidateReviewReport,
@@ -152,6 +148,7 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
     }
     monkeypatch.setattr("sol01.coordinator.load_db_index", lambda *args, **kwargs: schema)
     monkeypatch.setattr("sol01.pipeline.load_db_index", lambda *args, **kwargs: schema)
+    monkeypatch.setattr("sol01.pipeline_recovery.load_db_index", lambda *args, **kwargs: schema)
     monkeypatch.setattr(
         "sol01.candidates.verification.load_db_index", lambda *args, **kwargs: schema
     )
@@ -187,7 +184,24 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
         lambda *args, **kwargs: schema_context_cache,
     )
     monkeypatch.setattr(
+        "sol01.pipeline_recovery.build_schema_context_cache",
+        lambda *args, **kwargs: schema_context_cache,
+    )
+    monkeypatch.setattr(
         "sol01.pipeline.build_available_schema_context",
+        lambda *args, **kwargs: (
+            [
+                SchemaContextObject(schema_object=schema_objects[0], position=1),
+                SchemaContextObject(schema_object=schema_objects[1], position=2),
+            ],
+            {
+                "question_context": {"text": "test query"},
+                "context_counts": {"available_objects": 2},
+            },
+        ),
+    )
+    monkeypatch.setattr(
+        "sol01.pipeline_recovery.build_available_schema_context",
         lambda *args, **kwargs: (
             [
                 SchemaContextObject(schema_object=schema_objects[0], position=1),
@@ -471,6 +485,10 @@ def test_schema_expansion_selects_context_for_missing_column(
 
     monkeypatch.setattr(
         "sol01.pipeline.build_available_schema_context",
+        fake_build_available_schema_context,
+    )
+    monkeypatch.setattr(
+        "sol01.pipeline_recovery.build_available_schema_context",
         fake_build_available_schema_context,
     )
     task = Task(instance_id="sf_context_expand", db="TEST_DB", question="Show order totals.")

@@ -5,6 +5,11 @@ Snowflake-only Spider2-snow solver.
 This method loads Spider2-snow tasks, generates read-only Snowflake SQL,
 executes through Snowflake, writes CSV predictions, and records traces.
 
+The default runtime profile and heuristic caps live in
+`methods/sol01/sol01/infra/policy.py`. Use that file when you want to change
+the method's default behavior. Use shell variables or CLI flags when you only
+want a local override for one run or one machine.
+
 ## Setup
 
 ```bash
@@ -33,6 +38,21 @@ access token:
 ```
 
 Pydantic Logfire is enabled by default for CLI runs.
+
+## Policy Surface
+
+`sol01` keeps the main default policy in one place:
+
+- runtime profile defaults: base URL, model, provider routing, concurrency
+- solver budgets: initial candidates, max attempts, semantic repairs
+- schema prompt defaults: family threshold, linked-doc budget, total prompt budget
+- prompt shrink strategy: what gets cut first when planning prompts are too large
+- schema render caps: family previews, evidence lines, column previews, sample literal length
+- filter-grounding caps: probe target count, fallback columns, probe row limit
+- eval metadata: default dataset size and schema-context-eval report bounds
+
+That keeps implementation modules focused on behavior instead of hiding policy
+inside local constants.
 
 ## Quality
 
@@ -147,6 +167,16 @@ question -> schema metadata context
   -> resolver expansion -> compact schema context -> SQL generation
 ```
 
+The runtime code follows the same split:
+
+- `sol01/pipeline.py`: high-level per-task stage flow
+- `sol01/pipeline_recovery.py`: recovery orchestration
+- `sol01/pipeline_output.py`: final SQL / CSV / trace writing
+- `sol01/pipeline_support.py`: shared prompt, budget, and candidate-recording helpers
+- `sol01/llm/planning_prompts.py`: planner prompt assembly and planner-output cleanup
+- `sol01/llm/sql_prompts.py`: SQL generation, repair, and review prompts
+- `sol01/recovery_signals.py`: schema-expansion trigger detection
+
 Large-schema summaries keep very wide or repeated schemas compact. For ordinary
 schemas, the planner works from the full logical metadata object set instead of
 from a ranked shortlist.
@@ -182,6 +212,10 @@ Runtime schema-context settings can be set in the shell or `methods/sol01/.env`:
 - `SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD`, default `0.82`
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
 - `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
+
+Those env-configured values override the defaults from `infra/policy.py`. The
+remaining prompt and render heuristics stay code-defaulted on purpose so the
+runtime path has one explicit source of truth.
 
 `SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF` is not a runtime setting. It is an
 offline `sol01 schema-context-eval` option, exposed as `--object-cutoff`.

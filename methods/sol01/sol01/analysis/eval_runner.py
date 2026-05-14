@@ -14,6 +14,7 @@ from typing import Any
 
 from sol01.execution.snowflake_runner import DEFAULT_CREDENTIAL_PATH
 from sol01.infra.logging import get_logger
+from sol01.infra.policy import DEFAULT_EVAL_DATASET_POLICY
 from sol01.loading.tasks import REPO_ROOT, load_tasks
 from sol01.output.output import (
     RunPaths,
@@ -36,7 +37,6 @@ from sol01.output.output import (
 EVALUATION_SUITE_DIR = REPO_ROOT / "spider2-snow" / "evaluation_suite"
 EVALUATE_SCRIPT = EVALUATION_SUITE_DIR / "evaluate.py"
 GOLD_DIR = EVALUATION_SUITE_DIR / "gold"
-BENCHMARK_TOTAL = 547
 FINAL_SCORE_RE = re.compile(
     r"Final score:\s*([0-9.]+),\s*Correct examples:\s*(\d+),\s*Total examples:\s*(\d+)"
 )
@@ -128,7 +128,15 @@ def run_official_eval(
     )
 
     # Some injected test runners may return None instead of an empty string.
-    summary = parse_eval_stdout(stdout_text)
+    expected_ids = (
+        set(expected_instance_ids)
+        if expected_instance_ids is not None
+        else _expected_instance_ids(run_paths)
+    )
+    summary = parse_eval_stdout(
+        stdout_text,
+        expected_task_count=len(expected_ids) if expected_ids else None,
+    )
     summary["run_id"] = run_id
     summary["eval_id"] = eval_id
     summary["cwd"] = str(eval_cwd)
@@ -141,11 +149,6 @@ def run_official_eval(
     summary["stderr_path"] = str(eval_stderr_path)
     summary["log_path"] = str(eval_log_path)
     summary["copied_csv_count"] = copied_csv_count
-    expected_ids = (
-        set(expected_instance_ids)
-        if expected_instance_ids is not None
-        else _expected_instance_ids(run_paths)
-    )
     summary["per_instance"] = _per_instance_summary(
         expected_ids=expected_ids,
         instance_scores=summary.get("instance_scores", {}),
@@ -352,17 +355,22 @@ def build_eval_command(
     return command
 
 
-def parse_eval_stdout(stdout: str) -> dict[str, Any]:
+def parse_eval_stdout(stdout: str, *, expected_task_count: int | None = None) -> dict[str, Any]:
     """Parse the evaluator stdout into stable benchmark summary fields."""
 
     final_match = FINAL_SCORE_RE.search(stdout)
     real_match = REAL_SCORE_RE.search(stdout)
+    benchmark_total = _benchmark_total(
+        expected_task_count=expected_task_count,
+        final_match=final_match,
+        real_match=real_match,
+    )
 
     summary: dict[str, Any] = {
         "attempted_tasks": 0,
         "correct_tasks": 0,
         "attempted_score": 0.0,
-        "benchmark_total": BENCHMARK_TOTAL,
+        "benchmark_total": benchmark_total,
         "benchmark_score": 0.0,
         "instance_scores": _parse_instance_scores(stdout),
     }
@@ -375,7 +383,7 @@ def parse_eval_stdout(stdout: str) -> dict[str, Any]:
     if real_match:
         summary["benchmark_score"] = float(real_match.group(1))
     elif final_match:
-        summary["benchmark_score"] = int(final_match.group(2)) / BENCHMARK_TOTAL
+        summary["benchmark_score"] = int(final_match.group(2)) / benchmark_total
 
     return summary
 
@@ -475,7 +483,11 @@ def _load_failed_eval_summary(
         summary = json.loads(summary_path.read_text(encoding="utf-8"))
     else:
         eval_id = _eval_id_for(artifact_tag)
-        summary = parse_eval_stdout(error.output or "")
+        expected_ids = _expected_instance_ids(run_paths)
+        summary = parse_eval_stdout(
+            error.output or "",
+            expected_task_count=len(expected_ids) if expected_ids else None,
+        )
         summary["run_id"] = run_id
         summary["eval_id"] = eval_id
         summary["cwd"] = str(eval_workspace_suite_dir_for(run_paths, eval_id=eval_id))
@@ -551,7 +563,7 @@ def _build_no_csv_summary(
         "attempted_tasks": 0,
         "correct_tasks": 0,
         "attempted_score": 0.0,
-        "benchmark_total": BENCHMARK_TOTAL,
+        "benchmark_total": len(expected_ids) or DEFAULT_EVAL_DATASET_POLICY.default_task_count,
         "benchmark_score": 0.0,
         "cwd": str(cwd),
         "credential_staged_path": str(credential_staged_path),
@@ -697,6 +709,27 @@ def _expected_instance_ids(run_paths: RunPaths) -> set[str]:
         if isinstance(task_ids, list) and all(isinstance(item, str) for item in task_ids):
             return set(task_ids)
     return {task.instance_id for task in load_tasks()}
+
+
+def _benchmark_total(
+    *,
+    expected_task_count: int | None,
+    final_match: re.Match[str] | None,
+    real_match: re.Match[str] | None,
+) -> int:
+    """Resolve the benchmark denominator from the active eval slice when possible."""
+
+    if real_match:
+        reported_total = int(real_match.group(3))
+        if reported_total > 0:
+            return reported_total
+    if expected_task_count:
+        return expected_task_count
+    if final_match:
+        reported_total = int(final_match.group(3))
+        if reported_total > 0:
+            return reported_total
+    return DEFAULT_EVAL_DATASET_POLICY.default_task_count
 
 
 def _write_eval_credential(destination: Path, *, credential_path: Path | None) -> None:

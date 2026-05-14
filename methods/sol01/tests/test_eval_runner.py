@@ -11,9 +11,11 @@ from sol01.analysis.eval_runner import (
     EVALUATE_SCRIPT,
     GOLD_DIR,
     build_eval_command,
+    parse_eval_stdout,
     run_official_eval,
     run_persisted_eval,
 )
+from sol01.infra.policy import DEFAULT_EVAL_DATASET_POLICY
 from sol01.output.output import (
     ensure_run_paths,
     eval_command_path_for,
@@ -131,6 +133,23 @@ def test_run_official_eval_writes_stdout_and_summary(tmp_path: Path):
     assert command_record["temp_dir"] == str(eval_temp_dir_for(run_paths, eval_id="default"))
     assert eval_summary_path_for(run_paths, eval_id="default").exists()
     assert eval_per_instance_path_for(run_paths, eval_id="default").exists()
+
+
+def test_parse_eval_stdout_uses_expected_slice_total_when_real_score_is_missing():
+    summary = parse_eval_stdout(
+        "Final score: 0.5, Correct examples: 2, Total examples: 4\n",
+        expected_task_count=4,
+    )
+
+    assert summary["benchmark_total"] == 4
+    assert summary["benchmark_score"] == 0.5
+
+
+def test_parse_eval_stdout_falls_back_to_dataset_default_without_totals():
+    summary = parse_eval_stdout("", expected_task_count=None)
+
+    assert summary["benchmark_total"] == DEFAULT_EVAL_DATASET_POLICY.default_task_count
+    assert summary["benchmark_score"] == 0.0
 
 
 def test_run_official_eval_persists_output_on_failure(tmp_path: Path):

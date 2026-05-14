@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from sol01.infra.config import DEFAULT_FAMILY_SIMILARITY_THRESHOLD
+from sol01.infra.policy import DEFAULT_SCHEMA_CONTEXT_POLICY
 from sol01.models import SchemaObject, TableSchema
 
 from ._object_basics import (
@@ -30,7 +30,7 @@ def build_schema_objects(
     max_sample_values_per_column: int = DEFAULT_MAX_SAMPLE_VALUES_PER_COLUMN,
     max_join_candidates: int = DEFAULT_MAX_JOIN_CANDIDATES,
     max_join_candidates_per_column: int = DEFAULT_MAX_JOIN_CANDIDATES_PER_COLUMN,
-    family_similarity_threshold: float = DEFAULT_FAMILY_SIMILARITY_THRESHOLD,
+    family_similarity_threshold: float = DEFAULT_SCHEMA_CONTEXT_POLICY.family_similarity_threshold,
     covered_table_keys: set[str] | None = None,
 ) -> list[SchemaObject]:
     """Build deterministic schema objects from a database table index.

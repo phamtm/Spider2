@@ -10,6 +10,7 @@ from sqlglot.errors import ParseError
 
 from sol01.candidates.query_heuristics import coerce_number, looks_aggregate_query
 from sol01.execution.snowflake_runner import fetch_query_dataframe as _fetch_query_dataframe
+from sol01.infra.policy import DEFAULT_FILTER_GROUNDING_POLICY
 from sol01.infra.strings import column_looks_string_like
 from sol01.models import (
     ExecutionResult,
@@ -258,7 +259,7 @@ def _filter_probe_targets(
                     "literal": literal,
                 }
             )
-            if len(targets) >= 4:
+            if len(targets) >= DEFAULT_FILTER_GROUNDING_POLICY.max_probe_targets:
                 return targets
     return targets
 
@@ -296,7 +297,7 @@ def _probe_columns_for_table(
     preferred = [column for column in string_columns if filter_column.lower() in column.lower()]
     if preferred:
         return preferred
-    return string_columns[:2]
+    return string_columns[: DEFAULT_FILTER_GROUNDING_POLICY.fallback_string_columns]
 
 
 def _table_probe_rank(table_name: str, filter_column: str) -> tuple[int, str]:
@@ -318,7 +319,7 @@ def _string_filter_probe_sql(*, table_name: str, column_name: str, literal: str)
         f'SELECT DISTINCT "{column_name}" AS MATCHED_VALUE '
         f"FROM {table_name} "
         f"WHERE LOWER(CAST(\"{column_name}\" AS VARCHAR)) LIKE LOWER('%{escaped}%') "
-        "LIMIT 5"
+        f"LIMIT {DEFAULT_FILTER_GROUNDING_POLICY.probe_match_limit}"
     )
 
 
@@ -331,35 +332,21 @@ def _table_looks_like_lookup(table_schema: TableSchema) -> bool:
 def _table_looks_like_lookup_name(table_name: str) -> bool:
     """Return True when a table name suggests a lookup or code table."""
 
-    return any(
-        token in table_name
-        for token in (
-            "summary",
-            "lookup",
-            "ref_",
-            "_ref",
-            "dim_",
-            "_dim",
-            "map",
-            "code",
-            "label",
-            "country",
-        )
-    )
+    return any(token in table_name for token in DEFAULT_FILTER_GROUNDING_POLICY.lookup_table_tokens)
 
 
 def _column_looks_label_like(column_name: str) -> bool:
     """Return True when a column name looks like a human-readable label."""
 
     lowered = column_name.lower()
-    return any(token in lowered for token in ("name", "label", "display", "title", "desc"))
+    return any(token in lowered for token in DEFAULT_FILTER_GROUNDING_POLICY.label_column_tokens)
 
 
 def _column_looks_key_like(column_name: str) -> bool:
     """Return True when a column name looks like a stored key."""
 
     lowered = column_name.lower()
-    return any(token in lowered for token in ("key", "code", "id"))
+    return any(token in lowered for token in DEFAULT_FILTER_GROUNDING_POLICY.key_column_tokens)
 
 
 def _literal_looks_label_like(literal: str) -> bool:

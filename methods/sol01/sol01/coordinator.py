@@ -9,13 +9,9 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel
 
-from sol01.infra.config import (
-    DEFAULT_SOLVER_POLICY,
-    RuntimeConfig,
-    SchemaContextConfig,
-    SolverPolicy,
-)
+from sol01.infra.config import RuntimeConfig, SchemaContextConfig
 from sol01.infra.logging import get_logger
+from sol01.infra.policy import DEFAULT_SOLVER_POLICY, SolverPolicy
 from sol01.llm.client import LLMClient, PromptSpec
 from sol01.llm.llm_logging import LLMCallLogger
 from sol01.models import (
@@ -31,14 +27,10 @@ from sol01.output.output import (
     write_manifest,
     write_trace,
 )
-from sol01.pipeline import (
-    TaskRun,
-    check_skip,
-    generate_initial_candidates,
-    plan_schema,
-    run_recovery_stage,
-    write_task_output,
-)
+from sol01.pipeline import check_skip, generate_initial_candidates, plan_schema
+from sol01.pipeline_output import write_task_output
+from sol01.pipeline_recovery import run_recovery_stage
+from sol01.pipeline_state import TaskRun
 from sol01.schema.db_index import load_db_index
 from sol01.schema.index import CACHE_PATH
 from sol01.schema.schema_context_cache import build_schema_context_cache

@@ -11,6 +11,10 @@ auditable: the selected schema, prompts, candidate SQL, validation result,
 execution result, final CSV, official eval output, and raw LLM calls are all
 saved under `methods/sol01/outputs/`.
 
+Default runtime choices, solver budgets, prompt/schema caps, filter-grounding
+caps, and eval metadata now live in `sol01/infra/policy.py`. Runtime modules
+use those defaults, but they no longer hide the policy inside local constants.
+
 ## What It Solves
 
 Each Spider2-Snow task gives the solver:
@@ -45,6 +49,19 @@ Spider2-Snow task
   -> run official Spider2-Snow eval
   -> save run, trace, eval, and registry artifacts
 ```
+
+## Main Moving Parts
+
+- `sol01/infra/policy.py`: default runtime profile and heuristic caps
+- `sol01/infra/config.py`: env loading and validation
+- `sol01/pipeline.py`: high-level per-task stage flow
+- `sol01/pipeline_recovery.py`: recovery orchestration
+- `sol01/pipeline_output.py`: final SQL / CSV / trace writing
+- `sol01/pipeline_support.py`: shared prompt, budget, and candidate-recording helpers
+- `sol01/llm/planning_prompts.py`: planner prompt assembly and planner-output cleanup
+- `sol01/llm/sql_prompts.py`: SQL generation, repair, and review prompts
+- `sol01/recovery_signals.py`: schema-expansion trigger detection
+- `sol01/analysis/eval_runner.py`: official evaluator wrapper and persisted summaries
 
 ## Main Entry Points
 
@@ -251,7 +268,9 @@ Relevant runtime settings:
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
 - `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
 
-These can be set in the shell or in `methods/sol01/.env`.
+These can be set in the shell or in `methods/sol01/.env`. They override the
+defaults from `infra/policy.py`; the remaining heuristic caps stay code-defaulted
+so the method has one clear baseline policy surface.
 
 `SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF` is eval-only. Use
 `uv run sol01 schema-context-eval --object-cutoff <n>` when you want to change

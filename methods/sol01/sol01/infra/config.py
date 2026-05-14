@@ -1,64 +1,30 @@
 """Runtime settings for the sol01 command line tools and LLM calls."""
 
 import os
-from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
 from dotenv import dotenv_values
 from pydantic import BaseModel, Field, model_validator
 
-DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
-DEFAULT_MODEL = "deepseek/deepseek-v4-pro"
-DEFAULT_PROVIDER_ONLY = "deepseek"
-DEFAULT_CONCURRENCY = 4
-DEFAULT_SCHEMA_CONTEXT_VERSION = "schema_context_v1"
-DEFAULT_FAMILY_SIMILARITY_THRESHOLD = 0.82
-DEFAULT_MAX_LINKED_DOC_CHARS = 6000
-DEFAULT_MAX_SCHEMA_PROMPT_CHARS = 24000
-DEFAULT_INITIAL_CANDIDATES = 3
-DEFAULT_MAX_ATTEMPTS = 4
-DEFAULT_SEMANTIC_REPAIRS = 1
+from sol01.infra.policy import (
+    DEFAULT_RUNTIME_PROFILE,
+    DEFAULT_SCHEMA_CONTEXT_POLICY,
+)
+
 METHOD_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DOTENV_PATH = METHOD_ROOT / ".env"
-
-
-@dataclass(frozen=True)
-class SolverPolicy:
-    """Small internal policy object for solver retry and recovery budgets."""
-
-    initial_candidates: int = DEFAULT_INITIAL_CANDIDATES
-    max_attempts: int = DEFAULT_MAX_ATTEMPTS
-    semantic_repairs: int = DEFAULT_SEMANTIC_REPAIRS
-
-    def __post_init__(self) -> None:
-        if self.initial_candidates < 1:
-            raise ValueError("initial_candidates must be positive")
-        if self.max_attempts < 1:
-            raise ValueError("max_attempts must be positive")
-        if self.semantic_repairs < 0:
-            raise ValueError("semantic_repairs must be zero or positive")
-        if self.initial_candidates > self.max_attempts:
-            raise ValueError("initial_candidates must not exceed max_attempts")
-
-    def as_dict(self) -> dict[str, int]:
-        """Return a JSON-ready trace payload."""
-
-        return asdict(self)
-
-
-DEFAULT_SOLVER_POLICY = SolverPolicy()
 
 
 class RuntimeConfig(BaseModel):
     """Validated runtime options shared by the CLI, coordinator, and LLM client."""
 
     api_key: str | None = None
-    base_url: str = DEFAULT_BASE_URL
-    model: str = DEFAULT_MODEL
-    provider_only: str = DEFAULT_PROVIDER_ONLY
-    allow_fallbacks: bool = False
-    concurrency: int = Field(default=DEFAULT_CONCURRENCY, ge=1)
+    base_url: str = DEFAULT_RUNTIME_PROFILE.base_url
+    model: str = DEFAULT_RUNTIME_PROFILE.model
+    provider_only: str = DEFAULT_RUNTIME_PROFILE.provider_only
+    allow_fallbacks: bool = DEFAULT_RUNTIME_PROFILE.allow_fallbacks
+    concurrency: int = Field(default=DEFAULT_RUNTIME_PROFILE.concurrency, ge=1)
 
     @classmethod
     def from_env(
@@ -74,14 +40,22 @@ class RuntimeConfig(BaseModel):
 
         config = cls(
             api_key=_env_first("OPENROUTER_API_KEY", "LLM_API_KEY"),
-            base_url=_env_first("OPENROUTER_BASE_URL", "LLM_BASE_URL") or DEFAULT_BASE_URL,
-            model=_env_first("OPENROUTER_MODEL", "LLM_MODEL") or DEFAULT_MODEL,
-            provider_only=_env_first("OPENROUTER_PROVIDER_ONLY") or DEFAULT_PROVIDER_ONLY,
-            allow_fallbacks=_env_bool("OPENROUTER_ALLOW_FALLBACKS", default=False),
+            base_url=_env_first("OPENROUTER_BASE_URL", "LLM_BASE_URL")
+            or DEFAULT_RUNTIME_PROFILE.base_url,
+            model=_env_first("OPENROUTER_MODEL", "LLM_MODEL") or DEFAULT_RUNTIME_PROFILE.model,
+            provider_only=_env_first("OPENROUTER_PROVIDER_ONLY")
+            or DEFAULT_RUNTIME_PROFILE.provider_only,
+            allow_fallbacks=_env_bool(
+                "OPENROUTER_ALLOW_FALLBACKS",
+                default=DEFAULT_RUNTIME_PROFILE.allow_fallbacks,
+            ),
             concurrency=(
                 concurrency
                 if concurrency is not None
-                else _env_positive_int("SOL01_CONCURRENCY", default=DEFAULT_CONCURRENCY)
+                else _env_positive_int(
+                    "SOL01_CONCURRENCY",
+                    default=DEFAULT_RUNTIME_PROFILE.concurrency,
+                )
             ),
         )
         if require_api_key and not config.api_key:
@@ -103,8 +77,8 @@ class RuntimeConfig(BaseModel):
     def enforce_openrouter_policy(self) -> "RuntimeConfig":
         """Keep runs pinned to DeepSeek and fail instead of falling back silently."""
 
-        if self.provider_only != DEFAULT_PROVIDER_ONLY:
-            raise ValueError("provider_only must be deepseek")
+        if self.provider_only != DEFAULT_RUNTIME_PROFILE.provider_only:
+            raise ValueError(f"provider_only must be {DEFAULT_RUNTIME_PROFILE.provider_only}")
         if self.allow_fallbacks:
             raise ValueError("provider fallback is disabled for sol01")
         return self
@@ -114,12 +88,18 @@ class SchemaContextConfig(BaseModel):
     """Schema-context settings used before LLM planning."""
 
     family_similarity_threshold: float = Field(
-        default=DEFAULT_FAMILY_SIMILARITY_THRESHOLD,
+        default=DEFAULT_SCHEMA_CONTEXT_POLICY.family_similarity_threshold,
         ge=0.0,
         le=1.0,
     )
-    max_linked_doc_chars: int = Field(default=DEFAULT_MAX_LINKED_DOC_CHARS, ge=1)
-    max_schema_prompt_chars: int = Field(default=DEFAULT_MAX_SCHEMA_PROMPT_CHARS, ge=1)
+    max_linked_doc_chars: int = Field(
+        default=DEFAULT_SCHEMA_CONTEXT_POLICY.max_linked_doc_chars,
+        ge=1,
+    )
+    max_schema_prompt_chars: int = Field(
+        default=DEFAULT_SCHEMA_CONTEXT_POLICY.max_schema_prompt_chars,
+        ge=1,
+    )
 
     @classmethod
     def from_env(cls, *, dotenv_path: Path | None = None) -> "SchemaContextConfig":
@@ -130,15 +110,15 @@ class SchemaContextConfig(BaseModel):
         return cls(
             family_similarity_threshold=_env_unit_float(
                 "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD",
-                default=DEFAULT_FAMILY_SIMILARITY_THRESHOLD,
+                default=DEFAULT_SCHEMA_CONTEXT_POLICY.family_similarity_threshold,
             ),
             max_linked_doc_chars=_env_positive_int(
                 "SOL01_SCHEMA_MAX_LINKED_DOC_CHARS",
-                default=DEFAULT_MAX_LINKED_DOC_CHARS,
+                default=DEFAULT_SCHEMA_CONTEXT_POLICY.max_linked_doc_chars,
             ),
             max_schema_prompt_chars=_env_positive_int(
                 "SOL01_SCHEMA_MAX_PROMPT_CHARS",
-                default=DEFAULT_MAX_SCHEMA_PROMPT_CHARS,
+                default=DEFAULT_SCHEMA_CONTEXT_POLICY.max_schema_prompt_chars,
             ),
         )
 

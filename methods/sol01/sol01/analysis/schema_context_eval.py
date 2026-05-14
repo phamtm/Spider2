@@ -10,6 +10,7 @@ from typing import Any
 
 from sol01.infra.config import SchemaContextConfig
 from sol01.infra.paths import REPO_ROOT
+from sol01.infra.policy import DEFAULT_SCHEMA_CONTEXT_EVAL_POLICY
 from sol01.loading.docs import load_document_text
 from sol01.models import (
     SchemaContextObject,
@@ -25,11 +26,11 @@ from sol01.schema.schema_context import build_available_schema_context
 from sol01.schema.schema_context_cache import SchemaContextCache, build_schema_context_cache
 
 DEFAULT_GOLD_TABLE_PATH = REPO_ROOT / "methods" / "gold-tables" / "spider2-snow-gold-tables.jsonl"
-DEFAULT_SCHEMA_CONTEXT_OBJECT_CUTOFF = 12
-DEFAULT_FAILURE_EVIDENCE_LIMIT = 5
-DEFAULT_FAILURE_LIMIT = 20
-DEFAULT_PROMPT_WIN_LIMIT = 20
-DEFAULT_PROMPT_WIN_THRESHOLD = 0.25
+DEFAULT_SCHEMA_CONTEXT_OBJECT_CUTOFF = DEFAULT_SCHEMA_CONTEXT_EVAL_POLICY.object_cutoff
+DEFAULT_FAILURE_EVIDENCE_LIMIT = DEFAULT_SCHEMA_CONTEXT_EVAL_POLICY.failure_evidence_limit
+DEFAULT_FAILURE_LIMIT = DEFAULT_SCHEMA_CONTEXT_EVAL_POLICY.failure_limit
+DEFAULT_PROMPT_WIN_LIMIT = DEFAULT_SCHEMA_CONTEXT_EVAL_POLICY.prompt_win_limit
+DEFAULT_PROMPT_WIN_THRESHOLD = DEFAULT_SCHEMA_CONTEXT_EVAL_POLICY.prompt_win_threshold
 
 
 def db_schema_summary(db_index: Mapping[str, TableSchema]) -> str:
