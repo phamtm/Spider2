@@ -5,14 +5,28 @@ from __future__ import annotations
 from typing import Any
 
 
+def get_final_attempt(trace: dict[str, Any]) -> dict[str, Any]:
+    """Return the final candidate attempt dict, using recorded index when available."""
+
+    attempts = trace.get("attempts") or []
+    if not isinstance(attempts, list) or not attempts:
+        return {}
+    idx = trace.get("final_attempt_index")
+    if isinstance(idx, int) and 0 <= idx < len(attempts):
+        candidate = attempts[idx]
+        return candidate if isinstance(candidate, dict) else {}
+    candidate = attempts[-1]
+    return candidate if isinstance(candidate, dict) else {}
+
+
 def summarize_trace_diagnostics(trace: dict[str, Any]) -> str | None:
-    """Return one compact diagnostic string for the latest attempt in a trace."""
+    """Return one compact diagnostic string for the final attempt in a trace."""
 
     attempts = trace.get("attempts") or []
     if not isinstance(attempts, list) or not attempts:
         return _prompt_budget_diagnostic(trace)
 
-    final_attempt = attempts[-1] if isinstance(attempts[-1], dict) else {}
+    final_attempt = get_final_attempt(trace)
     diagnostics = _attempt_diagnostics(final_attempt)
     return _join_diagnostics(
         _prompt_budget_diagnostic(trace),
@@ -23,9 +37,8 @@ def summarize_trace_diagnostics(trace: dict[str, Any]) -> str | None:
 def summarize_failed_question(trace: dict[str, Any]) -> dict[str, Any]:
     """Return a stable per-question summary of the final verification signals."""
 
-    attempts = trace.get("attempts") or []
-    final_attempt = attempts[-1] if isinstance(attempts, list) and attempts else {}
-    diagnostics = _attempt_diagnostics(final_attempt if isinstance(final_attempt, dict) else {})
+    final_attempt = get_final_attempt(trace)
+    diagnostics = _attempt_diagnostics(final_attempt)
     prompt_budget_diagnostic = _prompt_budget_diagnostic(trace)
     if prompt_budget_diagnostic:
         diagnostics["diagnostics"] = _join_diagnostics(

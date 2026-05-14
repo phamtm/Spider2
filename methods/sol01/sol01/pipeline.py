@@ -657,6 +657,11 @@ def write_task_output(
 
     task = ctx.task
     final_ctx = expanded_ctx if expanded_ctx is not None else ctx
+    final_attempt_index = (
+        next((i for i, a in enumerate(attempts) if a is current_best), None)
+        if current_best is not None
+        else None
+    )
     trace_payload: dict[str, Any] = {
         "instance_id": task.instance_id,
         "db": task.db,
@@ -666,6 +671,7 @@ def write_task_output(
         "schema_context": final_ctx.schema_context,
         "intent": final_ctx.intent.model_dump(mode="json"),
         "prompt_hashes": ctx.prompt_hashes,
+        "final_attempt_index": final_attempt_index,
         "attempts": attempts,
     }
     if candidate_review_payload is not None:

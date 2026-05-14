@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from sol01.models import ColumnSchema, TableSchema
+from sol01.schema.large_schema_summaries import load_large_schema_summary_registry
 from sol01.schema.schema_context_cache import (
     SchemaContextCacheError,
     SchemaContextCacheLockTimeout,
@@ -17,7 +18,6 @@ from sol01.schema.schema_context_cache import (
     schema_context_cache_key,
     schema_source_hash,
 )
-from sol01.schema.large_schema_summaries import load_large_schema_summary_registry
 
 
 def _db_index(*, extra_column: bool = False) -> dict[str, TableSchema]:
@@ -242,8 +242,7 @@ def test_covered_tables_skip_child_objects_while_uncovered_tables_keep_them(tmp_
         for obj_id in uncovered_table_ids
     )
     assert not any(
-        obj_id.startswith("column:GITHUB_REPOS_DATE.DAY._20240103#")
-        for obj_id in covered_table_ids
+        obj_id.startswith("column:GITHUB_REPOS_DATE.DAY._20240103#") for obj_id in covered_table_ids
     )
 
     summary_chunk = next(

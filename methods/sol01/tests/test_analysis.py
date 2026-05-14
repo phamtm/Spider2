@@ -209,6 +209,62 @@ def test_analyze_run_groups_failures_and_writes_reports(tmp_path: Path):
     assert failures["by_database"]["db_gamma"]["category_counts"]["missing_csv"] == 1
 
 
+def test_analyze_run_uses_final_attempt_index_over_last_attempt(tmp_path: Path):
+    """When final_attempt_index selects an earlier attempt, analysis should use it."""
+
+    run_paths = ensure_run_paths("final-index-run", outputs_root=tmp_path)
+    # Attempt 0: good candidate selected by review (index 0)
+    # Attempt 1: broken repair that ran after — analysis must NOT treat this as final
+    write_trace(
+        run_paths,
+        instance_id="local901",
+        trace={
+            "instance_id": "local901",
+            "db": "db_alpha",
+            "question": "Find the total.",
+            "status": "failed",
+            "final_attempt_index": 0,
+            "csv_path": None,
+            "attempts": [
+                {
+                    "stage": "initial_1",
+                    "sql": "SELECT SUM(amount) FROM sales GROUP BY date",
+                    "validation": {"ok": True, "errors": []},
+                    "execution_result": {"ok": True, "error": None},
+                    "critic": {
+                        "confidence": 0.8,
+                        "issues": [],
+                        "should_repair": False,
+                        "repair_focus": None,
+                    },
+                },
+                {
+                    "stage": "critic_repair",
+                    "sql": "SELECT missing_col FROM sales",
+                    "validation": {
+                        "ok": False,
+                        "errors": ["Column missing_col is not allowed."],
+                    },
+                    "execution_result": {
+                        "ok": False,
+                        "error": "Validation failed before execution.",
+                    },
+                },
+            ],
+        },
+    )
+
+    report = analyze_run("final-index-run", outputs_root=tmp_path)
+
+    # Classification should reflect attempt 0 (no validation failure), not attempt 1
+    assert report["by_category"]["validation"] == []
+    assert report["by_category"]["execution"] == []
+    failed = report["failed_questions"]
+    assert len(failed) == 1
+    # Attempt 0 has no failed checks
+    assert failed[0]["failed_checks"] == []
+
+
 def test_analyze_run_does_not_label_success_keywords_as_failures(tmp_path: Path):
     """Success traces should not fall into failure-only heuristic buckets."""
 

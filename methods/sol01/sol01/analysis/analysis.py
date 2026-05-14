@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sol01.analysis.trace_diagnostics import summarize_failed_question
+from sol01.analysis.trace_diagnostics import get_final_attempt, summarize_failed_question
 from sol01.infra.logging import get_logger
 from sol01.loading.category_metadata import (
     CATEGORY_BATCHES_DIR,
@@ -167,13 +167,12 @@ def _trace_classification(trace: dict[str, Any]) -> dict[str, list[str]]:
 
     categories: dict[str, list[str]] = {}
     status = str(trace.get("status") or "")
-    attempts = trace.get("attempts") or []
-    final_attempt = attempts[-1] if attempts else {}
+    final_attempt = get_final_attempt(trace)
     final_validation = final_attempt.get("validation") or {}
     final_execution = final_attempt.get("execution_result") or {}
     final_trace_execution = trace.get("final_execution") or {}
 
-    if status != "success" and attempts:
+    if status != "success" and final_attempt:
         if not final_validation.get("ok", False):
             categories["validation"] = _validation_evidence(final_validation)
         elif not final_execution.get("ok", False):
@@ -282,8 +281,7 @@ def _trace_hints(trace: dict[str, Any]) -> list[str]:
     status = str(trace.get("status") or "")
     if status != "failed":
         return []
-    attempts = trace.get("attempts") or []
-    final_attempt = attempts[-1] if attempts else {}
+    final_attempt = get_final_attempt(trace)
     text = _analysis_text(trace, final_attempt)
     hints = []
     if any(keyword in text for keyword in ("group by", "aggregate", "aggregation", "sum(", "avg(")):
