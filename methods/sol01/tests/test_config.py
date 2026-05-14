@@ -14,6 +14,8 @@ SCHEMA_CONTEXT_ENV_VARS = [
     "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD",
     "SOL01_SCHEMA_MAX_LINKED_DOC_CHARS",
     "SOL01_SCHEMA_MAX_PROMPT_CHARS",
+    "SOL01_SCHEMA_TOP_K_SPARSE",
+    "SOL01_SCHEMA_TOP_K_OBJECTS",
 ]
 
 LLM_ENV_VARS = [
@@ -216,11 +218,15 @@ def test_schema_context_config_defaults(monkeypatch):
                 "SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD": "0.7",
                 "SOL01_SCHEMA_MAX_LINKED_DOC_CHARS": "4000",
                 "SOL01_SCHEMA_MAX_PROMPT_CHARS": "18000",
+                "SOL01_SCHEMA_TOP_K_SPARSE": "60",
+                "SOL01_SCHEMA_TOP_K_OBJECTS": "25",
             },
             {
                 "family_similarity_threshold": 0.7,
                 "max_linked_doc_chars": 4000,
                 "max_schema_prompt_chars": 18000,
+                "top_k_sparse": 60,
+                "top_k_objects": 25,
             },
             id="env-overrides",
         ),

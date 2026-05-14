@@ -134,20 +134,22 @@ The local registry lives in `methods/sol01/outputs/registry/` with:
 
 ## Schema Context
 
-`sol01` uses deterministic schema-context selection. It does not use embeddings,
-BM25, lexical ranking, or a model-backed search service. If a database has
-curated large-schema summary coverage, planning sees the summary-backed logical
-objects. Otherwise, planning sees the database metadata objects directly.
+`sol01` uses deterministic schema objects plus a sparse BM25 ranker. If a
+database has curated large-schema summary coverage, planning sees the
+summary-backed logical objects instead of the covered raw tables. Otherwise,
+planning ranks the database metadata objects directly.
 
 The runtime path is:
 
 ```text
-question -> schema metadata context -> planner object selection
+question -> schema metadata context -> sparse BM25 ranking
+  -> planner object selection
   -> resolver expansion -> compact schema context -> SQL generation
 ```
 
 Large-schema summaries keep very wide or repeated schemas compact. For ordinary
-schemas, the planner is not forced through a ranking guess first.
+schemas, the ranker narrows the planner-visible evidence to the strongest
+matches before the model chooses from those objects.
 
 Cache layout:
 
@@ -175,12 +177,16 @@ hints. Registry validation rejects those tokens, and the schema-context cache
 key includes the summary registry hash, so summary edits naturally create a new
 cache version.
 
-Runtime config can be set in the shell or `methods/sol01/.env`:
+Runtime schema-context settings can be set in the shell or `methods/sol01/.env`:
 
-- `SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF`, default `12`
 - `SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD`, default `0.82`
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
 - `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
+- `SOL01_SCHEMA_TOP_K_SPARSE`, default `80`
+- `SOL01_SCHEMA_TOP_K_OBJECTS`, default `30`
+
+`SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF` is not a runtime setting. It is an
+offline `sol01 schema-context-eval` option, exposed as `--object-cutoff`.
 
 Sample-value objects are built only for bounded, low-cardinality categorical
 evidence. High-cardinality, opaque, free-text, numeric, temporal,

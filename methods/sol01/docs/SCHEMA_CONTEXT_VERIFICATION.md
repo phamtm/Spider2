@@ -3,7 +3,7 @@
 Last verified: 2026-05-13.
 
 This note records verification for the schema-context selection work tracked by
-`sp-tvm.14`, `sp-4rb.10`, and the BM25 removal follow-up.
+`sp-tvm.14`, `sp-4rb.10`, and the later schema-context cleanup follow-up.
 
 ## Code Audit
 
@@ -11,8 +11,9 @@ This note records verification for the schema-context selection work tracked by
   versioned schema-context cache, selects available schema objects, calls
   `_schema_context_planning_user_prompt()`, sanitizes selected object IDs, and
   resolves selected logical objects to physical tables.
-- Schema context selection does not use embeddings, BM25, lexical ranking, or a
-  separate model-backed search service.
+- Runtime schema context uses deterministic schema objects plus sparse BM25
+  ranking in `sol01/schema/schema_context.py`. It does not use dense
+  embeddings or a separate model-backed search service.
 - The legacy full-schema planning and schema-expansion prompt builders were
   removed from `sol01/llm/prompt_builders.py`.
 - Remaining `db_schema_summary` usage is limited to offline schema-context-eval
@@ -32,7 +33,7 @@ This note records verification for the schema-context selection work tracked by
 uv run pytest tests/test_schema_context_planning.py tests/test_coordinator.py \
   tests/test_schema_context_eval.py tests/test_schema_resolver.py \
   tests/test_schema_context.py tests/test_schema_context_cache.py \
-  tests/test_schema_objects.py tests/test_schema_chunks.py -q
+  tests/test_schema_objects.py tests/test_hybrid_retrieval.py -q
 ```
 
 Result: `48 passed`.

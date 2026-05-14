@@ -131,22 +131,24 @@ directory is created and `current.json` is updated.
 
 ## Schema Context Planning
 
-The old BM25/lexical retrieval path has been removed. Runtime schema context is
-deterministic: use curated large-schema summary objects when they cover the
-database; otherwise pass the built database metadata objects directly. There is
-no embedding, BM25, exact-match ranking, or separate model-backed search
-service.
+Runtime schema context uses deterministic schema objects plus a sparse BM25
+ranker. Curated large-schema summary objects replace covered raw metadata
+before ranking, so repeated table families and very wide schemas stay compact.
+For databases without summary coverage, the ranker works directly over the
+built schema objects. There is no dense embedding or separate model-backed
+search service in the runtime path.
 
-That path was removed because large Spider2-Snow databases can have hundreds of
-tables or very wide tables. Passing a database-wide DDL summary into planning
-creates huge prompts, makes table selection noisy, and can bury the few relevant
-columns among irrelevant schema text.
+This keeps planning grounded without dumping a whole database into the prompt.
+Large Spider2-Snow databases can have hundreds of tables or very wide tables,
+so narrowing the planner-visible evidence first keeps selection noise and
+prompt size under control.
 
 The runtime pipeline is:
 
 ```text
 question
   -> deterministic schema metadata context
+  -> sparse BM25 ranking of available schema objects
   -> LLM planner selects available logical objects
   -> resolver expands logical families to physical tables
   -> compact schema context is rendered
@@ -225,8 +227,8 @@ instead of converting it into an invented rule.
 
 Curated summaries live in
 `methods/sol01/metadata/large_schema_summaries.json`. They compact repeated
-table families and wide repeated column groups before schema-context chunks are
-rendered.
+table families and wide repeated column groups before runtime ranking and
+resolver expansion.
 
 Add or edit a summary when a schema family has a stable shape that should be
 represented as one logical object. Each entry defines:
@@ -246,12 +248,17 @@ hash, so a summary edit creates a fresh cache version.
 
 Relevant runtime settings:
 
-- `SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF`, default `12`
 - `SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD`, default `0.82`
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
 - `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
+- `SOL01_SCHEMA_TOP_K_SPARSE`, default `80`
+- `SOL01_SCHEMA_TOP_K_OBJECTS`, default `30`
 
 These can be set in the shell or in `methods/sol01/.env`.
+
+`SOL01_SCHEMA_CONTEXT_OBJECT_CUTOFF` is eval-only. Use
+`uv run sol01 schema-context-eval --object-cutoff <n>` when you want to change
+how many ranked objects the offline coverage report measures.
 
 ## Schema Context Evaluation
 
@@ -433,7 +440,7 @@ Schema-context traces also include:
 - `schema_context_version`
 - effective `schema_context_config`
 - context mode and object counts
-- available object IDs, evidence, and chunk snippets
+- available object IDs and ranked planning evidence
 - planner sanitization diagnostics
 - resolver entries, allowed tables, and resolver warnings
 - recovery diagnostics when schema recovery expands schema context
@@ -542,14 +549,12 @@ trace races.
 - `sol01/loading/docs.py`: loads linked markdown documents.
 - `sol01/schema/index.py`: builds the Snowflake metadata cache.
 - `sol01/schema/objects.py`: assembles canonical logical schema objects.
-- `sol01/schema/object_families.py`: builds repeated-table family objects.
-- `sol01/schema/object_joins.py`: builds inferred join-candidate objects.
-- `sol01/schema/object_sample_values.py`: builds bounded sample-value objects.
-- `sol01/schema/chunks.py`: renders schema-context chunks from schema objects.
+- `sol01/schema/object_text.py`: builds planner/search text for schema objects.
+- `sol01/schema/reference_context.py`: renders compact schema context for SQL generation.
 - `sol01/schema/schema_context_cache.py`: builds versioned schema-context caches.
-- `sol01/schema/schema_context.py`: selects deterministic schema context.
+- `sol01/schema/schema_context.py`: ranks planner-visible schema objects.
 - `sol01/schema/resolver.py`: resolves selected logical objects to physical table context.
-- `sol01/schema/schema_context_eval.py`: evaluates offline schema-context coverage.
+- `sol01/analysis/schema_context_eval.py`: evaluates offline schema-context coverage.
 - `sol01/llm/client.py`: runs structured LLM calls and logs raw call data.
 - `sol01/llm/prompt_builders.py`: builds the prompts for each pipeline stage.
 - `sol01/llm/llm_call_logs.py`: reads persisted LLM call logs for CLI/UI inspection.
