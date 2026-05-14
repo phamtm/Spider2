@@ -106,6 +106,7 @@ def test_builds_loads_and_validates_schema_context_cache_for_one_database(tmp_pa
     assert loaded.manifest["source_schema_hash"] == schema_source_hash(_db_index())
     assert loaded.manifest["curated_summary_registry_hash"]
     assert loaded.manifest["curated_summary_registry_version"] == "large-schema-summaries-v1"
+    assert loaded.manifest["context_mode"] == "full_metadata"
 
 
 def test_cache_key_changes_for_schema_versions_model_metadata_family_threshold_and_summaries():
@@ -206,15 +207,18 @@ def test_custom_summary_registry_drives_coverage_and_object_metadata(tmp_path):
     object_ids = {obj.object_id for obj in cache.objects}
     orders_object = next(obj for obj in cache.objects if obj.object_id == "table:DB.PUBLIC.ORDERS")
 
+    # summary_only mode: only ORDERS is covered, so CUSTOMERS is absent entirely
+    assert cache.manifest["context_mode"] == "summary_only"
     assert "column:DB.PUBLIC.ORDERS#STATUS" not in object_ids
-    assert "column:DB.PUBLIC.CUSTOMERS#CUSTOMER_ID" in object_ids
+    assert "table:DB.PUBLIC.CUSTOMERS" not in object_ids
+    assert "column:DB.PUBLIC.CUSTOMERS#CUSTOMER_ID" not in object_ids
     assert orders_object.metadata["summary_ids"] == ["orders_custom_summary"]
     assert orders_object.metadata["large_schema_summaries"][0]["text"].startswith(
         "Large-schema summary: orders_custom_summary."
     )
 
 
-def test_covered_tables_skip_child_objects_while_uncovered_tables_keep_them(tmp_path):
+def test_summary_only_mode_excludes_uncovered_tables_and_join_candidates(tmp_path):
     covered_table = TableSchema(
         name="_20240103",
         database_name="GITHUB_REPOS_DATE",
@@ -250,28 +254,16 @@ def test_covered_tables_skip_child_objects_while_uncovered_tables_keep_them(tmp_
         lock_timeout_seconds=0.1,
     )
 
+    object_ids = {obj.object_id for obj in cache.objects}
     object_types = {obj.object_type for obj in cache.objects}
-    covered_table_ids = {
-        obj.object_id
-        for obj in cache.objects
-        if obj.table_name == "GITHUB_REPOS_DATE.DAY._20240103"
-    }
-    uncovered_table_ids = {
-        obj.object_id
-        for obj in cache.objects
-        if obj.table_name == "GITHUB_REPOS_DATE.DAY.REPOSITORIES"
-    }
 
+    # summary_only mode: only covered table is processed; uncovered table is absent
+    assert cache.manifest["context_mode"] == "summary_only"
+    assert "table:GITHUB_REPOS_DATE.DAY._20240103" in object_ids
+    assert "table:GITHUB_REPOS_DATE.DAY.REPOSITORIES" not in object_ids
+    assert not any(oid.startswith("column:") for oid in object_ids)
+    assert not any(oid.startswith("join_candidate:") for oid in object_ids)
     assert "table" in object_types
-    assert "column" in object_types
-    assert covered_table_ids == {"table:GITHUB_REPOS_DATE.DAY._20240103"}
-    assert any(
-        obj_id.startswith("column:GITHUB_REPOS_DATE.DAY.REPOSITORIES#")
-        for obj_id in uncovered_table_ids
-    )
-    assert not any(
-        obj_id.startswith("column:GITHUB_REPOS_DATE.DAY._20240103#") for obj_id in covered_table_ids
-    )
 
     summary_object = next(
         obj for obj in cache.objects if obj.object_id == "table:GITHUB_REPOS_DATE.DAY._20240103"

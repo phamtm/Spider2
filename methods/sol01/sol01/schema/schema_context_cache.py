@@ -38,8 +38,8 @@ from sol01.schema.large_schema_summaries import (
 from sol01.schema.object_text import annotate_summary_metadata
 from sol01.schema.objects import build_schema_objects
 
-OBJECT_BUILDER_VERSION = "schema-objects-v3"
-MANIFEST_VERSION = 3
+OBJECT_BUILDER_VERSION = "schema-objects-v4"
+MANIFEST_VERSION = 4
 REQUIRED_CACHE_ARTIFACTS = frozenset({"objects.jsonl", "manifest.json"})
 REQUIRED_MANIFEST_FIELDS = frozenset(
     {
@@ -51,6 +51,7 @@ REQUIRED_MANIFEST_FIELDS = frozenset(
         "curated_summary_registry_hash",
         "curated_summary_registry_version",
         "family_similarity_threshold",
+        "context_mode",
         "object_count",
     }
 )
@@ -218,16 +219,23 @@ def build_schema_context_cache(
 
         registry = load_large_schema_summary_registry(curated_summary_registry_path)
         covered_table_keys = _covered_table_keys(db_index, registry)
+        context_mode = "summary_only" if covered_table_keys else "full_metadata"
+        build_index = (
+            {k: v for k, v in db_index.items() if k in covered_table_keys}
+            if context_mode == "summary_only"
+            else db_index
+        )
         objects = build_schema_objects(
-            db_index,
+            build_index,
             family_similarity_threshold=config.family_similarity_threshold,
-            covered_table_keys=covered_table_keys,
+            summary_only=(context_mode == "summary_only"),
         )
         objects = annotate_summary_metadata(objects, large_schema_summary_registry=registry)
         logger.info(
             "schema context cache objects rendered",
             db=db,
             cache_key=cache_key,
+            context_mode=context_mode,
             object_count=len(objects),
             covered_table_count=len(covered_table_keys),
         )
@@ -241,6 +249,7 @@ def build_schema_context_cache(
                 source_hash=source_hash,
                 family_similarity_threshold=config.family_similarity_threshold,
                 curated_summary_registry_hash=curated_summary_registry_hash,
+                context_mode=context_mode,
                 objects=objects,
             )
             loaded_temp = _load_valid_cache(
@@ -393,6 +402,7 @@ def _write_cache_artifacts(
     source_hash: str,
     family_similarity_threshold: float,
     curated_summary_registry_hash: str,
+    context_mode: str,
     objects: Sequence[SchemaObject],
 ) -> None:
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -405,6 +415,7 @@ def _write_cache_artifacts(
         "curated_summary_registry_hash": curated_summary_registry_hash,
         "curated_summary_registry_version": LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
         "family_similarity_threshold": family_similarity_threshold,
+        "context_mode": context_mode,
         "object_count": len(objects),
     }
 

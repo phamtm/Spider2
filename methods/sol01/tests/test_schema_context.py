@@ -5,10 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from sol01.models import ColumnSchema, SchemaObject, TableSchema
-from sol01.schema.object_text import annotate_summary_metadata
-from sol01.schema.objects import build_schema_objects
 from sol01.schema.schema_context import build_available_schema_context
-from sol01.schema.schema_context_cache import SchemaContextCache
+from sol01.schema.schema_context_cache import SchemaContextCache, build_schema_context_cache
 
 
 def test_full_metadata_context_returns_all_objects_in_stable_order():
@@ -42,7 +40,7 @@ def test_full_metadata_context_returns_all_objects_in_stable_order():
     ]
 
 
-def test_summary_backed_context_uses_only_curated_large_schema_objects():
+def test_summary_backed_context_uses_only_curated_large_schema_objects(tmp_path):
     table = TableSchema(
         name="_20240103",
         database_name="GITHUB_REPOS_DATE",
@@ -73,21 +71,16 @@ def test_summary_backed_context_uses_only_curated_large_schema_objects():
         sample_rows=[],
         searchable_text="repository metadata",
     )
-    objects = build_schema_objects(
-        {
+    cache = build_schema_context_cache(
+        "GITHUB_REPOS_DATE",
+        db_index={
             "GITHUB_REPOS_DATE.DAY._20240103": table,
             "GITHUB_REPOS_DATE.DAY.REPOSITORIES": uncovered_table,
-        }
-    )
-    index = SchemaContextCache(
-        db="GITHUB_REPOS_DATE",
-        cache_key="summary-rendered",
-        cache_dir=Path("/tmp/test-schema-context-summary-rendered"),
-        manifest={},
-        objects=annotate_summary_metadata(objects),
+        },
+        cache_root=tmp_path,
     )
 
-    schema_context_objects, diagnostics = build_available_schema_context(index)
+    schema_context_objects, diagnostics = build_available_schema_context(cache)
 
     assert diagnostics["context_mode"] == "summary_only"
     schema_context_ids = [item.schema_object.object_id for item in schema_context_objects]

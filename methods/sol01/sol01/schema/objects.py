@@ -31,25 +31,34 @@ def build_schema_objects(
     max_join_candidates: int = DEFAULT_MAX_JOIN_CANDIDATES,
     max_join_candidates_per_column: int = DEFAULT_MAX_JOIN_CANDIDATES_PER_COLUMN,
     family_similarity_threshold: float = DEFAULT_SCHEMA_CONTEXT_POLICY.family_similarity_threshold,
-    covered_table_keys: set[str] | None = None,
+    summary_only: bool = False,
 ) -> list[SchemaObject]:
     """Build deterministic schema objects from a database table index.
 
-    When *covered_table_keys* is provided, tables whose key appears in that
-    set will only emit a table object. Column, column-group, and sample-value
-    objects are skipped because a curated large-schema summary replaces their
-    raw metadata at chunk-render time.
+    When *summary_only* is True, the input db_index must contain only
+    summary-covered tables. Only table and family objects are emitted;
+    column, column-group, sample-value, and join-candidate objects are
+    skipped because curated summaries replace raw metadata at render time.
     """
-    _covered = covered_table_keys or set()
-    column_refs = _column_refs(db_index)
     objects: list[SchemaObject] = []
 
+    if summary_only:
+        for table_key in sorted(db_index):
+            table = db_index[table_key]
+            objects.append(_table_object(table_key, table, _table_full_name(table_key, table)))
+        objects.extend(
+            table_family_objects(
+                db_index,
+                family_similarity_threshold=family_similarity_threshold,
+            )
+        )
+        return objects
+
+    column_refs = _column_refs(db_index)
     for table_key in sorted(db_index):
         table = db_index[table_key]
         table_full_name = _table_full_name(table_key, table)
         objects.append(_table_object(table_key, table, table_full_name))
-        if table_key in _covered:
-            continue
         objects.extend(_column_object(ref) for ref in column_refs if ref.table_key == table_key)
         objects.extend(_column_group_objects(table_key, table, table_full_name))
         objects.extend(
