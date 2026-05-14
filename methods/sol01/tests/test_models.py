@@ -8,8 +8,6 @@ from sol01.models import (
     FinalAnswer,
     Intent,
     ResolvedSchemaContext,
-    SchemaContextChunk,
-    SchemaContextChunkEvidence,
     SchemaContextObject,
     SchemaObject,
     SchemaSelection,
@@ -162,21 +160,15 @@ def test_schema_context_core_models_construct_and_validate_object_types():
         db="DB",
         searchable_text="orders customers amounts",
     )
-    chunk = SchemaContextChunk(
-        chunk_id="chunk-1",
-        object_id=schema_object.object_id,
-        text="Orders table with amount and customer fields.",
-    )
-    context_chunk = SchemaContextChunkEvidence(chunk=chunk, rank=1, score=0.82)
     context_object = SchemaContextObject(
         schema_object=schema_object,
-        chunks=[context_chunk],
+        planning_text="Orders table with amount and customer fields.",
         rank=1,
         score=0.9,
     )
 
     assert context_object.schema_object.object_type == "table"
-    assert context_object.chunks[0].chunk.object_id == "table:DB.PUBLIC.ORDERS"
+    assert context_object.planning_text == "Orders table with amount and customer fields."
 
     with pytest.raises(ValidationError, match="object_type"):
         SchemaObject(

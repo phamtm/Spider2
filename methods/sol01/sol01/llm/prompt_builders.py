@@ -319,13 +319,8 @@ def _schema_context_object_evidence(
             header += f"\n  score: {item.score:.4f}"
 
         evidence_lines = [header]
-        for context_chunk in item.chunks[:3]:
-            chunk = context_chunk.chunk
-            text = (
-                chunk.prompt_text or chunk.source_definition or chunk.inferred_usage or chunk.text
-            )
-            if text:
-                evidence_lines.append(f"  evidence: {_single_line(text, max_length=500)}")
+        if item.planning_text:
+            evidence_lines.append(f"  evidence: {_single_line(item.planning_text, max_length=500)}")
         rendered = "\n".join(evidence_lines)
         if len(rendered) + 2 > remaining:
             break

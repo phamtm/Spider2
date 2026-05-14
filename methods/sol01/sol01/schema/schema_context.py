@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import re
-from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from sol01.infra.config import SchemaContextConfig
 from sol01.models import (
     SchemaContextChunk,
-    SchemaContextChunkEvidence,
     SchemaContextObject,
     SchemaObject,
 )
@@ -243,27 +241,22 @@ def _schema_context_objects(
     *,
     chunks: Sequence[SchemaContextChunk],
 ) -> list[SchemaContextObject]:
-    chunks_by_object: dict[str, list[SchemaContextChunk]] = defaultdict(list)
-    for chunk in chunks:
-        chunks_by_object[chunk.object_id].append(chunk)
+    chunks_by_object: dict[str, SchemaContextChunk] = {chunk.object_id: chunk for chunk in chunks}
 
     return [
         SchemaContextObject(
             schema_object=schema_object,
-            chunks=[
-                SchemaContextChunkEvidence(chunk=chunk, rank=chunk_rank)
-                for chunk_rank, chunk in enumerate(
-                    sorted(
-                        chunks_by_object.get(schema_object.object_id, []),
-                        key=lambda item: item.chunk_id,
-                    ),
-                    start=1,
-                )
-            ],
+            planning_text=_chunk_planning_text(chunks_by_object.get(schema_object.object_id)),
             rank=rank,
         )
         for rank, schema_object in enumerate(objects, start=1)
     ]
+
+
+def _chunk_planning_text(chunk: SchemaContextChunk | None) -> str:
+    if chunk is None:
+        return ""
+    return chunk.prompt_text or chunk.source_definition or chunk.inferred_usage or chunk.text
 
 
 def _diagnostics(
@@ -297,7 +290,6 @@ def _diagnostics(
                 "object_id": obj.schema_object.object_id,
                 "object_type": obj.schema_object.object_type,
                 "position": obj.rank,
-                "evidence_chunk_ids": [chunk.chunk.chunk_id for chunk in obj.chunks],
             }
             for obj in schema_context_objects
         ],

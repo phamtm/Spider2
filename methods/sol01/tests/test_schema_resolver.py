@@ -7,8 +7,6 @@ from datetime import date, timedelta
 from sol01.execution.validation import validate_sql
 from sol01.models import (
     ColumnSchema,
-    SchemaContextChunk,
-    SchemaContextChunkEvidence,
     SchemaContextObject,
     SchemaObject,
     SchemaPlanningConstraints,
@@ -438,14 +436,8 @@ def _schema_context_join_evidence() -> SchemaContextObject:
             "right": {"table_full_name": "DB.PUBLIC.ORDERS", "column_name": "ORDER_ID"},
         },
     )
-    chunk = SchemaContextChunk(
-        chunk_id=f"{join_object.object_id}::join_candidate",
-        object_id=join_object.object_id,
-        chunk_type="join_candidate",
-        prompt_text="Join candidate: DB.PUBLIC.SALES_2022.ORDER_ID = DB.PUBLIC.ORDERS.ORDER_ID.",
-    )
     return SchemaContextObject(
         schema_object=join_object,
-        chunks=[SchemaContextChunkEvidence(chunk=chunk, rank=1)],
+        planning_text="Join candidate: DB.PUBLIC.SALES_2022.ORDER_ID = DB.PUBLIC.ORDERS.ORDER_ID.",
         rank=1,
     )

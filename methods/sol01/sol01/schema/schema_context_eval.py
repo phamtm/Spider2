@@ -367,11 +367,6 @@ def _tables_from_schema_context_objects(objects: Sequence[SchemaContextObject]) 
     tables: list[str] = []
     for item in objects:
         tables.extend(_schema_object_tables(item.schema_object))
-        for chunk in item.chunks:
-            tables.extend(_tables_from_chunk_id(chunk.chunk.object_id))
-            tables.extend(_tables_from_chunk_id(chunk.chunk.chunk_id.split("::", 1)[0]))
-            for parent_id in chunk.chunk.parent_object_ids:
-                tables.extend(_tables_from_chunk_id(parent_id))
     return _stable_tables(tables)
 
 
@@ -458,21 +453,18 @@ def _top_evidence(
 ) -> list[dict[str, Any]]:
     evidence: list[dict[str, Any]] = []
     for item in schema_context_objects:
-        for context_chunk in item.chunks:
-            chunk = context_chunk.chunk
-            text = chunk.prompt_text or chunk.source_definition or chunk.evidence_text or chunk.text
+        if item.planning_text:
             evidence.append(
                 {
                     "object_id": item.schema_object.object_id,
-                    "chunk_id": chunk.chunk_id,
-                    "chunk_type": chunk.chunk_type,
+                    "object_type": item.schema_object.object_type,
                     "rank": item.rank,
                     "score": item.score,
-                    "text": " ".join(text.split())[:500],
+                    "text": " ".join(item.planning_text.split())[:500],
                 }
             )
-            if len(evidence) >= limit:
-                return evidence
+        if len(evidence) >= limit:
+            return evidence
     return evidence
 
 

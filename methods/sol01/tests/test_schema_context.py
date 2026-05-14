@@ -150,11 +150,8 @@ def test_summary_backed_context_uses_only_curated_large_schema_objects():
         for item in schema_context_objects
         if item.schema_object.object_id == "table:GITHUB_REPOS_DATE.DAY._20240103"
     )
-    assert (
-        "Large-schema summary: github_repos_day_events."
-        in summary_object.chunks[0].chunk.prompt_text
-    )
-    assert "SECRET_DDL_MARKER" not in summary_object.chunks[0].chunk.prompt_text
+    assert "Large-schema summary: github_repos_day_events." in summary_object.planning_text
+    assert "SECRET_DDL_MARKER" not in summary_object.planning_text
 
 
 def _fake_index() -> SchemaContextCache:

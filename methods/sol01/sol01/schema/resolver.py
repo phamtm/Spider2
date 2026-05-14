@@ -521,18 +521,18 @@ def _schema_context_evidence_lines(
 
     lines: list[str] = []
     for item in schema_context_evidence:
-        for context_chunk in item.chunks:
-            chunk = context_chunk.chunk
-            if chunk.chunk_type not in {"join_candidate", "sample_value", "column", "column_group"}:
-                continue
-            text = (
-                chunk.prompt_text or chunk.source_definition or chunk.inferred_usage or chunk.text
-            )
-            if not text:
-                continue
-            lines.append(f"- {chunk.chunk_type}: {' '.join(text.split())}")
-            if len(lines) >= MAX_SCHEMA_CONTEXT_EVIDENCE_LINES:
-                return lines
+        if item.schema_object.object_type not in {
+            "join_candidate",
+            "sample_value",
+            "column",
+            "column_group",
+        }:
+            continue
+        if not item.planning_text:
+            continue
+        lines.append(f"- {item.schema_object.object_type}: {' '.join(item.planning_text.split())}")
+        if len(lines) >= MAX_SCHEMA_CONTEXT_EVIDENCE_LINES:
+            return lines
     return lines
 
 

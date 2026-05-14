@@ -87,7 +87,7 @@ def test_schema_context_eval_reports_gold_coverage_family_success_and_failures()
             "top_evidence": report.failures[0]["top_evidence"],
         }
     ]
-    assert report.failures[0]["top_evidence"][0]["chunk_id"]
+    assert report.failures[0]["top_evidence"][0]["object_type"]
 
 
 def test_schema_context_eval_filters_covered_schemas_and_compares_baseline(monkeypatch):

@@ -16,8 +16,6 @@ from sol01.models import (
     ColumnSchema,
     ExecutionResult,
     Intent,
-    SchemaContextChunk,
-    SchemaContextChunkEvidence,
     SchemaContextObject,
     SchemaObject,
     SchemaPlanningConstraints,
@@ -121,6 +119,9 @@ def test_schema_context_planning_prompt_uses_curated_summary_evidence_for_covere
     chunk = next(
         chunk for chunk in render_schema_chunks([schema_object]) if chunk.chunk_type == "table"
     )
+    planning_text = (
+        chunk.prompt_text or chunk.source_definition or chunk.inferred_usage or chunk.text
+    )
     prompt = schema_context_planning_user_prompt(
         Task(
             instance_id="sf_bq_test",
@@ -132,7 +133,7 @@ def test_schema_context_planning_prompt_uses_curated_summary_evidence_for_covere
         [
             SchemaContextObject(
                 schema_object=schema_object,
-                chunks=[SchemaContextChunkEvidence(chunk=chunk, rank=1, score=1.0)],
+                planning_text=planning_text,
                 rank=1,
                 score=1.0,
             )
@@ -341,33 +342,13 @@ def _schema_context_objects() -> list[SchemaContextObject]:
     return [
         SchemaContextObject(
             schema_object=orders,
-            chunks=[
-                SchemaContextChunkEvidence(
-                    chunk=SchemaContextChunk(
-                        chunk_id="table:DB.PUBLIC.ORDERS::table",
-                        object_id="table:DB.PUBLIC.ORDERS",
-                        chunk_type="table",
-                        prompt_text="Orders table with status and amount fields.",
-                    ),
-                    rank=1,
-                )
-            ],
+            planning_text="Orders table with status and amount fields.",
             rank=1,
             score=0.9,
         ),
         SchemaContextObject(
             schema_object=amount,
-            chunks=[
-                SchemaContextChunkEvidence(
-                    chunk=SchemaContextChunk(
-                        chunk_id="column:DB.PUBLIC.ORDERS#AMOUNT::column",
-                        object_id="column:DB.PUBLIC.ORDERS#AMOUNT",
-                        chunk_type="column",
-                        prompt_text="Amount column used as revenue evidence.",
-                    ),
-                    rank=2,
-                )
-            ],
+            planning_text="Amount column used as revenue evidence.",
             rank=2,
             score=0.7,
         ),

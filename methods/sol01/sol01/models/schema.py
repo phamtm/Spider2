@@ -161,19 +161,11 @@ class SchemaContextChunk(BaseModel):
         return self
 
 
-class SchemaContextChunkEvidence(BaseModel):
-    """One schema-context chunk attached to a logical schema object."""
-
-    chunk: SchemaContextChunk
-    rank: int = Field(ge=1)
-    score: float | None = None
-
-
 class SchemaContextObject(BaseModel):
-    """A schema object plus the chunks that explain it to the planner."""
+    """A schema object plus its planning text for the planner."""
 
     schema_object: SchemaObject
-    chunks: list[SchemaContextChunkEvidence] = Field(default_factory=list)
+    planning_text: str = ""
     rank: int = Field(ge=1)
     score: float | None = None
 
