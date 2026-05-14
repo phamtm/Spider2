@@ -638,9 +638,7 @@ def _covered_table_keys(
         database = table.database_name or ""
         schema_name = table.schema_name or ""
         table_name = table.name or table_key
-        if registry.match_table(
-            database=database, schema_name=schema_name, table_name=table_name
-        ):
+        if registry.match_table(database=database, schema_name=schema_name, table_name=table_name):
             covered.add(table_key)
     return covered
 
