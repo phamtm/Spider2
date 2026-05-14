@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from numbers import Number
 from pathlib import Path
 from typing import Any
 
@@ -10,9 +11,6 @@ import sqlglot
 from sqlglot import exp
 from sqlglot.errors import ParseError
 
-from sol01.candidates.scoring import (
-    _coerce_number,
-)
 from sol01.execution.snowflake_runner import fetch_query_dataframe as _fetch_query_dataframe
 from sol01.infra.logging import get_logger
 from sol01.infra.strings import column_looks_string_like
@@ -33,6 +31,20 @@ from sol01.schema.db_index import load_db_index
 from sol01.schema.index import CACHE_PATH
 
 logger = get_logger(__name__)
+
+
+def _coerce_number(value: Any) -> float | None:
+    """Convert one value to a number when it looks numeric."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, Number):
+        return float(value)  # type: ignore[arg-type]
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
 
 
 def infer_aggregate_grain(

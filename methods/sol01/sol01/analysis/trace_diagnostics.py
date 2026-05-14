@@ -111,7 +111,7 @@ def _attempt_diagnostics(attempt: dict[str, Any]) -> dict[str, Any]:
     shape_report = attempt.get("shape_report") or {}
     filter_grounding_report = attempt.get("filter_grounding_report") or {}
     critic = attempt.get("critic") or {}
-    score_breakdown = attempt.get("score_breakdown") or {}
+    evidence = attempt.get("evidence") or {}
 
     if isinstance(validation, dict):
         verification_checks.append("validation")
@@ -167,8 +167,8 @@ def _attempt_diagnostics(attempt: dict[str, Any]) -> dict[str, Any]:
         if issues:
             detail_parts.append(f"critic: {issues[0]}")
 
-    if isinstance(score_breakdown, dict) and score_breakdown:
-        ranking_reasons = _ranking_reasons(score_breakdown)
+    if isinstance(evidence, dict) and evidence:
+        ranking_reasons = _ranking_reasons_from_evidence(evidence)
         if ranking_reasons:
             detail_parts.append("ranking: " + ", ".join(ranking_reasons))
 
@@ -187,17 +187,14 @@ def _attempt_diagnostics(attempt: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _ranking_reasons(score_breakdown: dict[str, Any]) -> list[str]:
-    """Return the strongest score contributions in descending impact order."""
+def _ranking_reasons_from_evidence(evidence: dict[str, Any]) -> list[str]:
+    """Return the dominant eligibility signals from candidate evidence."""
 
-    contributions: list[tuple[str, float]] = []
-    for name, value in score_breakdown.items():
-        if name == "confidence_tiebreaker":
-            continue
-        try:
-            contributions.append((str(name), float(value)))
-        except (TypeError, ValueError):
-            continue
-
-    contributions.sort(key=lambda item: (abs(item[1]), item[0]), reverse=True)
-    return [f"{name}={value:+g}" for name, value in contributions[:3]]
+    reasons: list[str] = []
+    if not evidence.get("executable", True):
+        reasons.append("not_executable")
+    elif not evidence.get("validation_ok", True):
+        reasons.append("validation_failed")
+    for issue in (evidence.get("issues") or [])[:2]:
+        reasons.append(str(issue)[:60])
+    return reasons[:3]

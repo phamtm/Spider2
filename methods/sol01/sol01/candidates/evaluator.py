@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from time import perf_counter
 
-from sol01.candidates.scoring import attempt_score_breakdown, verification_penalty_reasons
+from sol01.candidates.scoring import build_candidate_evidence, score_from_evidence
 from sol01.candidates.verification import (
     infer_aggregate_grain,
     infer_filter_grounding_report,
@@ -110,17 +110,14 @@ def evaluate_candidate(
         error=execution.error,
     )
 
-    score_breakdown = attempt_score_breakdown(
-        intent=intent,
-        candidate=candidate,
-        validation=validation,
+    evidence = build_candidate_evidence(
         execution=execution,
-        aggregate_grain=aggregate_grain,
-        result_profile=result_profile,
+        validation=validation,
         shape_report=shape_report,
         filter_grounding_report=filter_grounding_report,
+        aggregate_grain=aggregate_grain,
     )
-    score = sum(score_breakdown.values())
+    score = score_from_evidence(evidence, candidate_confidence=candidate.confidence)
 
     record = AttemptRecord(
         stage=stage,
@@ -134,13 +131,7 @@ def evaluate_candidate(
         execution_result=execution,
         filter_grounding_report=filter_grounding_report,
         shape_report=shape_report,
-        score_breakdown=score_breakdown,
-        verification_penalty_reasons=verification_penalty_reasons(
-            execution=execution,
-            shape_report=shape_report,
-            filter_grounding_report=filter_grounding_report,
-            aggregate_grain=aggregate_grain,
-        ),
+        evidence=evidence,
         score=score,
         result_profile=result_profile,
         aggregate_grain=aggregate_grain,

@@ -351,6 +351,18 @@ class OutputShapeReport(BaseModel):
     violations: list[str] = Field(default_factory=list)
 
 
+class CandidateEvidence(BaseModel):
+    """Deterministic check results for one evaluated SQL candidate."""
+
+    executable: bool
+    validation_ok: bool
+    validation_errors: list[str] = Field(default_factory=list)
+    validation_warnings: list[str] = Field(default_factory=list)
+    row_count: int = 0
+    column_count: int = 0
+    issues: list[str] = Field(default_factory=list)
+
+
 class ConfidenceReport(BaseModel):
     """Repair-review output that decides whether a candidate needs another attempt."""
 
@@ -400,8 +412,7 @@ class AttemptRecord(BaseModel):
     execution_result: ExecutionResult
     filter_grounding_report: FilterGroundingReport | None = None
     shape_report: OutputShapeReport | None = None
-    score_breakdown: dict[str, float] = Field(default_factory=dict)
-    verification_penalty_reasons: dict[str, float] = Field(default_factory=dict)
+    evidence: CandidateEvidence | None = None
     score: float
     result_profile: dict[str, Any] | None = None
     aggregate_grain: AggregateGrainReport | None = None

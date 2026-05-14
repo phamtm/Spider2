@@ -471,12 +471,14 @@ def test_load_records_extracts_trace_diagnostics_from_trace_json(tmp_path: Path)
                 "repair_focus": "add the grouped key",
                 "issues": ["Result is missing the customer breakdown."]
               },
-              "score_breakdown": {
-                "execution_status": -1000.0,
-                "validation": -180.0,
-                "shape": -28.0,
-                "filter_grounding": 16.0,
-                "confidence_tiebreaker": 0.01
+              "evidence": {
+                "executable": false,
+                "validation_ok": false,
+                "validation_errors": ["missing grouped key StyleID"],
+                "validation_warnings": [],
+                "row_count": 0,
+                "column_count": 0,
+                "issues": ["validation_error: missing grouped key StyleID"]
               }
             }
           ]
@@ -497,7 +499,7 @@ def test_load_records_extracts_trace_diagnostics_from_trace_json(tmp_path: Path)
         "filter grounding: country = 'Russia' -> Russian Federation | "
         "filters: country = 'Russia' | "
         "critic: Result is missing the customer breakdown. | "
-        "ranking: execution_status=-1000, validation=-180, shape=-28"
+        "ranking: not_executable, validation_error: missing grouped key StyleID"
     )
 
 

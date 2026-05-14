@@ -1,6 +1,7 @@
 from sol01.models.core import (
     AggregateGrainReport,
     AttemptRecord,
+    CandidateEvidence,
     CandidateReviewReport,
     CategoryMetadata,
     ColumnSchema,
@@ -33,6 +34,7 @@ from sol01.models.core import (
 __all__ = [
     "AggregateGrainReport",
     "AttemptRecord",
+    "CandidateEvidence",
     "CandidateReviewReport",
     "CategoryMetadata",
     "ColumnSchema",

@@ -411,12 +411,14 @@ def test_analyze_run_surfaces_failed_question_diagnostics(tmp_path: Path):
                         "repair_focus": "add the grouped key",
                         "issues": ["Result is missing the customer breakdown."],
                     },
-                    "score_breakdown": {
-                        "execution_status": -1000.0,
-                        "validation": -180.0,
-                        "shape": -28.0,
-                        "filter_grounding": 16.0,
-                        "confidence_tiebreaker": 0.01,
+                    "evidence": {
+                        "executable": False,
+                        "validation_ok": False,
+                        "validation_errors": ["missing grouped key StyleID"],
+                        "validation_warnings": [],
+                        "row_count": 0,
+                        "column_count": 0,
+                        "issues": ["validation_error: missing grouped key StyleID"],
                     },
                 }
             ],
@@ -443,9 +445,9 @@ def test_analyze_run_surfaces_failed_question_diagnostics(tmp_path: Path):
         "critic",
     ]
     assert failed[0]["repair_triggers"] == ["critic repair: add the grouped key"]
-    assert failed[0]["ranking_reasons"][0] == "execution_status=-1000"
+    assert failed[0]["ranking_reasons"][0] == "not_executable"
 
     summary_text = (run_paths.analysis_dir / "summary.md").read_text(encoding="utf-8")
     assert "## Failed Questions" in summary_text
     assert "local401" in summary_text
-    assert "ranking: execution_status=-1000" in summary_text
+    assert "ranking: not_executable" in summary_text

@@ -59,8 +59,9 @@ def _comparison_attempt_summary(attempt: AttemptRecord) -> dict[str, Any]:
         "constraint_ledger": attempt.constraint_ledger,
         "unsupported_assumptions": attempt.unsupported_assumptions,
         "candidate_confidence": attempt.candidate_confidence,
-        "score": attempt.score,
-        "score_breakdown": attempt.score_breakdown,
+        "evidence": (
+            attempt.evidence.model_dump(mode="json") if attempt.evidence is not None else {}
+        ),
         "validation": attempt.validation.model_dump(mode="json"),
         "execution_result": attempt.execution_result.model_dump(mode="json"),
         "filter_grounding_report": (
