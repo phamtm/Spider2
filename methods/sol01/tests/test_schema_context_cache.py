@@ -10,12 +10,14 @@ from sol01.models import ColumnSchema, TableSchema
 from sol01.schema.schema_context_cache import (
     SchemaContextCacheError,
     SchemaContextCacheLockTimeout,
+    _covered_table_keys,
     _version_dir,
     build_schema_context_cache,
     load_current_schema_context_cache,
     schema_context_cache_key,
     schema_source_hash,
 )
+from sol01.schema.large_schema_summaries import load_large_schema_summary_registry
 
 
 def _db_index(*, extra_column: bool = False) -> dict[str, TableSchema]:
@@ -182,3 +184,101 @@ def test_changed_summary_registry_version_publishes_separate_version_directory(t
     assert second.manifest["curated_summary_registry_version"] == "summaries-v2"
     assert _version_dir(cache_root, "DB", first.cache_key).exists()
     assert _version_dir(cache_root, "DB", second.cache_key).exists()
+
+
+def test_covered_tables_skip_child_objects_while_uncovered_tables_keep_them(tmp_path):
+    covered_table = TableSchema(
+        name="_20240103",
+        database_name="GITHUB_REPOS_DATE",
+        schema_name="DAY",
+        full_name="GITHUB_REPOS_DATE.DAY._20240103",
+        ddl="",
+        columns=[
+            ColumnSchema(name="public", type="BOOLEAN"),
+            ColumnSchema(name="actor", type="VARIANT"),
+            ColumnSchema(name="created_at", type="TIMESTAMP"),
+        ],
+        sample_rows=[],
+        searchable_text="github events",
+    )
+    uncovered_table = TableSchema(
+        name="REPOSITORIES",
+        database_name="GITHUB_REPOS_DATE",
+        schema_name="DAY",
+        full_name="GITHUB_REPOS_DATE.DAY.REPOSITORIES",
+        ddl="",
+        columns=[ColumnSchema(name="ID", type="TEXT"), ColumnSchema(name="NAME", type="TEXT")],
+        sample_rows=[],
+        searchable_text="repository metadata",
+    )
+    db_index = {
+        "GITHUB_REPOS_DATE.DAY._20240103": covered_table,
+        "GITHUB_REPOS_DATE.DAY.REPOSITORIES": uncovered_table,
+    }
+    cache = build_schema_context_cache(
+        "GITHUB_REPOS_DATE",
+        db_index=db_index,
+        cache_root=tmp_path,
+        lock_timeout_seconds=0.1,
+    )
+
+    object_types = {obj.object_type for obj in cache.objects}
+    covered_table_ids = {
+        obj.object_id
+        for obj in cache.objects
+        if obj.table_name == "GITHUB_REPOS_DATE.DAY._20240103"
+    }
+    uncovered_table_ids = {
+        obj.object_id
+        for obj in cache.objects
+        if obj.table_name == "GITHUB_REPOS_DATE.DAY.REPOSITORIES"
+    }
+
+    assert "table" in object_types
+    assert "column" in object_types
+    assert covered_table_ids == {"table:GITHUB_REPOS_DATE.DAY._20240103"}
+    assert any(
+        obj_id.startswith("column:GITHUB_REPOS_DATE.DAY.REPOSITORIES#")
+        for obj_id in uncovered_table_ids
+    )
+    assert not any(
+        obj_id.startswith("column:GITHUB_REPOS_DATE.DAY._20240103#")
+        for obj_id in covered_table_ids
+    )
+
+    summary_chunk = next(
+        chunk
+        for chunk in cache.chunks
+        if chunk.object_id == "table:GITHUB_REPOS_DATE.DAY._20240103"
+    )
+    assert summary_chunk.metadata.get("large_schema_summaries")
+
+
+def test_covered_table_keys_matches_tables_against_summary_registry():
+    db_index = {
+        "GITHUB_REPOS_DATE.DAY._20240103": TableSchema(
+            name="_20240103",
+            database_name="GITHUB_REPOS_DATE",
+            schema_name="DAY",
+            full_name="GITHUB_REPOS_DATE.DAY._20240103",
+            ddl="",
+            columns=[ColumnSchema(name="public", type="BOOLEAN")],
+            sample_rows=[],
+            searchable_text="github events",
+        ),
+        "GITHUB_REPOS_DATE.DAY.REPOSITORIES": TableSchema(
+            name="REPOSITORIES",
+            database_name="GITHUB_REPOS_DATE",
+            schema_name="DAY",
+            full_name="GITHUB_REPOS_DATE.DAY.REPOSITORIES",
+            ddl="",
+            columns=[ColumnSchema(name="ID", type="TEXT")],
+            sample_rows=[],
+            searchable_text="repositories",
+        ),
+    }
+    registry = load_large_schema_summary_registry()
+
+    covered = _covered_table_keys(db_index, registry)
+
+    assert covered == {"GITHUB_REPOS_DATE.DAY._20240103"}

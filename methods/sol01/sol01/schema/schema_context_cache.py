@@ -24,11 +24,13 @@ from sol01.schema.db_index import load_db_index
 from sol01.schema.large_schema_summaries import (
     DEFAULT_LARGE_SCHEMA_SUMMARY_PATH,
     LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
+    LargeSchemaSummaryRegistry,
     large_schema_summary_registry_hash,
+    load_large_schema_summary_registry,
 )
 from sol01.schema.objects import build_schema_objects
 
-OBJECT_BUILDER_VERSION = "schema-objects-v1"
+OBJECT_BUILDER_VERSION = "schema-objects-v2"
 CHUNK_RENDER_VERSION = "schema-chunks-v1"
 MANIFEST_VERSION = 2
 REQUIRED_CACHE_ARTIFACTS = frozenset({"objects.jsonl", "chunks.jsonl", "manifest.json"})
@@ -201,9 +203,12 @@ def build_schema_context_cache(
         if version_dir.exists():
             _quarantine_invalid_version_directory(version_dir)
 
+        registry = load_large_schema_summary_registry(curated_summary_registry_path)
+        covered_table_keys = _covered_table_keys(db_index, registry)
         objects = build_schema_objects(
             db_index,
             family_similarity_threshold=config.family_similarity_threshold,
+            covered_table_keys=covered_table_keys,
         )
         chunks = render_schema_chunks(objects)
         logger.info(
@@ -212,6 +217,7 @@ def build_schema_context_cache(
             cache_key=cache_key,
             object_count=len(objects),
             chunk_count=len(chunks),
+            covered_table_count=len(covered_table_keys),
         )
 
         temp_dir = _new_temp_version_dir(cache_root, db, cache_key)
@@ -619,6 +625,24 @@ def _read_current_pointer(current_path: Path) -> dict[str, Any]:
 
 def _artifact_names(cache_dir: Path) -> frozenset[str]:
     return frozenset(path.name for path in cache_dir.iterdir())
+
+
+def _covered_table_keys(
+    db_index: Mapping[str, TableSchema],
+    registry: LargeSchemaSummaryRegistry,
+) -> set[str]:
+    """Return db-index keys whose tables match at least one curated summary."""
+
+    covered: set[str] = set()
+    for table_key, table in db_index.items():
+        database = table.database_name or ""
+        schema_name = table.schema_name or ""
+        table_name = table.name or table_key
+        if registry.match_table(
+            database=database, schema_name=schema_name, table_name=table_name
+        ):
+            covered.add(table_key)
+    return covered
 
 
 def _load_db_index(db: str) -> dict[str, TableSchema]:

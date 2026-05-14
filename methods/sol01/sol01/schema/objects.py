@@ -140,13 +140,21 @@ def build_schema_objects(
     max_join_candidates: int = DEFAULT_MAX_JOIN_CANDIDATES,
     max_join_candidates_per_column: int = DEFAULT_MAX_JOIN_CANDIDATES_PER_COLUMN,
     family_similarity_threshold: float = DEFAULT_FAMILY_SIMILARITY_THRESHOLD,
+    covered_table_keys: set[str] | None = None,
 ) -> list[SchemaObject]:
-    """Build deterministic schema objects from a database table index."""
+    """Build deterministic schema objects from a database table index.
+
+    When *covered_table_keys* is provided, tables whose key appears in that
+    set will only emit a table object. Column, column-group, and sample-value
+    objects are skipped because a curated large-schema summary replaces their
+    raw metadata at chunk-render time.
+    """
 
     from sol01.schema.object_families import table_family_objects  # noqa: PLC0415
     from sol01.schema.object_joins import join_candidate_objects  # noqa: PLC0415
     from sol01.schema.object_sample_values import sample_value_objects  # noqa: PLC0415
 
+    _covered = covered_table_keys or set()
     column_refs = _column_refs(db_index)
     objects: list[SchemaObject] = []
 
@@ -154,6 +162,8 @@ def build_schema_objects(
         table = db_index[table_key]
         table_full_name = _table_full_name(table_key, table)
         objects.append(_table_object(table_key, table, table_full_name))
+        if table_key in _covered:
+            continue
         objects.extend(_column_object(ref) for ref in column_refs if ref.table_key == table_key)
         objects.extend(_column_group_objects(table_key, table, table_full_name))
         objects.extend(
