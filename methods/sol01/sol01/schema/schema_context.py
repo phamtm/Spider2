@@ -17,10 +17,6 @@ from sol01.schema.embedding import BM25Index
 from sol01.schema.schema_context_cache import SchemaContextCache
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
-_DOTTED_OR_UNDERSCORE_RE = re.compile(r"\b[A-Za-z][A-Za-z0-9]*(?:[._][A-Za-z0-9]+)+\b")
-_UPPER_CODE_RE = re.compile(r"\b[A-Z][A-Z0-9_]{1,}\b")
-_DATE_RE = re.compile(r"\b\d{4}[-/]\d{1,2}[-/]\d{1,2}\b")
-_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 _QUOTED_LITERAL_RE = re.compile(r"'([^']+)'|\"([^\"]+)\"")
 
 _OBJECT_TYPE_ORDER = {
@@ -34,27 +30,21 @@ _OBJECT_TYPE_ORDER = {
 
 
 @dataclass(frozen=True)
-class SchemaContextInputs:
-    """Question-derived context kept for diagnostics and linked-document clipping."""
+class QuestionContext:
+    """Compact question context used for schema-object ranking and traces."""
 
     text: str
     question: str
     linked_doc_context: str
-    exact_literals: tuple[str, ...]
-    dates: tuple[str, ...]
-    years: tuple[str, ...]
-    identifiers: tuple[str, ...]
-    uppercase_codes: tuple[str, ...]
-    normalized_tokens: tuple[str, ...]
 
 
-def build_schema_context_inputs(
+def build_question_context(
     question: str,
     *,
     linked_docs: Sequence[str] = (),
     exact_literals: Sequence[str] = (),
     max_doc_chars: int = 6000,
-) -> SchemaContextInputs:
+) -> QuestionContext:
     """Build normalized question context without ranking schema objects."""
 
     clean_question = _clean_text(question)
@@ -64,37 +54,21 @@ def build_schema_context_inputs(
             *(_clean_text(value) for value in exact_literals),
         ]
     )
-    dates = _stable_unique(_DATE_RE.findall(clean_question))
-    years = _stable_unique(_YEAR_RE.findall(clean_question))
-    identifiers = _stable_unique(_DOTTED_OR_UNDERSCORE_RE.findall(clean_question))
-    uppercase_codes = _stable_unique(_UPPER_CODE_RE.findall(clean_question))
-    normalized_tokens = _normalized_tokens(
-        [clean_question, *literals, *dates, *years, *identifiers, *uppercase_codes]
-    )
+    query_terms = _normalized_tokens([clean_question, *literals])
     linked_doc_context = clip_linked_docs(
         linked_docs,
-        query_terms=normalized_tokens,
+        query_terms=query_terms,
         max_doc_chars=max_doc_chars,
     )
     parts = [
         clean_question,
         linked_doc_context,
         " ".join(literals),
-        " ".join(dates),
-        " ".join(identifiers),
-        " ".join(uppercase_codes),
-        " ".join(normalized_tokens),
     ]
-    return SchemaContextInputs(
+    return QuestionContext(
         text=_join_text(parts),
         question=clean_question,
         linked_doc_context=linked_doc_context,
-        exact_literals=tuple(literals),
-        dates=tuple(dates),
-        years=tuple(years),
-        identifiers=tuple(identifiers),
-        uppercase_codes=tuple(uppercase_codes),
-        normalized_tokens=tuple(normalized_tokens),
     )
 
 
@@ -152,16 +126,16 @@ def build_available_schema_context(
     exact_literals: Sequence[str] = (),
     config: SchemaContextConfig | None = None,
 ) -> tuple[list[SchemaContextObject], dict[str, object]]:
-    """Return schema objects ranked by BM25 relevance to the planning question.
+    """Return planner-visible schema objects for the current question.
 
     Curated large-schema summaries replace raw metadata for the tables they
-    cover, and their containing objects are pre-filtered before BM25 ranking.
-    For databases with more objects than top_k_objects, only the top-ranked
-    objects are returned.
+    cover, and their containing objects are pre-filtered before ranking.
+    For databases with more objects than top_k_objects, only the strongest
+    matches are returned.
     """
 
     config = config or SchemaContextConfig()
-    inputs = build_schema_context_inputs(
+    context = build_question_context(
         question,
         linked_docs=linked_docs,
         exact_literals=exact_literals,
@@ -170,7 +144,7 @@ def build_available_schema_context(
     context_mode, context_objects = _available_schema_objects(
         cache.objects,
         cache.chunks,
-        inputs.text,
+        context.text,
         top_k=config.top_k_objects,
         top_k_sparse=config.top_k_sparse,
     )
@@ -179,7 +153,7 @@ def build_available_schema_context(
         chunks=cache.chunks,
     )
     diagnostics = _diagnostics(
-        inputs,
+        context,
         context_mode=context_mode,
         schema_context_objects=schema_context_objects,
         object_count=len(cache.objects),
@@ -197,7 +171,7 @@ def _available_schema_objects(
     top_k: int,
     top_k_sparse: int,
 ) -> tuple[str, list[SchemaObject]]:
-    """Return BM25-ranked schema objects, respecting large-schema-summary pre-filtering."""
+    """Return ranked schema objects, respecting large-schema-summary pre-filtering."""
 
     summary_object_ids = {
         chunk.object_id
@@ -221,11 +195,11 @@ def _available_schema_objects(
         )
 
     if len(objects) <= top_k:
-        return "hybrid_retrieval", _bm25_rank(
+        return "schema_objects", _bm25_rank(
             objects, chunks, query_text, top_k=len(objects), top_k_sparse=len(chunks)
         )
 
-    return "hybrid_retrieval", _bm25_rank(
+    return "schema_objects", _bm25_rank(
         objects, chunks, query_text, top_k=top_k, top_k_sparse=top_k_sparse
     )
 
@@ -399,7 +373,7 @@ def _chunk_planning_text(chunk: SchemaContextChunk | None) -> str:
 
 
 def _diagnostics(
-    inputs: SchemaContextInputs,
+    context: QuestionContext,
     *,
     context_mode: str,
     schema_context_objects: Sequence[SchemaContextObject],
@@ -410,14 +384,8 @@ def _diagnostics(
     return {
         "context_mode": context_mode,
         "question_context": {
-            "text": inputs.text,
-            "exact_literals": list(inputs.exact_literals),
-            "dates": list(inputs.dates),
-            "years": list(inputs.years),
-            "identifiers": list(inputs.identifiers),
-            "uppercase_codes": list(inputs.uppercase_codes),
-            "normalized_tokens": list(inputs.normalized_tokens[:50]),
-            "linked_doc_chars": len(inputs.linked_doc_context),
+            "text": context.text,
+            "linked_doc_chars": len(context.linked_doc_context),
         },
         "context_counts": {
             "objects_total": object_count,

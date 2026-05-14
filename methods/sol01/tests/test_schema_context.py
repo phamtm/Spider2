@@ -9,14 +9,14 @@ from sol01.schema.chunks import render_schema_chunks
 from sol01.schema.objects import build_schema_objects
 from sol01.schema.schema_context import (
     build_available_schema_context,
-    build_schema_context_inputs,
+    build_question_context,
     clip_linked_docs,
 )
 from sol01.schema.schema_context_cache import SchemaContextCache
 
 
-def test_query_construction_extracts_signals_and_clips_linked_docs_by_overlap():
-    query = build_schema_context_inputs(
+def test_question_context_clips_linked_docs_and_keeps_compact_query_text():
+    context = build_question_context(
         "Show DB.PUBLIC.ORDERS where STATUS = 'closed' in FY_2024 and 2024-01-03",
         linked_docs=[
             "Irrelevant billing policy paragraph.\n\n"
@@ -26,15 +26,14 @@ def test_query_construction_extracts_signals_and_clips_linked_docs_by_overlap():
         max_doc_chars=80,
     )
 
-    assert query.exact_literals == ("closed", "VIP_CUSTOMER")
-    assert query.dates == ("2024-01-03",)
-    assert "2024" in query.years
-    assert "DB.PUBLIC.ORDERS" in query.identifiers
-    assert "FY_2024" in query.uppercase_codes
-    assert "vip_customer" in query.normalized_tokens
-    assert "vip" in query.normalized_tokens
-    assert query.linked_doc_context.startswith("Orders status values")
-    assert len(query.linked_doc_context) <= 80
+    assert (
+        context.question
+        == "Show DB.PUBLIC.ORDERS where STATUS = 'closed' in FY_2024 and 2024-01-03"
+    )
+    assert context.linked_doc_context.startswith("Orders status values")
+    assert len(context.linked_doc_context) <= 80
+    assert "VIP_CUSTOMER" in context.text
+    assert "closed" in context.text
 
     clipped = clip_linked_docs(
         ["alpha beta.\n\ntarget revenue status paragraph.\n\ntrailing text."],
@@ -63,12 +62,14 @@ def test_hybrid_retrieval_returns_all_objects_for_small_database():
         "join_candidate:DB.PUBLIC.ORDERS#CUSTOMER_ID->DB.PUBLIC.CUSTOMERS#CUSTOMER_ID:abcdef12",
         "sample_value:DB.PUBLIC.ORDERS#STATUS:11111111",
     }
-    assert diagnostics["context_mode"] == "hybrid_retrieval"
+    assert diagnostics["context_mode"] == "schema_objects"
     assert diagnostics["context_counts"] == {
         "objects_total": 7,
         "chunks_total": 7,
         "available_objects": 7,
     }
+    assert diagnostics["question_context"]["linked_doc_chars"] == 0
+    assert "exact_literals" not in diagnostics["question_context"]
 
     # ORDERS-related objects should rank above CUSTOMERS-only
     id_to_pos = {obj.schema_object.object_id: obj.position for obj in objects}

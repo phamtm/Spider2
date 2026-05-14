@@ -218,7 +218,7 @@ def test_bm25_retrieval_prefers_question_relevant_objects():
         cache, "Find all orders where status is closed"
     )
 
-    assert diagnostics["context_mode"] == "hybrid_retrieval"
+    assert diagnostics["context_mode"] == "schema_objects"
     ids = [obj.schema_object.object_id for obj in result_objects]
     weather_pos = ids.index("table:DB.PUBLIC.WEATHER")
     orders_pos = ids.index("table:DB.PUBLIC.ORDERS")
