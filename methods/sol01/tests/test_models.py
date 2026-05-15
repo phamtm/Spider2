@@ -180,13 +180,13 @@ def test_resolved_schema_context_keeps_compact_selection_context():
         db="DB",
         selected_objects=[selected],
         resolved_tables=["DB.PUBLIC.ORDERS"],
-        prompt_context="Table DB.PUBLIC.ORDERS: AMOUNT",
+        sql_prompt_context="Table DB.PUBLIC.ORDERS: AMOUNT",
         diagnostics={"schema_context_object_count": 1},
     )
 
     assert context.selected_objects[0].role == "metric"
     assert context.resolved_tables == ["DB.PUBLIC.ORDERS"]
-    assert context.prompt_context == "Table DB.PUBLIC.ORDERS: AMOUNT"
+    assert context.sql_prompt_context == "Table DB.PUBLIC.ORDERS: AMOUNT"
     assert context.diagnostics == {"schema_context_object_count": 1}
 
 

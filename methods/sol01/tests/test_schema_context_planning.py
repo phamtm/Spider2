@@ -241,6 +241,7 @@ def test_sql_reference_and_repair_prompts_use_large_schema_summary_context():
     repair_prompt = sql_repair_prompt(
         Task(instance_id="sf_bq_test", db="COVID19_USA", question="Show confirmed cases."),
         _intent(),
+        None,
         AttemptRecord(
             sql=f"SELECT state FROM {table_name}",
             stage="test",
@@ -254,19 +255,19 @@ def test_sql_reference_and_repair_prompts_use_large_schema_summary_context():
         "Confirmed cases are county-level.",
     )
 
-    assert "Large-schema summary: covid19_usafacts_wide_daily_counts" in reference_context
+    assert "Table: COVID19_USA.COVID19_USAFACTS.CONFIRMED_CASES" in reference_context
     assert len(reference_context) <= DEFAULT_SCHEMA_CONTEXT_POLICY.max_schema_prompt_chars
     assert "CONFIRMED_CASES" in reference_context
     assert "CREATE TABLE" not in reference_context
     assert "SECRET_DDL_MARKER" not in reference_context
     assert "SECRET_SAMPLE_MARKER" not in reference_context
     assert "unknown column: bad_column" in repair_prompt
-    assert "Large-schema summary: covid19_usafacts_wide_daily_counts" in repair_prompt
+    assert "Table: COVID19_USA.COVID19_USAFACTS.CONFIRMED_CASES" in repair_prompt
     assert "CREATE TABLE" not in repair_prompt
     assert "SECRET_DDL_MARKER" not in repair_prompt
 
 
-def test_sql_reference_budget_enforcement_preserves_large_schema_rules():
+def test_sql_reference_budget_enforcement_preserves_exact_selected_table_context():
     table_name = "COVID19_USA.COVID19_USAFACTS.CONFIRMED_CASES"
     table_schemas = {
         table_name: TableSchema(
@@ -297,8 +298,8 @@ def test_sql_reference_budget_enforcement_preserves_large_schema_rules():
 
     assert enforced == reference_context
     assert table_name in enforced
-    assert "CONFIRMED_CASES and DEATHS repeat daily count columns named _YYYY_MM_DD" in enforced
-    assert "Wide date columns begin with an underscore and must be quoted" in enforced
+    assert "Column count: 1" in enforced
+    assert "TEXT: state [TEXT]" in enforced
     with pytest.raises(PromptBudgetExceededError, match="sql_reference_context prompt"):
         enforce_prompt_budget(
             "sql_reference_context",

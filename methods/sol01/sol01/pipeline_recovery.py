@@ -19,6 +19,7 @@ from sol01.pipeline_support import (
     evaluate_and_record_candidate,
     prompt_budget_diagnostics,
     run_prompt,
+    run_schema_grounding,
     run_schema_planning,
 )
 from sol01.recovery_signals import schema_expansion_trigger
@@ -191,6 +192,7 @@ def _run_sql_recovery(run: TaskRun, *, best) -> RecoveryAction:
         user_prompt=sql_repair_prompt(
             run.task,
             run.intent,
+            run.schema_grounding,
             best,
             run.sql_reference_context,
             run.docs_context,
@@ -295,7 +297,7 @@ def _run_schema_recovery(
             "planner": planner_diagnostics,
             "resolver": resolved.diagnostics,
             "prompt_budget": prompt_budget_diagnostics(
-                sql_reference_context=resolved.prompt_context,
+                sql_reference_context=resolved.sql_prompt_context,
                 schema_context_config=run.schema_context_config,
             ),
         }
@@ -320,7 +322,7 @@ def _run_schema_recovery(
     run.table_schemas = new_table_schemas
     run.sql_reference_context = checked_schema_prompt(
         "schema_expansion_sql_reference_context",
-        resolved.prompt_context,
+        resolved.sql_prompt_context,
         run.schema_context_config,
     )
     run.intent = augment_intent_with_value_groundings(
@@ -329,6 +331,19 @@ def _run_schema_recovery(
         schema=expanded_schema,
         table_schemas=new_table_schemas,
     )
+    grounding = run_schema_grounding(
+        task=run.task,
+        intent=run.intent,
+        available_tables=list(new_table_schemas),
+        table_schemas=new_table_schemas,
+        sql_prompt_context=run.sql_reference_context,
+        client=run.client,
+        prompt_hashes=run.prompt_hashes,
+        schema_context_config=run.schema_context_config,
+    )
+    run.schema_grounding = grounding.grounding
+    run.schema.diagnostics["schema_grounding"] = grounding.diagnostics
+    details["schema_grounding"] = grounding.diagnostics
 
     batch = run_prompt(
         run.client,
@@ -338,6 +353,7 @@ def _run_schema_recovery(
         user_prompt=sql_generation_batch_prompt(
             run.task,
             run.intent,
+            run.schema_grounding,
             run.sql_reference_context,
             run.docs_context,
             candidate_count=1,

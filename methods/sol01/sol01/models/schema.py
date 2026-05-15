@@ -156,7 +156,7 @@ class ResolvedSchemaContext(BaseModel):
     schema_context_objects: list[SchemaContextObject] = Field(default_factory=list)
     resolved_tables: list[str] = Field(default_factory=list)
     table_schemas: dict[str, TableSchema] = Field(default_factory=dict)
-    prompt_context: str = ""
+    sql_prompt_context: str = ""
     diagnostics: dict[str, object] = Field(default_factory=dict)
 
 

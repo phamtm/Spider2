@@ -15,7 +15,7 @@ from sol01.models import (
     TableSchema,
     Task,
 )
-from sol01.schema.reference_context import render_sql_reference_context
+from sol01.schema.exact_reference_context import render_exact_sql_reference_context
 
 
 def sql_reference_context(
@@ -24,7 +24,7 @@ def sql_reference_context(
 ) -> str:
     """Render deterministic selected-table context for cache-friendly SQL prompts."""
 
-    return render_sql_reference_context(
+    return render_exact_sql_reference_context(
         db=schema.db,
         expanded_tables=schema.expanded_tables,
         table_schemas=table_schemas,

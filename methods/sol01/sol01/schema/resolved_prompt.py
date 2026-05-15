@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from sol01.infra.policy import DEFAULT_SCHEMA_RENDER_POLICY
 from sol01.models import SchemaContextObject, SchemaObject, SelectedSchemaObject, TableSchema
+from sol01.schema.exact_reference_context import render_exact_table_reference
 from sol01.schema.family_resolution import (
     canonical_family_member,
     family_member_count,
@@ -13,7 +14,6 @@ from sol01.schema.family_resolution import (
     physical_tables_for_object,
     stable_sorted_tables,
 )
-from sol01.schema.reference_context import render_table_reference
 from sol01.schema.utils import _string_list
 
 MAX_FAMILY_MEMBERS_IN_PROMPT = DEFAULT_SCHEMA_RENDER_POLICY.family_members_in_prompt
@@ -165,7 +165,7 @@ def resolved_family_members(
 def render_table(table: TableSchema, *, header: str | None = None) -> list[str]:
     """Render one table schema for SQL generation."""
 
-    return render_table_reference(table, header=header)
+    return render_exact_table_reference(table, header=header)
 
 
 def schema_context_evidence_lines(

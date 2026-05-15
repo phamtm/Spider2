@@ -8,7 +8,7 @@ from sol01.candidates.selection import select_winner
 from sol01.infra.config import SchemaContextConfig
 from sol01.infra.policy import DEFAULT_SOLVER_POLICY, SolverPolicy
 from sol01.llm.client import LLMClient
-from sol01.models import AttemptRecord, Intent, SchemaSelection, Task
+from sol01.models import AttemptRecord, Intent, SchemaGrounding, SchemaSelection, Task
 from sol01.workflow import RecoveryTrace
 
 
@@ -23,6 +23,7 @@ class TaskRun:
 
     # Set during plan_schema
     intent: Intent | None = None
+    schema_grounding: SchemaGrounding | None = None
     schema: SchemaSelection | None = None
     table_schemas: dict[str, object] = dataclasses.field(default_factory=dict)
     sql_reference_context: str = ""

@@ -32,7 +32,7 @@ def test_resolver_maps_exact_table_selection_to_allowed_table_context():
     assert context.resolved_tables == ["DB.PUBLIC.ORDERS"]
     assert context.resolved_tables == ["DB.PUBLIC.ORDERS"]
     assert list(context.table_schemas) == ["DB.PUBLIC.ORDERS"]
-    assert "Table: DB.PUBLIC.ORDERS" in context.prompt_context
+    assert "Table: DB.PUBLIC.ORDERS" in context.sql_prompt_context
 
 
 def test_resolver_applies_explicit_year_date_suffix_and_version_constraints():
@@ -154,13 +154,14 @@ def test_resolver_has_deterministic_table_order_and_compact_family_prompt():
         "DB.PUBLIC.SALES_2023",
         "DB.PUBLIC.SALES_2024",
     ]
-    assert context.prompt_context.count("CREATE TABLE SALES_") == 1
+    assert "CREATE TABLE SALES_" not in context.sql_prompt_context
     assert (
         "Physical members: DB.PUBLIC.SALES_2022, DB.PUBLIC.SALES_2023, DB.PUBLIC.SALES_2024"
-        in context.prompt_context
+        in context.sql_prompt_context
     )
-    assert "Common columns: ORDER_ID, AMOUNT" in context.prompt_context
-    assert "join_candidate: Join candidate:" in context.prompt_context
+    assert "Common columns: ORDER_ID, AMOUNT" in context.sql_prompt_context
+    assert "join_candidate: Join candidate:" in context.sql_prompt_context
+    assert "Exact columns by type:" in context.sql_prompt_context
 
 
 def test_resolver_expands_large_date_family_only_to_matching_member():
@@ -185,8 +186,8 @@ def test_resolver_expands_large_date_family_only_to_matching_member():
 
     assert context.resolved_tables == [matched_table]
     assert context.diagnostics["resolution_entries"][0]["reason"] == ("explicit_constraints")
-    assert f"Physical members: {matched_table}" in context.prompt_context
-    assert "GITHUB_REPOS_DATE.DAY._20240104" not in context.prompt_context
+    assert f"Physical members: {matched_table}" in context.sql_prompt_context
+    assert "GITHUB_REPOS_DATE.DAY._20240104" not in context.sql_prompt_context
 
 
 def test_resolver_keeps_large_broad_github_family_symbolic_and_budgeted():
@@ -211,7 +212,7 @@ def test_resolver_keeps_large_broad_github_family_symbolic_and_budgeted():
 
     entry = broad_context.diagnostics["resolution_entries"][0]
     include_all_entry = include_all_context.diagnostics["resolution_entries"][0]
-    prompt = broad_context.prompt_context
+    prompt = broad_context.sql_prompt_context
 
     assert broad_context.resolved_tables == []
     assert include_all_context.resolved_tables == []
@@ -222,7 +223,6 @@ def test_resolver_keeps_large_broad_github_family_symbolic_and_budgeted():
     assert broad_context.diagnostics["warnings"]
     assert "expansion budget" in broad_context.diagnostics["warnings"][0]
     assert "Physical members: kept symbolic (1500 matched; expansion budget 64)" in prompt
-    assert "Large-schema summary: github_repos_day_events" in prompt
     assert "GITHUB_REPOS_DATE.DAY._20240101" in prompt
     assert "GITHUB_REPOS_DATE.DAY._20240410" not in prompt
     assert prompt.count("GITHUB_REPOS_DATE.DAY._") < 20
@@ -246,7 +246,7 @@ def test_validation_accepts_non_canonical_family_member_from_resolved_allowed_ta
     assert report.referenced_tables == ["DB.PUBLIC.SALES_2024"]
 
 
-def test_resolver_renders_large_schema_summary_without_raw_table_metadata():
+def test_resolver_renders_exact_selected_table_metadata_without_raw_ddl():
     table_name = "COVID19_USA.COVID19_USAFACTS.CONFIRMED_CASES"
     index = {
         table_name: TableSchema(
@@ -275,16 +275,13 @@ def test_resolver_renders_large_schema_summary_without_raw_table_metadata():
     )
 
     assert context.resolved_tables == [table_name]
-    assert "Large-schema summary: covid19_usafacts_wide_daily_counts" in context.prompt_context
-    assert "CONFIRMED_CASES and DEATHS repeat daily count columns named _YYYY_MM_DD" in (
-        context.prompt_context
-    )
-    assert "Wide date columns begin with an underscore and must be quoted" in (
-        context.prompt_context
-    )
-    assert "CREATE TABLE" not in context.prompt_context
-    assert "SECRET_DDL_MARKER" not in context.prompt_context
-    assert "SECRET_SAMPLE_MARKER" not in context.prompt_context
+    assert "Table: COVID19_USA.COVID19_USAFACTS.CONFIRMED_CASES" in context.sql_prompt_context
+    assert "Column count: 3" in context.sql_prompt_context
+    assert "TEXT: state [TEXT], county_name [TEXT]" in context.sql_prompt_context
+    assert "NUMERIC: _2020_01_01 [NUMBER]" in context.sql_prompt_context
+    assert "CREATE TABLE" not in context.sql_prompt_context
+    assert "SECRET_DDL_MARKER" not in context.sql_prompt_context
+    assert "SECRET_SAMPLE_MARKER" not in context.sql_prompt_context
 
     valid = validate_sql(
         f'SELECT "state" FROM {table_name}',

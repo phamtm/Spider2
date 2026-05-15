@@ -9,6 +9,11 @@ from sol01.models.candidate import (
     SQLCandidateBatch,
     ValidationReport,
 )
+from sol01.models.grounding import (
+    SchemaGrounding,
+    SchemaGroundingBinding,
+    UnresolvedSchemaTerm,
+)
 from sol01.models.schema import (
     ColumnSchema,
     ResolvedSchemaContext,
@@ -42,6 +47,8 @@ __all__ = [
     "Intent",
     "OutputShapeReport",
     "ResolvedSchemaContext",
+    "SchemaGrounding",
+    "SchemaGroundingBinding",
     "SchemaContextObject",
     "SchemaObject",
     "SchemaPlanningConstraints",
@@ -52,6 +59,7 @@ __all__ = [
     "SQLCandidateBatch",
     "TableSchema",
     "Task",
+    "UnresolvedSchemaTerm",
     "ValidationReport",
     "is_schema_object_id",
     "schema_object_id_kind",

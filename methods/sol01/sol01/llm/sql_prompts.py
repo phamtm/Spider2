@@ -9,10 +9,12 @@ from sol01.infra.strings import column_looks_string_like
 from sol01.models import (
     AttemptRecord,
     Intent,
+    SchemaGrounding,
     SchemaSelection,
     TableSchema,
     Task,
 )
+from sol01.schema.schema_grounding import render_grounding_block
 
 
 def infer_native_value_terms(
@@ -44,6 +46,7 @@ def infer_native_value_terms(
 def sql_generation_prompt(
     task: Task,
     intent: Intent,
+    schema_grounding: SchemaGrounding | None,
     sql_reference_context: str,
     docs_context: str | None,
 ) -> str:
@@ -51,11 +54,14 @@ def sql_generation_prompt(
 
     grounded_literals = _grounded_literal_context_from_intent(intent)
     grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
+    grounding_block = render_grounding_block(schema_grounding)
+    grounding_block_text = f"{grounding_block}\n\n" if grounding_block else ""
     return (
         f"{sql_reference_context}\n\n"
         f"Document context:\n{docs_context or 'No task-linked document context.'}\n\n"
         f"Question: {task.question}\n\n"
         f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
+        f"{grounding_block_text}"
         f"{grounded_literal_block}"
         "Write the SQL using only the reference context above."
     )
@@ -64,6 +70,7 @@ def sql_generation_prompt(
 def sql_generation_batch_prompt(
     task: Task,
     intent: Intent,
+    schema_grounding: SchemaGrounding | None,
     sql_reference_context: str,
     docs_context: str | None,
     *,
@@ -74,6 +81,7 @@ def sql_generation_batch_prompt(
     base_prompt = sql_generation_prompt(
         task,
         intent,
+        schema_grounding,
         sql_reference_context,
         docs_context,
     )
@@ -87,6 +95,7 @@ def sql_generation_batch_prompt(
 def sql_repair_prompt(
     task: Task,
     intent: Intent | None,
+    schema_grounding: SchemaGrounding | None,
     attempt: AttemptRecord,
     sql_reference_context: str,
     docs_context: str | None,
@@ -97,6 +106,8 @@ def sql_repair_prompt(
         _grounded_literal_context_from_intent(intent) if intent is not None else None
     )
     grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
+    grounding_block = render_grounding_block(schema_grounding)
+    grounding_block_text = f"{grounding_block}\n\n" if grounding_block else ""
 
     return (
         f"{sql_reference_context}\n\n"
@@ -109,6 +120,7 @@ def sql_repair_prompt(
         f"Execution:\n"
         f"{json.dumps(attempt.execution_result.model_dump(mode='json'), indent=2, sort_keys=True)}"
         "\n\n"
+        f"{grounding_block_text}"
         f"{grounded_literal_block}"
     )
 

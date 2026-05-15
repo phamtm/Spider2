@@ -200,7 +200,7 @@ def run_schema_context_eval(
             resolved_tables,
         )
         full_schema_chars = len(db_schema_summary(db_index))
-        resolved_prompt_chars = len(resolved.prompt_context)
+        resolved_prompt_chars = len(resolved.sql_prompt_context)
         prompt_reduction = _prompt_reduction(full_schema_chars, resolved_prompt_chars)
         prompt_chars_saved = max(0, full_schema_chars - resolved_prompt_chars)
         row = {

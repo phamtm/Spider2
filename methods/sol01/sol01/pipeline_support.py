@@ -16,9 +16,12 @@ from sol01.llm.planning_prompts import (
     schema_context_planning_user_prompt,
 )
 from sol01.llm.prompt_budget import enforce_prompt_budget
+from sol01.llm.schema_grounding_prompts import schema_grounding_user_prompt
 from sol01.models import (
     AttemptRecord,
+    Intent,
     SchemaContextObject,
+    SchemaGrounding,
     SchemaPlanningDecision,
     SQLCandidate,
     TableSchema,
@@ -27,6 +30,7 @@ from sol01.models import (
 from sol01.pipeline_state import TaskRun
 from sol01.schema.schema_context import build_available_schema_context
 from sol01.schema.schema_context_cache import SchemaContextCache, build_schema_context_cache
+from sol01.schema.schema_grounding import grounding_targets, sanitize_schema_grounding
 
 logger = get_logger(__name__)
 
@@ -42,6 +46,15 @@ class SchemaPlanningRun:
     decision: SchemaPlanningDecision
     planner_diagnostics: dict[str, object]
     prompt_budget: dict[str, object]
+
+
+@dataclass(frozen=True)
+class SchemaGroundingRun:
+    """Grounding result used by SQL generation and recovery stages."""
+
+    prompt: str
+    grounding: SchemaGrounding
+    diagnostics: dict[str, object]
 
 
 def build_planning_prompt(
@@ -151,6 +164,68 @@ def run_schema_planning(
             planning_prompt=planning_prompt,
             schema_context_config=schema_context_config,
         ),
+    )
+
+
+def run_schema_grounding(
+    *,
+    task: Task,
+    intent: Intent,
+    available_tables: list[str],
+    table_schemas: dict[str, TableSchema],
+    sql_prompt_context: str,
+    client: LLMClient,
+    prompt_hashes: dict[str, str],
+    schema_context_config: SchemaContextConfig,
+) -> SchemaGroundingRun:
+    """Ground requested terms against exact selected-table metadata."""
+
+    requested_terms = grounding_targets(intent)
+    if not requested_terms:
+        return SchemaGroundingRun(
+            prompt="",
+            grounding=SchemaGrounding(),
+            diagnostics={
+                "allowed_binding_count": 0,
+                "binding_count": 0,
+                "unresolved_count": 0,
+                "invalid_bindings": [],
+                "warning_count": 0,
+                "requested_terms": [],
+                "prompt_chars": 0,
+            },
+        )
+    prompt = checked_schema_prompt(
+        "schema_grounding",
+        schema_grounding_user_prompt(
+            task,
+            intent,
+            sql_prompt_context,
+            requested_terms,
+        ),
+        schema_context_config,
+    )
+    raw_grounding = run_prompt(
+        client,
+        prompt_hashes=prompt_hashes,
+        prompt_name="schema_grounding",
+        output_type=SchemaGrounding,
+        user_prompt=prompt,
+    )
+    grounding, diagnostics = sanitize_schema_grounding(
+        raw_grounding,
+        available_tables=available_tables,
+        table_schemas=table_schemas,
+        requested_terms=requested_terms,
+    )
+    return SchemaGroundingRun(
+        prompt=prompt,
+        grounding=grounding,
+        diagnostics={
+            **diagnostics,
+            "requested_terms": requested_terms,
+            "prompt_chars": len(prompt),
+        },
     )
 
 

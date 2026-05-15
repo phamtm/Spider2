@@ -40,6 +40,11 @@ def write_task_output(
         "schema_context": run.schema_context,
         "solver_policy": run.policy.as_dict(),
         "intent": run.intent.model_dump(mode="json"),
+        "schema_grounding": (
+            run.schema_grounding.model_dump(mode="json")
+            if run.schema_grounding is not None
+            else None
+        ),
         "prompt_hashes": run.prompt_hashes,
         "final_attempt_index": final_attempt_index,
         "final_attempt_reason": final_winner_reason(best),

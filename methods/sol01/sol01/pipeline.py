@@ -28,6 +28,7 @@ from sol01.pipeline_support import (
     evaluate_and_record_candidate,
     prompt_budget_diagnostics,
     run_prompt,
+    run_schema_grounding,
     run_schema_planning,
 )
 from sol01.schema.db_index import load_db_index
@@ -109,8 +110,33 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
     )
     sql_ref_context = checked_schema_prompt(
         "sql_reference_context",
-        resolved.prompt_context,
+        resolved.sql_prompt_context,
         run.schema_context_config,
+    )
+    selected_object_ids = [selected.object_id for selected in planning.decision.selected_objects]
+    resolved_tables = list(resolved.resolved_tables)
+    schema_selection = SchemaSelection(
+        db=run.task.db,
+        selected_object_ids=selected_object_ids,
+        expanded_tables=resolved_tables,
+        rationale=planning.decision.rationale,
+        confidence=planning.decision.confidence,
+    )
+    run.intent = augment_intent_with_value_groundings(
+        planning.decision.intent,
+        task=run.task,
+        schema=schema_selection,
+        table_schemas=resolved.table_schemas,
+    )
+    grounding = run_schema_grounding(
+        task=run.task,
+        intent=run.intent,
+        available_tables=list(resolved.table_schemas),
+        table_schemas=resolved.table_schemas,
+        sql_prompt_context=sql_ref_context,
+        client=run.client,
+        prompt_hashes=run.prompt_hashes,
+        schema_context_config=run.schema_context_config,
     )
     prompt_budget = prompt_budget_diagnostics(
         planning_prompt=planning.planning_prompt,
@@ -118,32 +144,26 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
         schema_context_config=run.schema_context_config,
     )
 
-    run.schema = SchemaSelection(
-        db=run.task.db,
-        selected_object_ids=[s.object_id for s in planning.decision.selected_objects],
-        expanded_tables=list(resolved.resolved_tables),
-        rationale=planning.decision.rationale,
-        confidence=planning.decision.confidence,
-        diagnostics={
-            "planning_prompt_chars": len(planning.planning_prompt),
-            "sql_reference_context_chars": len(sql_ref_context),
-            "max_schema_prompt_chars": run.schema_context_config.max_schema_prompt_chars,
-            "prompt_budget": prompt_budget,
-            "schema_context_object_count": len(planning.schema_context_objects),
-            "selected_objects": [
-                s.model_dump(mode="json") for s in planning.decision.selected_objects
-            ],
-            "resolved_tables": list(resolved.resolved_tables),
-            "planner": planning.planner_diagnostics,
-            "resolver": resolved.diagnostics,
-        },
+    run.schema = schema_selection.model_copy(
+        update={
+            "diagnostics": {
+                "planning_prompt_chars": len(planning.planning_prompt),
+                "sql_reference_context_chars": len(sql_ref_context),
+                "schema_grounding_prompt_chars": grounding.diagnostics["prompt_chars"],
+                "max_schema_prompt_chars": run.schema_context_config.max_schema_prompt_chars,
+                "prompt_budget": prompt_budget,
+                "schema_context_object_count": len(planning.schema_context_objects),
+                "selected_objects": [
+                    s.model_dump(mode="json") for s in planning.decision.selected_objects
+                ],
+                "resolved_tables": resolved_tables,
+                "planner": planning.planner_diagnostics,
+                "resolver": resolved.diagnostics,
+                "schema_grounding": grounding.diagnostics,
+            },
+        }
     )
-    run.intent = augment_intent_with_value_groundings(
-        planning.decision.intent,
-        task=run.task,
-        schema=run.schema,
-        table_schemas=resolved.table_schemas,
-    )
+    run.schema_grounding = grounding.grounding
     run.table_schemas = resolved.table_schemas
     run.sql_reference_context = sql_ref_context
     run.schema_context = {
@@ -165,6 +185,7 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
         ],
         "planner": planning.planner_diagnostics,
         "resolver": resolved.diagnostics,
+        "schema_grounding": grounding.diagnostics,
         "prompt_budget": prompt_budget,
     }
     logger.info(
@@ -207,6 +228,7 @@ def generate_initial_candidates(run: TaskRun) -> TaskRun:
         user_prompt=sql_generation_batch_prompt(
             run.task,
             run.intent,
+            run.schema_grounding,
             run.sql_reference_context,
             run.docs_context,
             candidate_count=candidate_limit,

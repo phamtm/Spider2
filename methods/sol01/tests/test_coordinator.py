@@ -66,6 +66,8 @@ class FakeLLMClient:
             self.prompts.setdefault(prompt_name, []).append(user_prompt)
         queue = self.outputs.get(prompt_name, [])
         if not queue:
+            if prompt_name == "schema_grounding":
+                return output_type()
             raise AssertionError(f"No fake output queued for prompt {prompt_name}")
         output = queue.pop(0)
         assert isinstance(output, output_type)
@@ -273,6 +275,7 @@ def test_run_task_uses_planning_and_batched_generation(
     trace = json.loads((run_paths.traces_dir / "sf_local003.json").read_text(encoding="utf-8"))
     assert trace["prompt_hashes"] == {
         "planning": "hash-planning",
+        "schema_grounding": "hash-schema_grounding",
         "sql_generation_batch": "hash-sql_generation_batch",
     }
     assert trace["schema_selection"]["expanded_tables"] == [SALES_TABLE]
@@ -284,9 +287,10 @@ def test_run_task_uses_planning_and_batched_generation(
     assert trace["schema_context"]["prompt_budget"] == prompt_budget
     assert len(trace["attempts"]) == 1
     assert "candidate_review" not in trace
-    assert set(prompts) == {"planning", "sql_generation_batch"}
+    assert set(prompts) == {"planning", "schema_grounding", "sql_generation_batch"}
     assert "Schema summary:" not in prompts["planning"][0]
     assert "Available schema metadata evidence:" in prompts["planning"][0]
+    assert "Requested schema-facing terms:" in prompts["schema_grounding"][0]
 
 
 def test_close_executable_candidates_use_score_based_selection(
