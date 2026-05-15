@@ -129,7 +129,6 @@ def build_schema_context_cache(
             "schema context cache hit",
             db=db,
             cache_key=cache_key,
-            cache_dir=str(version_dir),
             elapsed_seconds=round(time.perf_counter() - started_at, 3),
         )
         return existing
@@ -172,7 +171,6 @@ def build_schema_context_cache(
                 "schema context cache loaded after wait",
                 db=db,
                 cache_key=cache_key,
-                cache_dir=str(version_dir),
                 elapsed_seconds=round(time.perf_counter() - started_at, 3),
             )
             return loaded
@@ -187,7 +185,6 @@ def build_schema_context_cache(
                 "schema context cache current loaded after wait",
                 db=db,
                 cache_key=cache_key,
-                cache_dir=str(loaded.cache_dir),
                 elapsed_seconds=round(time.perf_counter() - started_at, 3),
             )
             return loaded
@@ -209,7 +206,6 @@ def build_schema_context_cache(
                 "schema context cache hit after lock",
                 db=db,
                 cache_key=cache_key,
-                cache_dir=str(version_dir),
                 elapsed_seconds=round(time.perf_counter() - started_at, 3),
             )
             return existing
@@ -281,7 +277,6 @@ def build_schema_context_cache(
                     "schema context cache loaded existing published version",
                     db=db,
                     cache_key=cache_key,
-                    cache_dir=str(version_dir),
                     elapsed_seconds=round(time.perf_counter() - started_at, 3),
                 )
                 return loaded
@@ -302,7 +297,6 @@ def build_schema_context_cache(
             "schema context cache published",
             db=db,
             cache_key=cache_key,
-            cache_dir=str(version_dir),
             object_count=len(objects),
             elapsed_seconds=round(time.perf_counter() - started_at, 3),
         )
@@ -422,7 +416,6 @@ def _write_cache_artifacts(
         "schema context artifacts written",
         db=db,
         cache_key=cache_key,
-        cache_dir=str(cache_dir),
         object_count=len(objects),
     )
 

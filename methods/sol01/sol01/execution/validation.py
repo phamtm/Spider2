@@ -238,6 +238,11 @@ def _validate_scope_column(
     ]
     if len(table_schemas) == 1:
         resolution = _resolve_column(column, table_schemas[0])
+        if not resolution.matched and (
+            _scope_has_derived_sources(scope)
+            or column.name.lower() in _scope_select_aliases(scope)
+        ):
+            return None, f"Could not validate unqualified column {column.sql()}: may be a SELECT alias or CTE output column."
         return resolution.error, None
     if not table_schemas:
         return None, f"Could not validate column {column.sql()}: no table schema available."
@@ -357,6 +362,17 @@ def _scope_source_tables(
         if alias:
             sources[_normalize_identifier(alias)] = canonical
     return sources
+
+
+def _scope_has_derived_sources(scope: Scope) -> bool:
+    return any(isinstance(src, Scope) for _, src in scope.selected_sources.values())
+
+
+def _scope_select_aliases(scope: Scope) -> frozenset[str]:
+    expr = scope.expression
+    if not isinstance(expr, exp.Select):
+        return frozenset()
+    return frozenset(sel.alias.lower() for sel in expr.expressions if sel.alias)
 
 
 def _scope_source(scope: Scope, source_name: str) -> exp.Table | Scope | None:

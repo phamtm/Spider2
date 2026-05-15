@@ -228,6 +228,66 @@ def test_resolver_keeps_large_broad_github_family_symbolic_and_budgeted():
     assert prompt.count("GITHUB_REPOS_DATE.DAY._") < 20
 
 
+def test_validation_select_alias_in_group_by_is_not_a_column_error():
+    """GROUP BY on a SELECT alias must not be reported as an unknown column."""
+    table = _table(
+        "BIKESHARE_STATIONS",
+        columns=[
+            ColumnSchema(name="modified_date", type="NUMBER"),
+            ColumnSchema(name="status", type="TEXT"),
+            ColumnSchema(name="station_id", type="TEXT"),
+        ],
+    )
+    index = {"DB.PUBLIC.BIKESHARE_STATIONS": table}
+    sql = (
+        'SELECT DATE_PART(YEAR, TO_TIMESTAMP("modified_date" / 1000000)) AS yr, '
+        '"status", COUNT(DISTINCT "station_id") '
+        "FROM DB.PUBLIC.BIKESHARE_STATIONS "
+        "GROUP BY yr, \"status\""
+    )
+    report = validate_sql(
+        sql,
+        allowed_tables=["DB.PUBLIC.BIKESHARE_STATIONS"],
+        table_schemas=index,
+    )
+    assert report.ok is True, report.errors
+
+
+def test_validation_cte_output_column_unqualified_in_outer_scope_is_not_an_error():
+    """Unqualified CTE output column mixed with a base table must not be a hard error."""
+    sales_table = _table(
+        "SALESORDERHEADER",
+        columns=[
+            ColumnSchema(name="salespersonid", type="TEXT"),
+            ColumnSchema(name="orderdate", type="TEXT"),
+            ColumnSchema(name="subtotal", type="NUMBER"),
+        ],
+    )
+    person_table = _table(
+        "SALESPERSON",
+        columns=[ColumnSchema(name="businessentityid", type="TEXT")],
+    )
+    index = {
+        "DB.PUBLIC.SALESORDERHEADER": sales_table,
+        "DB.PUBLIC.SALESPERSON": person_table,
+    }
+    # yr is a CTE output alias; referencing it unqualified in outer scope must not error
+    sql = (
+        "WITH spy AS (SELECT \"salespersonid\", "
+        "DATE_PART(YEAR, \"orderdate\") AS yr, SUM(\"subtotal\") AS total "
+        "FROM DB.PUBLIC.SALESORDERHEADER GROUP BY \"salespersonid\", yr) "
+        "SELECT sp.\"businessentityid\", spy.yr, spy.total "
+        "FROM DB.PUBLIC.SALESPERSON AS sp "
+        "LEFT JOIN spy ON sp.\"businessentityid\" = spy.\"salespersonid\""
+    )
+    report = validate_sql(
+        sql,
+        allowed_tables=["DB.PUBLIC.SALESORDERHEADER", "DB.PUBLIC.SALESPERSON"],
+        table_schemas=index,
+    )
+    assert report.ok is True, report.errors
+
+
 def test_validation_accepts_non_canonical_family_member_from_resolved_allowed_tables():
     index = {f"DB.PUBLIC.SALES_{year}": _table(f"SALES_{year}") for year in (2022, 2023, 2024)}
     context = _resolve_family(
@@ -277,7 +337,7 @@ def test_resolver_renders_exact_selected_table_metadata_without_raw_ddl():
     assert context.resolved_tables == [table_name]
     assert "Table: COVID19_USA.COVID19_USAFACTS.CONFIRMED_CASES" in context.sql_prompt_context
     assert "Column count: 3" in context.sql_prompt_context
-    assert "TEXT: state [TEXT], county_name [TEXT]" in context.sql_prompt_context
+    assert 'TEXT: "state" [TEXT], "county_name" [TEXT]' in context.sql_prompt_context
     assert "NUMERIC: _2020_01_01 [NUMBER]" in context.sql_prompt_context
     assert "CREATE TABLE" not in context.sql_prompt_context
     assert "SECRET_DDL_MARKER" not in context.sql_prompt_context
