@@ -207,10 +207,9 @@ def test_custom_summary_registry_drives_coverage_and_object_metadata(tmp_path):
     object_ids = {obj.object_id for obj in cache.objects}
     orders_object = next(obj for obj in cache.objects if obj.object_id == "table:DB.PUBLIC.ORDERS")
 
-    # summary_only mode: only ORDERS is covered, so CUSTOMERS is absent entirely
-    assert cache.manifest["context_mode"] == "summary_only"
+    assert cache.manifest["context_mode"] == "compact_catalog"
     assert "column:DB.PUBLIC.ORDERS#STATUS" not in object_ids
-    assert "table:DB.PUBLIC.CUSTOMERS" not in object_ids
+    assert "table:DB.PUBLIC.CUSTOMERS" in object_ids
     assert "column:DB.PUBLIC.CUSTOMERS#CUSTOMER_ID" not in object_ids
     assert orders_object.metadata["summary_ids"] == ["orders_custom_summary"]
     assert orders_object.metadata["large_schema_summaries"][0]["text"].startswith(
@@ -218,7 +217,7 @@ def test_custom_summary_registry_drives_coverage_and_object_metadata(tmp_path):
     )
 
 
-def test_summary_only_mode_excludes_uncovered_tables_and_join_candidates(tmp_path):
+def test_compact_catalog_keeps_uncovered_tables_without_join_candidates(tmp_path):
     covered_table = TableSchema(
         name="_20240103",
         database_name="GITHUB_REPOS_DATE",
@@ -257,10 +256,9 @@ def test_summary_only_mode_excludes_uncovered_tables_and_join_candidates(tmp_pat
     object_ids = {obj.object_id for obj in cache.objects}
     object_types = {obj.object_type for obj in cache.objects}
 
-    # summary_only mode: only covered table is processed; uncovered table is absent
-    assert cache.manifest["context_mode"] == "summary_only"
+    assert cache.manifest["context_mode"] == "compact_catalog"
     assert "table:GITHUB_REPOS_DATE.DAY._20240103" in object_ids
-    assert "table:GITHUB_REPOS_DATE.DAY.REPOSITORIES" not in object_ids
+    assert "table:GITHUB_REPOS_DATE.DAY.REPOSITORIES" in object_ids
     assert not any(oid.startswith("column:") for oid in object_ids)
     assert not any(oid.startswith("join_candidate:") for oid in object_ids)
     assert "table" in object_types
@@ -269,6 +267,19 @@ def test_summary_only_mode_excludes_uncovered_tables_and_join_candidates(tmp_pat
         obj for obj in cache.objects if obj.object_id == "table:GITHUB_REPOS_DATE.DAY._20240103"
     )
     assert summary_object.metadata.get("large_schema_summaries")
+
+
+def test_compact_catalog_preserves_table_object_for_every_input_table(tmp_path):
+    registry_path = _write_custom_summary_registry(tmp_path / "custom_summaries.json")
+    cache = _build(tmp_path / "cache", curated_summary_registry_path=registry_path)
+
+    visible_tables = {
+        obj.table_name
+        for obj in cache.objects
+        if obj.object_type == "table" and obj.table_name is not None
+    }
+
+    assert visible_tables == {"DB.PUBLIC.CUSTOMERS", "DB.PUBLIC.ORDERS"}
 
 
 def test_covered_table_keys_matches_tables_against_summary_registry():

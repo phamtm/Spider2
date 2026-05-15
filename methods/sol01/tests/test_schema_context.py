@@ -40,7 +40,7 @@ def test_full_metadata_context_returns_all_objects_in_stable_order():
     ]
 
 
-def test_summary_backed_context_uses_only_curated_large_schema_objects(tmp_path):
+def test_compact_catalog_context_uses_summary_text_without_hiding_uncovered_tables(tmp_path):
     table = TableSchema(
         name="_20240103",
         database_name="GITHUB_REPOS_DATE",
@@ -82,19 +82,25 @@ def test_summary_backed_context_uses_only_curated_large_schema_objects(tmp_path)
 
     schema_context_objects, diagnostics = build_available_schema_context(cache)
 
-    assert diagnostics["context_mode"] == "summary_only"
+    assert diagnostics["context_mode"] == "compact_catalog"
     schema_context_ids = [item.schema_object.object_id for item in schema_context_objects]
     assert "table:GITHUB_REPOS_DATE.DAY._20240103" in schema_context_ids
     assert "column:GITHUB_REPOS_DATE.DAY._20240103#payload" not in schema_context_ids
-    assert "table:GITHUB_REPOS_DATE.DAY.REPOSITORIES" not in schema_context_ids
+    assert "table:GITHUB_REPOS_DATE.DAY.REPOSITORIES" in schema_context_ids
     assert "column:GITHUB_REPOS_DATE.DAY.REPOSITORIES#NAME" not in schema_context_ids
     summary_object = next(
         item
         for item in schema_context_objects
         if item.schema_object.object_id == "table:GITHUB_REPOS_DATE.DAY._20240103"
     )
+    uncovered_object = next(
+        item
+        for item in schema_context_objects
+        if item.schema_object.object_id == "table:GITHUB_REPOS_DATE.DAY.REPOSITORIES"
+    )
     assert "Large-schema summary: github_repos_day_events." in summary_object.planning_text
     assert "SECRET_DDL_MARKER" not in summary_object.planning_text
+    assert "Columns: ID [TEXT], NAME [TEXT]." in uncovered_object.planning_text
 
 
 def _fake_index() -> SchemaContextCache:

@@ -31,18 +31,17 @@ def build_schema_objects(
     max_join_candidates: int = DEFAULT_MAX_JOIN_CANDIDATES,
     max_join_candidates_per_column: int = DEFAULT_MAX_JOIN_CANDIDATES_PER_COLUMN,
     family_similarity_threshold: float = DEFAULT_SCHEMA_CONTEXT_POLICY.family_similarity_threshold,
-    summary_only: bool = False,
+    compact_only: bool = False,
 ) -> list[SchemaObject]:
     """Build deterministic schema objects from a database table index.
 
-    When *summary_only* is True, the input db_index must contain only
-    summary-covered tables. Only table and family objects are emitted;
-    column, column-group, sample-value, and join-candidate objects are
-    skipped because curated summaries replace raw metadata at render time.
+    When *compact_only* is True, only table and family objects are emitted.
+    This keeps planner-time discovery compact while later stages can still
+    expand selected tables into exact metadata.
     """
     objects: list[SchemaObject] = []
 
-    if summary_only:
+    if compact_only:
         for table_key in sorted(db_index):
             table = db_index[table_key]
             objects.append(_table_object(table_key, table, _table_full_name(table_key, table)))

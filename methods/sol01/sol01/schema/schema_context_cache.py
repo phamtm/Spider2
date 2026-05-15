@@ -39,8 +39,8 @@ from sol01.schema.large_schema_summaries import (
 from sol01.schema.object_text import annotate_summary_metadata
 from sol01.schema.objects import build_schema_objects
 
-OBJECT_BUILDER_VERSION = "schema-objects-v4"
-MANIFEST_VERSION = 4
+OBJECT_BUILDER_VERSION = "schema-objects-v5"
+MANIFEST_VERSION = 5
 REQUIRED_CACHE_ARTIFACTS = frozenset({"objects.jsonl", "manifest.json"})
 REQUIRED_MANIFEST_FIELDS = frozenset(
     {
@@ -220,18 +220,15 @@ def build_schema_context_cache(
 
         registry = load_large_schema_summary_registry(curated_summary_registry_path)
         covered_table_keys = _covered_table_keys(db_index, registry)
-        context_mode = "summary_only" if covered_table_keys else "full_metadata"
-        build_index = (
-            {k: v for k, v in db_index.items() if k in covered_table_keys}
-            if context_mode == "summary_only"
-            else db_index
-        )
+        context_mode = "compact_catalog" if covered_table_keys else "full_metadata"
+        build_index = db_index
         objects = build_schema_objects(
             build_index,
             family_similarity_threshold=config.family_similarity_threshold,
-            summary_only=(context_mode == "summary_only"),
+            compact_only=(context_mode == "compact_catalog"),
         )
         objects = annotate_summary_metadata(objects, large_schema_summary_registry=registry)
+        _validate_table_object_coverage(db_index, objects)
         logger.info(
             "schema context cache objects rendered",
             db=db,
@@ -239,6 +236,7 @@ def build_schema_context_cache(
             context_mode=context_mode,
             object_count=len(objects),
             covered_table_count=len(covered_table_keys),
+            uncovered_table_count=max(0, len(db_index) - len(covered_table_keys)),
         )
 
         temp_dir = _new_temp_version_dir(cache_root, db, cache_key)
@@ -533,6 +531,30 @@ def _covered_table_keys(
         if registry.match_table(database=database, schema_name=schema_name, table_name=table_name):
             covered.add(table_key)
     return covered
+
+
+def _validate_table_object_coverage(
+    db_index: Mapping[str, TableSchema],
+    objects: Sequence[SchemaObject],
+) -> None:
+    """Fail fast if planner-visible objects hide any physical table."""
+
+    visible_table_ids = {
+        obj.object_id
+        for obj in objects
+        if obj.object_type == "table" and obj.table_name
+    }
+    missing: list[str] = []
+    for table_key, table in db_index.items():
+        table_full_name = table.full_name or table.name or table_key
+        object_id = f"table:{table_full_name}"
+        if object_id not in visible_table_ids:
+            missing.append(table_full_name)
+    if missing:
+        raise SchemaContextCacheError(
+            "planner-visible schema context is missing table objects for: "
+            + ", ".join(sorted(missing))
+        )
 
 
 def _load_db_index(db: str) -> dict[str, TableSchema]:
