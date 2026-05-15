@@ -1,15 +1,13 @@
-"""SQL generation, repair, and review prompt assembly."""
+"""SQL generation and repair prompt assembly."""
 
 from __future__ import annotations
 
 import json
 import re
-from typing import Any
 
 from sol01.infra.strings import column_looks_string_like
 from sol01.models import (
     AttemptRecord,
-    ConfidenceReport,
     Intent,
     SchemaSelection,
     TableSchema,
@@ -113,98 +111,6 @@ def sql_repair_prompt(
         "\n\n"
         f"{grounded_literal_block}"
     )
-
-
-def candidate_review_prompt(
-    task: Task,
-    intent: Intent,
-    attempts: list[AttemptRecord],
-    sql_reference_context: str,
-    docs_context: str | None,
-    *,
-    baseline_stage: str | None,
-    review_reason: str,
-) -> str:
-    """Build the unified comparison and critic prompt."""
-
-    comparison_candidates = [_comparison_attempt_summary(attempt) for attempt in attempts]
-    grounded_literals = _grounded_literal_context_from_intent(intent)
-    grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
-    return (
-        f"{sql_reference_context}\n\n"
-        f"Document context:\n{docs_context or 'No task-linked document context.'}\n\n"
-        f"Question: {task.question}\n\n"
-        f"Intent:\n{intent.model_dump_json(indent=2)}\n\n"
-        f"{grounded_literal_block}"
-        f"Baseline stage: {baseline_stage or 'unknown'}\n"
-        f"Review reason: {review_reason}\n\n"
-        "Executable candidates:\n"
-        f"{json.dumps(comparison_candidates, indent=2, sort_keys=True)}\n\n"
-        "Use local scores and verification reports as evidence, not as the final decision. "
-        "Pick the candidate that best answers the contract, then decide whether that "
-        "preferred candidate still needs repair. Consider wrong shape, missing or "
-        "ungrounded filters, suspicious aggregations including tiny aggregate results, "
-        "native value mismatches, metric-source mistakes, and unsupported assumptions. "
-        "Recommend repair only for a concrete issue."
-    )
-
-
-def semantic_repair_prompt(
-    task: Task,
-    intent: Intent,
-    attempt: AttemptRecord,
-    critic: ConfidenceReport,
-    sql_reference_context: str,
-    docs_context: str | None,
-) -> str:
-    """Build the repair prompt for one critic-triggered retry."""
-
-    grounded_literals = _grounded_literal_context_from_intent(intent)
-    grounded_literal_block = f"{grounded_literals}\n\n" if grounded_literals else ""
-    return (
-        f"{sql_reference_context}\n\n"
-        f"Document context:\n{docs_context or 'No task-linked document context.'}\n\n"
-        f"Question: {task.question}\n\n"
-        f"Current answer contract:\n{intent.model_dump_json(indent=2)}\n\n"
-        f"{grounded_literal_block}"
-        f"Current SQL:\n{attempt.sql}\n\n"
-        "Candidate assumptions:\n"
-        f"{json.dumps(attempt.assumptions, indent=2, sort_keys=True)}\n\n"
-        "Candidate constraint ledger:\n"
-        f"{json.dumps(attempt.constraint_ledger, indent=2, sort_keys=True)}\n\n"
-        "Candidate unsupported assumptions:\n"
-        f"{json.dumps(attempt.unsupported_assumptions, indent=2, sort_keys=True)}\n\n"
-        f"Critic issues:\n{json.dumps(critic.model_dump(mode='json'), indent=2, sort_keys=True)}"
-    )
-
-
-def _comparison_attempt_summary(attempt: AttemptRecord) -> dict[str, Any]:
-    """Render one attempt in a compact, comparison-friendly format."""
-
-    return {
-        "stage": attempt.stage,
-        "sql": attempt.sql,
-        "assumptions": attempt.assumptions,
-        "constraint_ledger": attempt.constraint_ledger,
-        "unsupported_assumptions": attempt.unsupported_assumptions,
-        "candidate_confidence": attempt.candidate_confidence,
-        "evidence": (
-            attempt.evidence.model_dump(mode="json") if attempt.evidence is not None else {}
-        ),
-        "validation": attempt.validation.model_dump(mode="json"),
-        "execution_result": attempt.execution_result.model_dump(mode="json"),
-        "filter_grounding_report": (
-            attempt.filter_grounding_report.model_dump(mode="json")
-            if attempt.filter_grounding_report is not None
-            else None
-        ),
-        "shape_report": (
-            attempt.shape_report.model_dump(mode="json")
-            if attempt.shape_report is not None
-            else None
-        ),
-        "result_profile": attempt.result_profile or {},
-    }
 
 
 def _grounded_literal_context_from_intent(intent: Intent) -> str | None:

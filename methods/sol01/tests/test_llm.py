@@ -110,7 +110,6 @@ def test_default_sql_prompts_keep_grouped_identifiers():
     planning_prompt = client.load_prompt("planning")
     generation_prompt = client.load_prompt("sql_generation_batch")
     repair_prompt = client.load_prompt("sql_repair")
-    review_prompt = client.load_prompt("candidate_review")
 
     assert "answer contract" in planning_prompt.text
     assert "join and bridge tables" in planning_prompt.text
@@ -123,9 +122,6 @@ def test_default_sql_prompts_keep_grouped_identifiers():
     assert "native metric column" in repair_prompt.text
     assert "column-name semantics" in repair_prompt.text
     assert "clearly grounded" in repair_prompt.text
-    assert "suspicious aggregations" in review_prompt.text
-    assert "metric-source mismatches" in review_prompt.text
-    assert "Recommend repair only" in review_prompt.text
 
 
 def test_build_model_uses_openrouter_wrapper_for_string_override():

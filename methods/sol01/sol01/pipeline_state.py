@@ -9,7 +9,7 @@ from sol01.infra.config import SchemaContextConfig
 from sol01.infra.policy import DEFAULT_SOLVER_POLICY, SolverPolicy
 from sol01.llm.client import LLMClient
 from sol01.models import AttemptRecord, Intent, SchemaSelection, Task
-from sol01.workflow import CandidateReviewTrace, RecoveryTrace
+from sol01.workflow import RecoveryTrace
 
 
 @dataclasses.dataclass
@@ -32,12 +32,11 @@ class TaskRun:
     # Accumulated across stages
     prompt_hashes: dict[str, str] = dataclasses.field(default_factory=dict)
     attempts: list[AttemptRecord] = dataclasses.field(default_factory=list)
-    candidate_review_payload: CandidateReviewTrace | None = None
     recovery_payload: RecoveryTrace | None = None
 
 
-def current_best(run: TaskRun, *, preferred_stage: str | None = None) -> AttemptRecord | None:
+def current_best(run: TaskRun) -> AttemptRecord | None:
     """Return the current best attempt for one task run."""
 
-    selection = select_winner(run.attempts, preferred_stage=preferred_stage)
+    selection = select_winner(run.attempts)
     return selection.attempt if selection is not None else None

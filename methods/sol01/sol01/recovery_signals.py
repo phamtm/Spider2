@@ -5,14 +5,12 @@ from __future__ import annotations
 from sol01.infra.policy import DEFAULT_RECOVERY_SIGNAL_POLICY
 from sol01.models import AttemptRecord
 
-_CRITIC_SCHEMA_REPAIR_HINTS = ("schema_selection", "missing_join")
-_CRITIC_SCHEMA_ISSUE_PHRASES = ("missing table",)
 _MISSING_TABLE_ERROR_CODES = ("000904", "002003")
 _MISSING_TABLE_ERROR_PHRASES = ("does not exist", "object does not exist", "table not found")
 
 
 def schema_expansion_trigger(attempt: AttemptRecord) -> str | None:
-    """Return why schema expansion is warranted for this attempt, or None."""
+    """Return why schema expansion is warranted from validation or execution feedback."""
 
     for error in attempt.validation.errors:
         error_lower = error.lower()
@@ -28,10 +26,6 @@ def schema_expansion_trigger(attempt: AttemptRecord) -> str | None:
     execution_signal = _execution_schema_signal(attempt.execution_result.error)
     if execution_signal is not None:
         return execution_signal
-
-    critic_signal = _critic_schema_signal(attempt.critic)
-    if critic_signal is not None:
-        return critic_signal
 
     return None
 
@@ -56,25 +50,6 @@ def _looks_like_missing_table_error(error: str, error_lower: str) -> bool:
     return any(code in error for code in _MISSING_TABLE_ERROR_CODES) or any(
         phrase in error_lower for phrase in _MISSING_TABLE_ERROR_PHRASES
     )
-
-
-def _critic_schema_signal(critic: dict[str, object] | None) -> str | None:
-    """Return a schema-recovery trigger from critic guidance."""
-
-    if not critic:
-        return None
-
-    repair_focus = str(critic.get("repair_focus") or "").lower()
-    if any(hint in repair_focus for hint in _CRITIC_SCHEMA_REPAIR_HINTS):
-        return f"critic_repair_focus: {critic.get('repair_focus')}"
-
-    for issue in critic.get("issues", []):
-        issue_lower = issue.lower()
-        if ("missing" in issue_lower and "join" in issue_lower) or any(
-            phrase in issue_lower for phrase in _CRITIC_SCHEMA_ISSUE_PHRASES
-        ):
-            return f"critic_issue: {issue}"
-    return None
 
 
 def _preview_error(error: str) -> str:

@@ -3,7 +3,6 @@ from pydantic import ValidationError
 
 from sol01.models import (
     ColumnSchema,
-    ConfidenceReport,
     ExecutionResult,
     FinalAnswer,
     Intent,
@@ -95,7 +94,7 @@ def test_schema_selection_model_validates_confidence_range():
         )
 
 
-def test_sql_validation_execution_and_critic_models_construct():
+def test_sql_validation_and_execution_models_construct():
     candidate = SQLCandidate(
         sql="SELECT 1 AS answer",
         explanation="Simple query.",
@@ -117,17 +116,11 @@ def test_sql_validation_execution_and_critic_models_construct():
         sample_rows=[{"answer": 1}],
         csv_path="outputs/run/csv/local003.csv",
     )
-    confidence = ConfidenceReport(
-        confidence=0.9,
-        issues=[],
-        should_repair=False,
-    )
 
     assert candidate.sql.startswith("SELECT")
     assert candidate.constraint_ledger == []
     assert validation.ok is True
     assert execution.error is None
-    assert confidence.repair_focus is None
 
 
 def test_schema_object_id_helpers_validate_stable_formats():

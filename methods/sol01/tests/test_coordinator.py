@@ -16,7 +16,6 @@ from sol01.infra.config import RuntimeConfig, SchemaContextConfig
 from sol01.infra.policy import DEFAULT_SOLVER_POLICY, SolverPolicy
 from sol01.llm.client import PromptSpec
 from sol01.models import (
-    CandidateReviewReport,
     ColumnSchema,
     FinalAnswer,
     Intent,
@@ -236,7 +235,7 @@ def _candidate(sql: str, *, confidence: float = 0.8) -> SQLCandidate:
     )
 
 
-def test_run_task_uses_planning_batched_generation_and_model_review(
+def test_run_task_uses_planning_and_batched_generation(
     tmp_path: Path,
     fake_snowflake: None,
     db_index: dict[str, TableSchema],
@@ -254,17 +253,6 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
                             f"SELECT CUSTOMER, AMOUNT FROM {SALES_TABLE} ORDER BY AMOUNT DESC"
                         )
                     ]
-                )
-            ],
-            "candidate_review": [
-                CandidateReviewReport(
-                    baseline_stage="initial_1",
-                    preferred_stage="initial_1",
-                    compared_stages=["initial_1"],
-                    reasons=["The candidate matches the requested columns."],
-                    confidence=0.9,
-                    issues=[],
-                    should_repair=False,
                 )
             ],
         },
@@ -286,7 +274,6 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
     assert trace["prompt_hashes"] == {
         "planning": "hash-planning",
         "sql_generation_batch": "hash-sql_generation_batch",
-        "candidate_review": "hash-candidate_review",
     }
     assert trace["schema_selection"]["expanded_tables"] == [SALES_TABLE]
     assert trace["schema_context"]["cache"]["cache_key"] == "test-cache-key"
@@ -296,16 +283,13 @@ def test_run_task_uses_planning_batched_generation_and_model_review(
     assert prompt_budget["sql_reference_context_chars"] <= prompt_budget["max_schema_prompt_chars"]
     assert trace["schema_context"]["prompt_budget"] == prompt_budget
     assert len(trace["attempts"]) == 1
-    assert trace["candidate_review"]["preferred_stage"] == "initial_1"
-    assert trace["candidate_review"]["review_reason"] == (
-        "final adjudication of the only executable candidate"
-    )
-    assert set(prompts) == {"planning", "sql_generation_batch", "candidate_review"}
+    assert "candidate_review" not in trace
+    assert set(prompts) == {"planning", "sql_generation_batch"}
     assert "Schema summary:" not in prompts["planning"][0]
     assert "Available schema metadata evidence:" in prompts["planning"][0]
 
 
-def test_close_executable_candidates_use_one_candidate_review(
+def test_close_executable_candidates_use_score_based_selection(
     tmp_path: Path,
     fake_snowflake: None,
     db_index: dict[str, TableSchema],
@@ -326,17 +310,6 @@ def test_close_executable_candidates_use_one_candidate_review(
                     ]
                 )
             ],
-            "candidate_review": [
-                CandidateReviewReport(
-                    baseline_stage="initial_2",
-                    preferred_stage="initial_2",
-                    compared_stages=["initial_1", "initial_2"],
-                    reasons=["initial_2 preserves ordering"],
-                    confidence=0.9,
-                    issues=[],
-                    should_repair=False,
-                )
-            ],
         }
     )
 
@@ -351,11 +324,11 @@ def test_close_executable_candidates_use_one_candidate_review(
 
     assert answer.status == "success"
     trace = json.loads((run_paths.traces_dir / "sf_review.json").read_text(encoding="utf-8"))
-    assert trace["candidate_review"]["preferred_stage"] == "initial_2"
+    assert trace["final_attempt_reason"] == "score: best executable (stage=initial_2)"
     assert trace["final_sql"].endswith("ORDER BY AMOUNT DESC")
 
 
-def test_tiny_aggregate_is_reviewed_by_candidate_review(
+def test_tiny_aggregate_stops_without_extra_semantic_repair(
     tmp_path: Path,
     fake_snowflake: None,
     db_index: dict[str, TableSchema],
@@ -369,21 +342,6 @@ def test_tiny_aggregate_is_reviewed_by_candidate_review(
                 SQLCandidateBatch(
                     candidates=[_candidate(f"SELECT COUNT(*) AS COUNT FROM {SALES_TABLE}")]
                 )
-            ],
-            "candidate_review": [
-                CandidateReviewReport(
-                    baseline_stage="initial_1",
-                    preferred_stage="initial_1",
-                    compared_stages=["initial_1"],
-                    reasons=["tiny aggregate may be a false count"],
-                    confidence=0.6,
-                    issues=["Aggregate returned a suspiciously tiny result."],
-                    should_repair=True,
-                    repair_focus="Check filters and aggregation grain.",
-                )
-            ],
-            "sql_repair": [
-                _candidate(f"SELECT CUSTOMER, AMOUNT FROM {SALES_TABLE} ORDER BY AMOUNT DESC")
             ],
         }
     )
@@ -400,9 +358,10 @@ def test_tiny_aggregate_is_reviewed_by_candidate_review(
     assert answer.status == "success"
     trace = json.loads((run_paths.traces_dir / "sf_count.json").read_text(encoding="utf-8"))
     assert "aggregate_verification" not in trace
-    assert trace["candidate_review"]["should_repair"] is True
-    assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1", "recovery_semantic"]
-    assert trace["recovery"]["actions"][0]["kind"] == "semantic"
+    assert "candidate_review" not in trace
+    assert trace["recovery"]["actions"] == []
+    assert [attempt["stage"] for attempt in trace["attempts"]] == ["initial_1"]
+    assert trace["final_sql"] == f"SELECT COUNT(*) AS COUNT FROM {SALES_TABLE}"
 
 
 def test_schema_expansion_uses_exact_table_name_and_reuses_intent(
@@ -432,7 +391,7 @@ def test_schema_expansion_uses_exact_table_name_and_reuses_intent(
         config=RuntimeConfig(api_key="test-key"),
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
-        policy=_policy(initial_candidates=1, max_attempts=2, semantic_repairs=0),
+        policy=_policy(initial_candidates=1, max_attempts=2),
     )
 
     assert answer.status == "success"
@@ -500,7 +459,7 @@ def test_schema_expansion_selects_context_for_missing_column(
         config=RuntimeConfig(api_key="test-key"),
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
-        policy=_policy(initial_candidates=1, max_attempts=2, semantic_repairs=0),
+        policy=_policy(initial_candidates=1, max_attempts=2),
     )
 
     assert answer.status == "success"
@@ -555,7 +514,7 @@ def test_schema_expansion_recovers_unambiguous_table_from_execution_error(
         config=RuntimeConfig(api_key="test-key"),
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
-        policy=_policy(initial_candidates=1, max_attempts=2, semantic_repairs=0),
+        policy=_policy(initial_candidates=1, max_attempts=2),
     )
 
     assert answer.status == "success"
@@ -591,7 +550,7 @@ def test_schema_expansion_rejects_hallucinated_context_selection(
         config=RuntimeConfig(api_key="test-key"),
         schema_context_config=SchemaContextConfig(),
         llm_client=llm,
-        policy=_policy(initial_candidates=1, max_attempts=2, semantic_repairs=0),
+        policy=_policy(initial_candidates=1, max_attempts=2),
     )
 
     assert answer.status == "failed"

@@ -11,15 +11,12 @@ class SolverPolicy:
 
     initial_candidates: int = 3
     max_attempts: int = 4
-    semantic_repairs: int = 1
 
     def __post_init__(self) -> None:
         if self.initial_candidates < 1:
             raise ValueError("initial_candidates must be positive")
         if self.max_attempts < 1:
             raise ValueError("max_attempts must be positive")
-        if self.semantic_repairs < 0:
-            raise ValueError("semantic_repairs must be zero or positive")
         if self.initial_candidates > self.max_attempts:
             raise ValueError("initial_candidates must not exceed max_attempts")
 
@@ -94,7 +91,7 @@ class FilterGroundingPolicy:
 class RecoverySignalPolicy:
     """Signals that trigger schema-aware recovery decisions."""
 
-    priority_order: tuple[str, ...] = ("schema", "sql", "semantic")
+    priority_order: tuple[str, ...] = ("schema", "sql")
     execution_error_preview_chars: int = 300
 
 

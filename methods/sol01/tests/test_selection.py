@@ -46,25 +46,6 @@ def test_select_winner_executable_beats_non_executable():
     assert result.attempt is exec_ok
 
 
-def test_select_winner_model_preferred_wins_over_score():
-    a1 = _attempt("initial_1", score=1200.0)
-    a2 = _attempt("initial_2", score=900.0)
-    result = select_winner([a1, a2], preferred_stage="initial_2")
-    assert result is not None
-    assert result.attempt is a2
-    assert result.index == 1
-    assert result.reason == "model preferred: initial_2"
-
-
-def test_select_winner_preferred_non_executable_falls_back_to_score():
-    a1 = _attempt("initial_1", ok=True, score=1000.0)
-    a2 = _attempt("initial_2", ok=False, score=500.0)
-    result = select_winner([a1, a2], preferred_stage="initial_2")
-    assert result is not None
-    assert result.attempt is a1
-    assert "score" in result.reason
-
-
 def test_select_winner_schema_recovery_wins_when_higher_score():
     initial = _attempt("initial_1", ok=False, score=-800.0)
     expansion = _attempt("recovery_schema", ok=True, score=1100.0)

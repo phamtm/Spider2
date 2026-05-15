@@ -2,7 +2,7 @@
 
 Decide whether the current table selection is missing a table needed to answer the question.
 
-Use the evidence provided (validation error, execution error, or critic finding) to identify the gap.
+Use the evidence provided (validation error or execution error) to identify the gap.
 
 Rules:
 - Set `should_expand=true` only when a specific table from the database is clearly needed and absent.

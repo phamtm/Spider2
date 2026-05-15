@@ -292,7 +292,7 @@ recall, family expansion success, and prompt reduction. By default it reads
 offline labels from `methods/gold-tables/spider2-snow-gold-tables.jsonl`;
 `--gold-path <path>` is only for alternate local label files. Gold tables are
 offline-only labels for measuring schema-context coverage. They are not available to
-runtime planning, SQL generation, repair, or candidate review.
+runtime planning, SQL generation, or repair.
 
 Use `--covered-only` to focus on tasks whose gold tables touch curated
 large-schema summaries. Use `--baseline-path <report.json|tasks.jsonl>` to
@@ -375,28 +375,8 @@ The observation payload also includes:
 - model confidence as a small tie-breaker
 
 The numeric score is retained as diagnostic evidence. It is separate from the
-official benchmark score, which runs later on the final CSV, and it is not the
-semantic authority for choosing the final answer.
-
-## Candidate Review
-
-After executable candidates are observed, the solver asks the LLM for one
-combined candidate review. Local scores, validation output, execution profiles,
-shape reports, and grounding reports are evidence for that review rather than
-hardcoded semantic policy.
-
-The review chooses the candidate that best matches:
-
-- output shape
-- grain
-- filters
-- table usage
-- metric source
-- grounded assumptions
-
-The same review also decides whether the preferred candidate needs repair. This
-keeps semantic judgment in the model while preserving deterministic safety checks
-in local code.
+official benchmark score, which runs later on the final CSV, and it is the
+runtime tie-breaker for choosing the final answer among executable candidates.
 
 ## Repairs
 
@@ -406,7 +386,6 @@ The recovery stage uses a simple priority order:
 
 - schema recovery first when the trace shows the selected schema is incomplete
 - SQL recovery when the best candidate still does not execute
-- semantic recovery when candidate review finds a concrete issue in an executable candidate
 
 All recovery attempts share the same task-level attempt budget.
 
@@ -415,25 +394,11 @@ All recovery attempts share the same task-level attempt budget.
 If the best candidate does not execute, the solver asks for a SQL repair using
 the validation and execution feedback.
 
-### Semantic Recovery
-
-When candidate review finds a concrete semantic issue, the solver asks for one
-semantic repair.
-
 ### Schema Recovery
 
-When validation, execution, or critic evidence shows that the selected schema
-is incomplete, the solver expands the schema context first and retries SQL
+When validation or execution evidence shows that the selected schema is
+incomplete, the solver expands the schema context first and retries SQL
 generation against that broader context.
-
-The review looks for concrete issues such as:
-
-- ungrounded filters
-- wrong shape
-- missing filters
-- suspicious aggregates
-- wrong metric source
-- literal values treated as invented business definitions
 
 By default, each task has a small attempt budget: three initial candidates and
 up to four total attempts.
@@ -450,8 +415,8 @@ The final candidate must execute successfully. The solver writes:
 - `llm_calls/<instance_id>.jsonl`
 
 The trace contains the full local decision path: schema selection, intent,
-prompt hashes, attempts, recovery actions, candidate review output, final SQL,
-and final execution summary.
+prompt hashes, attempts, recovery actions, final SQL, and final execution
+summary.
 
 Schema-context traces also include:
 

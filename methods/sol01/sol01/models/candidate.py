@@ -79,15 +79,6 @@ class CandidateEvidence(BaseModel):
     issues: list[str] = Field(default_factory=list)
 
 
-class ConfidenceReport(BaseModel):
-    """Repair-review output that decides whether a candidate needs another attempt."""
-
-    confidence: float = Field(ge=0.0, le=1.0)
-    issues: list[str] = Field(default_factory=list)
-    should_repair: bool
-    repair_focus: str | None = None
-
-
 class AggregateGrainReport(BaseModel):
     """Heuristic grain analysis used to rank aggregate candidates."""
 
@@ -97,19 +88,6 @@ class AggregateGrainReport(BaseModel):
     uses_distinct: bool = False
     has_joins: bool = False
     selected_tables: list[str] = Field(default_factory=list)
-
-
-class CandidateReviewReport(BaseModel):
-    """Single review pass that can compare candidates and request repair."""
-
-    baseline_stage: str | None = None
-    preferred_stage: str | None = None
-    compared_stages: list[str] = Field(default_factory=list)
-    reasons: list[str] = Field(default_factory=list)
-    confidence: float = Field(ge=0.0, le=1.0)
-    issues: list[str] = Field(default_factory=list)
-    should_repair: bool
-    repair_focus: str | None = None
 
 
 class AttemptRecord(BaseModel):
@@ -133,8 +111,6 @@ class AttemptRecord(BaseModel):
     result_profile: dict[str, Any] | None = None
     aggregate_grain: AggregateGrainReport | None = None
     elapsed_seconds: float = 0.0
-    critic: dict[str, Any] | None = None
-    candidate_review: dict[str, Any] | None = None
     repair_skipped_reason: RepairSkippedReason | None = None
 
     _dataframe: Any = PrivateAttr(default=None)

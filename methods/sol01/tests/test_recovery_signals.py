@@ -11,7 +11,6 @@ def _attempt(
     validation_errors: list[str] | None = None,
     validation_warnings: list[str] | None = None,
     execution_error: str | None = None,
-    critic: dict[str, object] | None = None,
 ) -> AttemptRecord:
     return AttemptRecord(
         stage="initial_1",
@@ -29,7 +28,6 @@ def _attempt(
             error=execution_error,
         ),
         score=0.0,
-        critic=critic,
     )
 
 
@@ -53,13 +51,3 @@ def test_schema_expansion_trigger_detects_invalid_identifier_execution_errors() 
     attempt = _attempt(execution_error="SQL compilation error: invalid identifier 'MISSING_COLUMN'")
 
     assert schema_expansion_trigger(attempt).startswith("execution_unknown_column:")
-
-
-def test_schema_expansion_trigger_detects_critic_schema_issue() -> None:
-    attempt = _attempt(
-        critic={"issues": ["The query is missing a join between orders and customers."]}
-    )
-
-    assert schema_expansion_trigger(attempt) == (
-        "critic_issue: The query is missing a join between orders and customers."
-    )

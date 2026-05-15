@@ -11,19 +11,8 @@ from sol01.candidates.verification import (
 )
 from sol01.infra.logging import get_logger
 from sol01.infra.policy import DEFAULT_RECOVERY_SIGNAL_POLICY
-from sol01.llm.sql_prompts import (
-    candidate_review_prompt,
-    semantic_repair_prompt,
-    sql_generation_batch_prompt,
-    sql_repair_prompt,
-)
-from sol01.models import (
-    CandidateReviewReport,
-    ConfidenceReport,
-    SelectedSchemaObject,
-    SQLCandidate,
-    SQLCandidateBatch,
-)
+from sol01.llm.sql_prompts import sql_generation_batch_prompt, sql_repair_prompt
+from sol01.models import SelectedSchemaObject, SQLCandidate, SQLCandidateBatch
 from sol01.pipeline_state import TaskRun, current_best
 from sol01.pipeline_support import (
     checked_schema_prompt,
@@ -44,7 +33,6 @@ from sol01.schema.expansion import (
 from sol01.schema.schema_context_cache import build_schema_context_cache
 from sol01.workflow import (
     RECOVERY_KIND_SCHEMA,
-    RECOVERY_KIND_SEMANTIC,
     RECOVERY_KIND_SQL,
     RECOVERY_OUTCOME_DB_INDEX_UNAVAILABLE,
     RECOVERY_OUTCOME_EXPANDED,
@@ -54,18 +42,13 @@ from sol01.workflow import (
     RECOVERY_OUTCOME_RECOVERED,
     RECOVERY_OUTCOME_STILL_FAILED,
     RECOVERY_STAGE_SCHEMA,
-    RECOVERY_STAGE_SEMANTIC,
     RECOVERY_STAGE_SQL,
     REPAIR_SKIPPED_REASON_ATTEMPT_BUDGET,
-    REPAIR_SKIPPED_REASON_SEMANTIC_BUDGET,
     STOP_REASON_ATTEMPT_BUDGET_EXHAUSTED,
     STOP_REASON_NO_ATTEMPTS,
     STOP_REASON_NO_RECOVERY_NEEDED,
-    STOP_REASON_REVIEW_COMPLETE,
     STOP_REASON_SCHEMA_RECOVERY_COMPLETE,
-    STOP_REASON_SEMANTIC_REPAIR_BUDGET_EXHAUSTED,
     STOP_REASON_SQL_RECOVERY_COMPLETE,
-    CandidateReviewTrace,
     RecoveryKind,
     RecoveryOutcome,
     RecoveryStopReason,
@@ -103,8 +86,6 @@ def run_recovery_stage(run: TaskRun) -> TaskRun:
     """Run the single recovery stage until it is done or the shared budget is spent."""
 
     actions: list[RecoveryAction] = []
-    remaining_semantic_repairs = run.policy.semantic_repairs
-    review_ran = False
     stop_reason: RecoveryStopReason = STOP_REASON_NO_ATTEMPTS
 
     while True:
@@ -130,42 +111,20 @@ def run_recovery_stage(run: TaskRun) -> TaskRun:
                 break
             continue
 
-        if not best.execution_result.ok:
-            if len(run.attempts) >= run.policy.max_attempts:
-                best.repair_skipped_reason = REPAIR_SKIPPED_REASON_ATTEMPT_BUDGET
-                stop_reason = STOP_REASON_ATTEMPT_BUDGET_EXHAUSTED
-                break
+        if best.execution_result.ok:
+            stop_reason = STOP_REASON_NO_RECOVERY_NEEDED
+            break
 
-            action = _run_sql_recovery(run, best=best)
-            actions.append(action)
-            if action.outcome == RECOVERY_OUTCOME_RECOVERED:
-                stop_reason = STOP_REASON_SQL_RECOVERY_COMPLETE
-                break
-            continue
+        if len(run.attempts) >= run.policy.max_attempts:
+            best.repair_skipped_reason = REPAIR_SKIPPED_REASON_ATTEMPT_BUDGET
+            stop_reason = STOP_REASON_ATTEMPT_BUDGET_EXHAUSTED
+            break
 
-        if not review_ran:
-            review = _run_candidate_review(run, best=best)
-            review_ran = True
-            if not review.should_repair:
-                stop_reason = STOP_REASON_REVIEW_COMPLETE
-                break
-            if remaining_semantic_repairs < 1:
-                best = current_best(run, preferred_stage=review.preferred_stage) or best
-                best.repair_skipped_reason = REPAIR_SKIPPED_REASON_SEMANTIC_BUDGET
-                stop_reason = STOP_REASON_SEMANTIC_REPAIR_BUDGET_EXHAUSTED
-                break
-            if len(run.attempts) >= run.policy.max_attempts:
-                best = current_best(run, preferred_stage=review.preferred_stage) or best
-                best.repair_skipped_reason = REPAIR_SKIPPED_REASON_ATTEMPT_BUDGET
-                stop_reason = STOP_REASON_ATTEMPT_BUDGET_EXHAUSTED
-                break
-
-            actions.append(_run_semantic_recovery(run, best=best, review=review))
-            remaining_semantic_repairs -= 1
-            continue
-
-        stop_reason = STOP_REASON_NO_RECOVERY_NEEDED
-        break
+        action = _run_sql_recovery(run, best=best)
+        actions.append(action)
+        if action.outcome == RECOVERY_OUTCOME_RECOVERED:
+            stop_reason = STOP_REASON_SQL_RECOVERY_COMPLETE
+            break
 
     run.recovery_payload = RecoveryTrace(
         priority_order=list(DEFAULT_RECOVERY_SIGNAL_POLICY.priority_order),
@@ -174,8 +133,6 @@ def run_recovery_stage(run: TaskRun) -> TaskRun:
         ),
         attempts_after_recovery=len(run.attempts),
         max_attempts=run.policy.max_attempts,
-        semantic_repairs_allowed=run.policy.semantic_repairs,
-        semantic_repairs_remaining=remaining_semantic_repairs,
         actions=[action.as_trace_payload() for action in actions],
         stop_reason=stop_reason,
     )
@@ -243,108 +200,6 @@ def _run_sql_recovery(run: TaskRun, *, best) -> RecoveryAction:
     return RecoveryAction(
         kind=RECOVERY_KIND_SQL,
         trigger="best_attempt_not_executable",
-        source_stage=best.stage,
-        attempt_stage=attempt.stage,
-        outcome=RECOVERY_OUTCOME_RECOVERED
-        if attempt.execution_result.ok
-        else RECOVERY_OUTCOME_STILL_FAILED,
-    )
-
-
-def _run_candidate_review(run: TaskRun, *, best) -> CandidateReviewReport:
-    """Review executable attempts and attach the critic report to the preferred baseline."""
-
-    executable = [attempt for attempt in run.attempts if attempt.execution_result.ok]
-    review_reason = (
-        "final adjudication of the only executable candidate"
-        if len(executable) == 1
-        else "final adjudication across executable candidates using local observations"
-    )
-
-    logger.info(
-        "candidate review requested",
-        instance_id=run.task.instance_id,
-        best_stage=best.stage,
-        executable_attempts=len(executable),
-        reason=review_reason,
-    )
-    review = run_prompt(
-        run.client,
-        prompt_hashes=run.prompt_hashes,
-        prompt_name="candidate_review",
-        output_type=CandidateReviewReport,
-        user_prompt=candidate_review_prompt(
-            run.task,
-            run.intent,
-            executable,
-            run.sql_reference_context,
-            run.docs_context,
-            baseline_stage=best.stage,
-            review_reason=review_reason,
-        ),
-    )
-    run.candidate_review_payload = CandidateReviewTrace(
-        review_reason=review_reason,
-        **review.model_dump(mode="json"),
-    )
-    annotated = current_best(run, preferred_stage=review.preferred_stage) or best
-    annotated.critic = {
-        "confidence": review.confidence,
-        "issues": review.issues,
-        "should_repair": review.should_repair,
-        "repair_focus": review.repair_focus,
-    }
-    annotated.candidate_review = run.candidate_review_payload.model_dump(mode="json")
-
-    logger.info(
-        "candidate review complete",
-        instance_id=run.task.instance_id,
-        preferred_stage=review.preferred_stage,
-        should_repair=review.should_repair,
-        confidence=review.confidence,
-        issues=review.issues,
-    )
-    return review
-
-
-def _run_semantic_recovery(
-    run: TaskRun,
-    *,
-    best,
-    review: CandidateReviewReport,
-) -> RecoveryAction:
-    """Attempt one semantic recovery after the critic identifies a concrete issue."""
-
-    logger.info(
-        "recovery action requested",
-        instance_id=run.task.instance_id,
-        action="semantic",
-        best_stage=best.stage,
-        focus=review.repair_focus,
-    )
-    repaired = run_prompt(
-        run.client,
-        prompt_hashes=run.prompt_hashes,
-        prompt_name="sql_repair",
-        output_type=SQLCandidate,
-        user_prompt=semantic_repair_prompt(
-            run.task,
-            run.intent,
-            best,
-            ConfidenceReport(
-                confidence=review.confidence,
-                issues=review.issues,
-                should_repair=review.should_repair,
-                repair_focus=review.repair_focus,
-            ),
-            run.sql_reference_context,
-            run.docs_context,
-        ),
-    )
-    attempt = evaluate_and_record_candidate(run, candidate=repaired, stage=RECOVERY_STAGE_SEMANTIC)
-    return RecoveryAction(
-        kind=RECOVERY_KIND_SEMANTIC,
-        trigger=review.repair_focus or "critic_requested_repair",
         source_stage=best.stage,
         attempt_stage=attempt.stage,
         outcome=RECOVERY_OUTCOME_RECOVERED

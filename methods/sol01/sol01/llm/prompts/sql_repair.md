@@ -4,7 +4,7 @@ Repair the SQL using the validation or execution feedback.
 
 Keep the original question and document context as the source of truth.
 For validation or execution repairs, preserve the answer contract.
-For critic or semantic repairs, re-check whether the current contract or SQL preserved an unsupported assumption.
+Re-check whether the current contract or SQL preserved an unsupported assumption.
 Change only what is needed to make the Snowflake query valid and correct.
 Use column identifiers exactly as shown in the DDL/schema context.
 Quote columns that are quoted in the DDL; do not leave mixed-case or lower-case columns bare.

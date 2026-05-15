@@ -22,8 +22,8 @@ This note records verification for the schema-context selection work tracked by
   prompt-reduction measurement and its tests, not runtime planning or schema
   expansion.
 - Runtime code imports offline gold-table labels only through the
-  `schema-context-eval` CLI path. The coordinator, planner, SQL generation, repair,
-  and candidate review paths do not import or load gold-table data.
+  `schema-context-eval` CLI path. The coordinator, planner, SQL generation, and
+  repair paths do not import or load gold-table data.
 - Curated large-schema summaries live in
   `methods/sol01/metadata/large_schema_summaries.json`. Edits are validated by
   `sol01/schema/large_schema_summaries.py`, and the summary registry hash is

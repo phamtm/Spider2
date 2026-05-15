@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 import sqlglot
@@ -22,12 +21,6 @@ from sol01.models import (
     Task,
     ValidationReport,
 )
-
-_LOOKUP_TABLE_HINTS = frozenset(
-    {"code", "country", "dim", "label", "lookup", "map", "ref", "summary"}
-)
-_LABEL_COLUMN_HINTS = frozenset({"desc", "description", "display", "label", "name", "title"})
-_KEY_COLUMN_HINTS = frozenset({"code", "id", "key"})
 
 
 def infer_filter_grounding_report(
@@ -292,15 +285,6 @@ def _probe_columns_for_table(
     if exact_matches:
         return exact_matches
 
-    if _table_looks_like_lookup(table_schema) or _literal_looks_label_like(literal):
-        preferred = [
-            column
-            for column in string_columns
-            if _column_looks_label_like(column) or _column_looks_key_like(column)
-        ]
-        if preferred:
-            return preferred
-
     preferred = [column for column in string_columns if filter_column.lower() in column.lower()]
     if preferred:
         return preferred
@@ -308,14 +292,12 @@ def _probe_columns_for_table(
 
 
 def _table_probe_rank(table_name: str, filter_column: str) -> tuple[int, str]:
-    """Rank tables so likely lookup tables are probed first."""
+    """Rank tables so the most obviously related table is probed first."""
 
     lowered = table_name.lower()
     if filter_column.lower() in lowered:
         return 0, lowered
-    if _table_looks_like_lookup_name(lowered):
-        return 1, lowered
-    return 2, lowered
+    return 1, lowered
 
 
 def _string_filter_probe_sql(*, table_name: str, column_name: str, literal: str) -> str:
@@ -328,48 +310,3 @@ def _string_filter_probe_sql(*, table_name: str, column_name: str, literal: str)
         f"WHERE LOWER(CAST(\"{column_name}\" AS VARCHAR)) LIKE LOWER('%{escaped}%') "
         f"LIMIT {DEFAULT_FILTER_GROUNDING_POLICY.probe_match_limit}"
     )
-
-
-def _table_looks_like_lookup(table_schema: TableSchema) -> bool:
-    """Return True when a table name suggests a lookup or code table."""
-
-    return _table_looks_like_lookup_name((table_schema.full_name or table_schema.name).lower())
-
-
-def _table_looks_like_lookup_name(table_name: str) -> bool:
-    """Return True when a table name suggests a lookup or code table."""
-
-    return _name_has_hint(table_name, _LOOKUP_TABLE_HINTS)
-
-
-def _column_looks_label_like(column_name: str) -> bool:
-    """Return True when a column name looks like a human-readable label."""
-
-    return _name_has_hint(column_name, _LABEL_COLUMN_HINTS)
-
-
-def _column_looks_key_like(column_name: str) -> bool:
-    """Return True when a column name looks like a stored key."""
-
-    lowered = column_name.lower()
-    return (
-        lowered == "id" or lowered.endswith("_id") or _name_has_hint(column_name, _KEY_COLUMN_HINTS)
-    )
-
-
-def _literal_looks_label_like(literal: str) -> bool:
-    """Return True when a filter literal looks like a display label."""
-
-    return (any(part.isalpha() for part in literal) and " " in literal) or literal[:1].isupper()
-
-
-def _name_has_hint(name: str, hints: frozenset[str]) -> bool:
-    """Return True when a table or column name contains one of the known role hints."""
-
-    return any(part in hints for part in _name_parts(name))
-
-
-def _name_parts(name: str) -> tuple[str, ...]:
-    """Split one identifier into comparable lowercase name parts."""
-
-    return tuple(part for part in re.split(r"[^a-z0-9]+", name.lower()) if part)

@@ -28,8 +28,8 @@ def write_task_output(
     """Write final SQL, CSV, and trace; return the FinalAnswer."""
 
     task = run.task
-    best = current_best(run)
-    final_selection = select_winner(run.attempts) if best is not None else None
+    final_selection = select_winner(run.attempts)
+    best = final_selection.attempt if final_selection is not None else current_best(run)
     final_attempt_index = final_selection.index if final_selection is not None else None
 
     trace_payload: dict[str, object] = {
@@ -42,14 +42,9 @@ def write_task_output(
         "intent": run.intent.model_dump(mode="json"),
         "prompt_hashes": run.prompt_hashes,
         "final_attempt_index": final_attempt_index,
-        "final_attempt_reason": final_winner_reason(
-            best,
-            candidate_review_payload=run.candidate_review_payload,
-        ),
+        "final_attempt_reason": final_winner_reason(best),
         "attempts": [attempt.model_dump(mode="json") for attempt in run.attempts],
     }
-    if run.candidate_review_payload is not None:
-        trace_payload["candidate_review"] = run.candidate_review_payload.model_dump(mode="json")
     if run.recovery_payload is not None:
         trace_payload["recovery"] = run.recovery_payload.model_dump(mode="json")
     if live_logging_enabled:

@@ -44,7 +44,7 @@ Pydantic Logfire is enabled by default for CLI runs.
 `sol01` keeps the main default policy in one place:
 
 - runtime profile defaults: base URL, model, fixed OpenRouter routing, concurrency
-- solver budgets: initial candidates, max attempts, semantic repairs
+- solver budgets: initial candidates and max attempts
 - schema prompt defaults: family threshold, linked-doc budget, total prompt budget
 - prompt shrink strategy: what gets cut first when planning prompts are too large
 - schema render caps: family previews, evidence lines, column previews, sample literal length
@@ -99,8 +99,8 @@ artifacts without running solver tasks.
 the offline gold-table JSONL file at
 `methods/gold-tables/spider2-snow-gold-tables.jsonl` by default. Use
 `--gold-path <path>` only when evaluating another local label file. Gold tables
-are evaluation labels only; runtime planning, SQL generation, repair, and
-candidate review do not receive gold tables.
+are evaluation labels only; runtime planning, SQL generation, and repair do not
+receive gold tables.
 Use `--covered-only` to limit the report to gold tables covered by curated
 large-schema summaries. `--baseline-path <report.json|tasks.jsonl>` compares
 recall to a previous report, `--trace-run-id <run_id>` scans saved traces for
@@ -174,7 +174,7 @@ The runtime code follows the same split:
 - `sol01/pipeline_output.py`: final SQL / CSV / trace writing
 - `sol01/pipeline_support.py`: shared prompt, budget, and candidate-recording helpers
 - `sol01/llm/planning_prompts.py`: planner prompt assembly and planner-output cleanup
-- `sol01/llm/sql_prompts.py`: SQL generation, repair, and review prompts
+- `sol01/llm/sql_prompts.py`: SQL generation and repair prompts
 - `sol01/recovery_signals.py`: schema-expansion trigger detection
 
 Large-schema summaries keep very wide or repeated schemas compact. For ordinary
