@@ -1,0 +1,11 @@
+{
+  "artifact_hash": "0e50a9a658d79cce61091a6dcef282b39dafd4476fc3a2441d9e33416a24bf5b",
+  "builder_version": "schema-profile-builder-v1",
+  "db": "BLS",
+  "family_profile_count": 0,
+  "generated_at": "2026-05-15T03:29:03.997731+00:00",
+  "prompt_template_version": "schema-profile-template-v1",
+  "source_schema_hash": "5f131a83bfbc38545787aa956e760f0fd94ada38e7eb3f7dc4f14b1b4ca43c0c",
+  "summarizer_version": "schema-profile-deterministic-v1",
+  "table_profile_count": 143
+}

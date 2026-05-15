@@ -1,0 +1,2205 @@
+{
+  "aliases": [
+    "github_repos_date",
+    "day _20110731",
+    "day _20121228",
+    "day _20140302",
+    "day _20170416"
+  ],
+  "db": "GITHUB_REPOS_DATE",
+  "db_overview": "GITHUB_REPOS_DATE profile catalog covers 38 tables and 0 families. Wide-schema abstractions: 0. Main themes: other, repo, payload, created, actor, public.",
+  "family_profiles": [],
+  "source_schema_hash": "4fea0d82443682d107a311f6ad9c8cee44a57faf92091f8736cb634344806c9c",
+  "table_profiles": [
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "day _20110731"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.DAY._20110731 is a table covering public, actor, created, repo. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.DAY._20110731"
+      ],
+      "dimension_columns": [
+        "type",
+        "payload",
+        "id",
+        "other"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "public appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "created_at appears across 6 related tables",
+        "type appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "payload appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.DAY._20110731.",
+        "Preserve exact snake_case column spellings such as public, actor, created_at, type, repo, payload."
+      ],
+      "profile_id": "github_repos_date_day_20110731_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/DAY/_20110731.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.DAY._20110731",
+      "theme_terms": [
+        "public",
+        "actor",
+        "created",
+        "repo",
+        "payload",
+        "other",
+        "org"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "day _20121228"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.DAY._20121228 is a table covering actor, repo, created, public. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.DAY._20121228"
+      ],
+      "dimension_columns": [
+        "type",
+        "id",
+        "other",
+        "payload"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "type appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "created_at appears across 6 related tables",
+        "public appears across 6 related tables",
+        "id appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.DAY._20121228.",
+        "Preserve exact snake_case column spellings such as type, actor, repo, created_at, public, id."
+      ],
+      "profile_id": "github_repos_date_day_20121228_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/DAY/_20121228.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.DAY._20121228",
+      "theme_terms": [
+        "actor",
+        "repo",
+        "created",
+        "public",
+        "other",
+        "org",
+        "payload"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "day _20140302"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.DAY._20140302 is a table covering other, public, repo, created. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.DAY._20140302"
+      ],
+      "dimension_columns": [
+        "other",
+        "type",
+        "id",
+        "payload"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "other appears across 6 related tables",
+        "public appears across 6 related tables",
+        "type appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "id appears across 6 related tables",
+        "created_at appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.DAY._20140302.",
+        "Preserve exact snake_case column spellings such as other, public, type, repo, id, created_at."
+      ],
+      "profile_id": "github_repos_date_day_20140302_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/DAY/_20140302.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.DAY._20140302",
+      "theme_terms": [
+        "other",
+        "public",
+        "repo",
+        "created",
+        "org",
+        "payload",
+        "actor"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "day _20170416"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.DAY._20170416 is a table covering org, repo, other, created. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.DAY._20170416"
+      ],
+      "dimension_columns": [
+        "id",
+        "type",
+        "other",
+        "payload"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "org appears across 6 related tables",
+        "id appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "type appears across 6 related tables",
+        "other appears across 6 related tables",
+        "created_at appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.DAY._20170416.",
+        "Preserve exact snake_case column spellings such as org, id, repo, type, other, created_at."
+      ],
+      "profile_id": "github_repos_date_day_20170416_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/DAY/_20170416.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.DAY._20170416",
+      "theme_terms": [
+        "org",
+        "repo",
+        "other",
+        "created",
+        "payload",
+        "public",
+        "actor"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "day _20170508"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.DAY._20170508 is a table covering payload, org, repo, actor. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.DAY._20170508"
+      ],
+      "dimension_columns": [
+        "payload",
+        "id",
+        "other",
+        "type"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "payload appears across 6 related tables",
+        "org appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "id appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "other appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.DAY._20170508.",
+        "Preserve exact snake_case column spellings such as payload, org, repo, id, actor, other."
+      ],
+      "profile_id": "github_repos_date_day_20170508_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/DAY/_20170508.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.DAY._20170508",
+      "theme_terms": [
+        "payload",
+        "org",
+        "repo",
+        "actor",
+        "other",
+        "created",
+        "public"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "day _20171026"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.DAY._20171026 is a table covering other, public, created, actor. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.DAY._20171026"
+      ],
+      "dimension_columns": [
+        "other",
+        "type",
+        "id",
+        "payload"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "other appears across 6 related tables",
+        "public appears across 6 related tables",
+        "type appears across 6 related tables",
+        "created_at appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "id appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.DAY._20171026.",
+        "Preserve exact snake_case column spellings such as other, public, type, created_at, actor, id."
+      ],
+      "profile_id": "github_repos_date_day_20171026_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/DAY/_20171026.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.DAY._20171026",
+      "theme_terms": [
+        "other",
+        "public",
+        "created",
+        "actor",
+        "org",
+        "repo",
+        "payload"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "day _20180116"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.DAY._20180116 is a table covering actor, created, payload, public. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.DAY._20180116"
+      ],
+      "dimension_columns": [
+        "type",
+        "id",
+        "payload",
+        "other"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "type appears across 6 related tables",
+        "id appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "created_at appears across 6 related tables",
+        "payload appears across 6 related tables",
+        "public appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.DAY._20180116.",
+        "Preserve exact snake_case column spellings such as type, id, actor, created_at, payload, public."
+      ],
+      "profile_id": "github_repos_date_day_20180116_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/DAY/_20180116.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.DAY._20180116",
+      "theme_terms": [
+        "actor",
+        "created",
+        "payload",
+        "public",
+        "other",
+        "org",
+        "repo"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "day _20181201"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.DAY._20181201 is a table covering repo, created, public, payload. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.DAY._20181201"
+      ],
+      "dimension_columns": [
+        "type",
+        "payload",
+        "id",
+        "other"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "repo appears across 6 related tables",
+        "created_at appears across 6 related tables",
+        "public appears across 6 related tables",
+        "type appears across 6 related tables",
+        "payload appears across 6 related tables",
+        "id appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.DAY._20181201.",
+        "Preserve exact snake_case column spellings such as repo, created_at, public, type, payload, id."
+      ],
+      "profile_id": "github_repos_date_day_20181201_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/DAY/_20181201.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.DAY._20181201",
+      "theme_terms": [
+        "repo",
+        "created",
+        "public",
+        "payload",
+        "actor",
+        "other",
+        "org"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "day _20191129"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.DAY._20191129 is a table covering repo, org, payload, other. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.DAY._20191129"
+      ],
+      "dimension_columns": [
+        "id",
+        "payload",
+        "other",
+        "type"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "repo appears across 6 related tables",
+        "id appears across 6 related tables",
+        "org appears across 6 related tables",
+        "payload appears across 6 related tables",
+        "other appears across 6 related tables",
+        "public appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.DAY._20191129.",
+        "Preserve exact snake_case column spellings such as repo, id, org, payload, other, public."
+      ],
+      "profile_id": "github_repos_date_day_20191129_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/DAY/_20191129.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.DAY._20191129",
+      "theme_terms": [
+        "repo",
+        "org",
+        "payload",
+        "other",
+        "public",
+        "created",
+        "actor"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "day _20210612"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.DAY._20210612 is a table covering created, actor, payload, repo. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.DAY._20210612"
+      ],
+      "dimension_columns": [
+        "type",
+        "payload",
+        "other",
+        "id"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "created_at appears across 6 related tables",
+        "type appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "payload appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "other appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.DAY._20210612.",
+        "Preserve exact snake_case column spellings such as created_at, type, actor, payload, repo, other."
+      ],
+      "profile_id": "github_repos_date_day_20210612_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/DAY/_20210612.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.DAY._20210612",
+      "theme_terms": [
+        "created",
+        "actor",
+        "payload",
+        "repo",
+        "other",
+        "public",
+        "org"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "day _20230118"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.DAY._20230118 is a table covering other, public, payload, org. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.DAY._20230118"
+      ],
+      "dimension_columns": [
+        "other",
+        "payload",
+        "id",
+        "type"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "other appears across 6 related tables",
+        "public appears across 6 related tables",
+        "payload appears across 6 related tables",
+        "org appears across 6 related tables",
+        "id appears across 6 related tables",
+        "type appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.DAY._20230118.",
+        "Preserve exact snake_case column spellings such as other, public, payload, org, id, type."
+      ],
+      "profile_id": "github_repos_date_day_20230118_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/DAY/_20230118.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.DAY._20230118",
+      "theme_terms": [
+        "other",
+        "public",
+        "payload",
+        "org",
+        "actor",
+        "created",
+        "repo"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "languages",
+        "github_repos languages"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.GITHUB_REPOS.LANGUAGES is a table covering languages, repo, language. It exposes 2 exact columns. Dimension-style columns include repo_name.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.GITHUB_REPOS.LANGUAGES"
+      ],
+      "dimension_columns": [
+        "repo_name"
+      ],
+      "grain_hint": "One row per logical record.",
+      "join_anchors": [
+        "repo_name appears across 5 related tables"
+      ],
+      "key_columns": [],
+      "measure_columns": [],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.GITHUB_REPOS.LANGUAGES.",
+        "Preserve exact snake_case column spellings such as repo_name, language."
+      ],
+      "profile_id": "github_repos_date_github_repos_languages_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/GITHUB_REPOS/LANGUAGES.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 2,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.GITHUB_REPOS.LANGUAGES",
+      "theme_terms": [
+        "languages",
+        "repo",
+        "language"
+      ],
+      "time_columns": []
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "licenses",
+        "github_repos licenses"
+      ],
+      "caveats": [],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.GITHUB_REPOS.LICENSES is a table covering licenses, repo, license. It exposes 2 exact columns. Dimension-style columns include repo_name, license.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.GITHUB_REPOS.LICENSES"
+      ],
+      "dimension_columns": [
+        "repo_name",
+        "license"
+      ],
+      "grain_hint": "One row per logical record.",
+      "join_anchors": [
+        "repo_name appears across 5 related tables"
+      ],
+      "key_columns": [],
+      "measure_columns": [],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.GITHUB_REPOS.LICENSES.",
+        "Preserve exact snake_case column spellings such as repo_name, license."
+      ],
+      "profile_id": "github_repos_date_github_repos_licenses_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/GITHUB_REPOS/LICENSES.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 2,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.GITHUB_REPOS.LICENSES",
+      "theme_terms": [
+        "licenses",
+        "repo",
+        "license"
+      ],
+      "time_columns": []
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "sample commits",
+        "github_repos sample_commits"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_COMMITS is a table covering sample, commits, difference, parent. It exposes 12 exact columns. Dimension-style columns include message, subject, encoding, commit.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_COMMITS"
+      ],
+      "dimension_columns": [
+        "message",
+        "subject",
+        "encoding",
+        "commit",
+        "repo_name",
+        "tree"
+      ],
+      "grain_hint": "One row per logical record.",
+      "join_anchors": [
+        "repo_name appears across 5 related tables"
+      ],
+      "key_columns": [],
+      "measure_columns": [],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_COMMITS.",
+        "Preserve exact snake_case column spellings such as parent, committer, difference, message, author, difference_truncated."
+      ],
+      "profile_id": "github_repos_date_github_repos_sample_commits_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/GITHUB_REPOS/SAMPLE_COMMITS.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 12,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_COMMITS",
+      "theme_terms": [
+        "sample",
+        "commits",
+        "difference",
+        "parent",
+        "committer",
+        "message",
+        "author",
+        "truncated"
+      ],
+      "time_columns": []
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "sample contents",
+        "github_repos sample_contents"
+      ],
+      "caveats": [],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_CONTENTS is a table covering sample, contents, size, binary. It exposes 10 exact columns. Typical lookup starts from id. Measure columns include size, copies, sample_mode. Repeated column templates include sample_* (5 columns).",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_CONTENTS"
+      ],
+      "dimension_columns": [
+        "sample_symlink_target",
+        "sample_path",
+        "content",
+        "sample_ref",
+        "sample_repo_name",
+        "id"
+      ],
+      "grain_hint": "One row per logical record; keyed by id.",
+      "join_anchors": [
+        "id appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "size",
+        "copies",
+        "sample_mode"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_CONTENTS.",
+        "Preserve exact snake_case column spellings such as size, binary, sample_symlink_target, copies, sample_mode, sample_path."
+      ],
+      "profile_id": "github_repos_date_github_repos_sample_contents_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/GITHUB_REPOS/SAMPLE_CONTENTS.json"
+      ],
+      "repeated_column_templates": [
+        "sample_* (5 columns)"
+      ],
+      "source_column_count": 10,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_CONTENTS",
+      "theme_terms": [
+        "sample",
+        "contents",
+        "size",
+        "binary",
+        "symlink",
+        "target",
+        "copies",
+        "mode"
+      ],
+      "time_columns": []
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "sample files",
+        "github_repos sample_files"
+      ],
+      "caveats": [],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_FILES is a table covering sample, files, symlink, target. It exposes 6 exact columns. Typical lookup starts from id. Measure columns include mode.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_FILES"
+      ],
+      "dimension_columns": [
+        "symlink_target",
+        "id",
+        "path",
+        "ref",
+        "repo_name"
+      ],
+      "grain_hint": "One row per logical record; keyed by id.",
+      "join_anchors": [
+        "id appears across 6 related tables",
+        "repo_name appears across 5 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "mode"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_FILES.",
+        "Preserve exact snake_case column spellings such as symlink_target, id, mode, path, ref, repo_name."
+      ],
+      "profile_id": "github_repos_date_github_repos_sample_files_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/GITHUB_REPOS/SAMPLE_FILES.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 6,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_FILES",
+      "theme_terms": [
+        "sample",
+        "files",
+        "symlink",
+        "target",
+        "mode",
+        "path",
+        "ref",
+        "repo"
+      ],
+      "time_columns": []
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "sample repos",
+        "github_repos sample_repos"
+      ],
+      "caveats": [],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_REPOS is a table covering sample, repos, watch, repo. It exposes 2 exact columns. Measure columns include watch_count. Dimension-style columns include repo_name.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_REPOS"
+      ],
+      "dimension_columns": [
+        "repo_name"
+      ],
+      "grain_hint": "One row per logical record.",
+      "join_anchors": [
+        "repo_name appears across 5 related tables"
+      ],
+      "key_columns": [],
+      "measure_columns": [
+        "watch_count"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_REPOS.",
+        "Preserve exact snake_case column spellings such as watch_count, repo_name."
+      ],
+      "profile_id": "github_repos_date_github_repos_sample_repos_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/GITHUB_REPOS/SAMPLE_REPOS.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 2,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.GITHUB_REPOS.SAMPLE_REPOS",
+      "theme_terms": [
+        "sample",
+        "repos",
+        "watch",
+        "repo"
+      ],
+      "time_columns": []
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "month _201110"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.MONTH._201110 is a table covering org, other, repo, created. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.MONTH._201110"
+      ],
+      "dimension_columns": [
+        "id",
+        "type",
+        "other",
+        "payload"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "id appears across 6 related tables",
+        "type appears across 6 related tables",
+        "org appears across 6 related tables",
+        "other appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "created_at appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.MONTH._201110.",
+        "Preserve exact snake_case column spellings such as id, type, org, other, repo, created_at."
+      ],
+      "profile_id": "github_repos_date_month_201110_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/MONTH/_201110.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.MONTH._201110",
+      "theme_terms": [
+        "org",
+        "other",
+        "repo",
+        "created",
+        "actor",
+        "payload",
+        "public"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "month _201211"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.MONTH._201211 is a table covering created, repo, other, public. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.MONTH._201211"
+      ],
+      "dimension_columns": [
+        "other",
+        "type",
+        "id",
+        "payload"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "created_at appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "other appears across 6 related tables",
+        "public appears across 6 related tables",
+        "type appears across 6 related tables",
+        "id appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.MONTH._201211.",
+        "Preserve exact snake_case column spellings such as created_at, repo, other, public, type, id."
+      ],
+      "profile_id": "github_repos_date_month_201211_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/MONTH/_201211.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.MONTH._201211",
+      "theme_terms": [
+        "created",
+        "repo",
+        "other",
+        "public",
+        "payload",
+        "actor",
+        "org"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "month _201307"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.MONTH._201307 is a table covering other, repo, actor, org. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.MONTH._201307"
+      ],
+      "dimension_columns": [
+        "other",
+        "type",
+        "payload",
+        "id"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "other appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "type appears across 6 related tables",
+        "org appears across 6 related tables",
+        "payload appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.MONTH._201307.",
+        "Preserve exact snake_case column spellings such as other, repo, actor, type, org, payload."
+      ],
+      "profile_id": "github_repos_date_month_201307_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/MONTH/_201307.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.MONTH._201307",
+      "theme_terms": [
+        "other",
+        "repo",
+        "actor",
+        "org",
+        "payload",
+        "public",
+        "created"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "month _201409"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.MONTH._201409 is a table covering repo, other, org, payload. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.MONTH._201409"
+      ],
+      "dimension_columns": [
+        "id",
+        "type",
+        "other",
+        "payload"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "repo appears across 6 related tables",
+        "id appears across 6 related tables",
+        "type appears across 6 related tables",
+        "other appears across 6 related tables",
+        "org appears across 6 related tables",
+        "payload appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.MONTH._201409.",
+        "Preserve exact snake_case column spellings such as repo, id, type, other, org, payload."
+      ],
+      "profile_id": "github_repos_date_month_201409_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/MONTH/_201409.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.MONTH._201409",
+      "theme_terms": [
+        "repo",
+        "other",
+        "org",
+        "payload",
+        "public",
+        "actor",
+        "created"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "month _201601"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.MONTH._201601 is a table covering payload, org, other, actor. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.MONTH._201601"
+      ],
+      "dimension_columns": [
+        "payload",
+        "type",
+        "other",
+        "id"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "payload appears across 6 related tables",
+        "type appears across 6 related tables",
+        "org appears across 6 related tables",
+        "other appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "created_at appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.MONTH._201601.",
+        "Preserve exact snake_case column spellings such as payload, type, org, other, actor, created_at."
+      ],
+      "profile_id": "github_repos_date_month_201601_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/MONTH/_201601.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.MONTH._201601",
+      "theme_terms": [
+        "payload",
+        "org",
+        "other",
+        "actor",
+        "created",
+        "public",
+        "repo"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "month _201706"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.MONTH._201706 is a table covering created, actor, public, payload. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.MONTH._201706"
+      ],
+      "dimension_columns": [
+        "type",
+        "payload",
+        "id",
+        "other"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "created_at appears across 6 related tables",
+        "type appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "public appears across 6 related tables",
+        "payload appears across 6 related tables",
+        "repo appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.MONTH._201706.",
+        "Preserve exact snake_case column spellings such as created_at, type, actor, public, payload, repo."
+      ],
+      "profile_id": "github_repos_date_month_201706_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/MONTH/_201706.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.MONTH._201706",
+      "theme_terms": [
+        "created",
+        "actor",
+        "public",
+        "payload",
+        "repo",
+        "other",
+        "org"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "month _201904"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.MONTH._201904 is a table covering payload, public, org, other. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.MONTH._201904"
+      ],
+      "dimension_columns": [
+        "payload",
+        "id",
+        "other",
+        "type"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "payload appears across 6 related tables",
+        "id appears across 6 related tables",
+        "public appears across 6 related tables",
+        "org appears across 6 related tables",
+        "other appears across 6 related tables",
+        "type appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.MONTH._201904.",
+        "Preserve exact snake_case column spellings such as payload, id, public, org, other, type."
+      ],
+      "profile_id": "github_repos_date_month_201904_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/MONTH/_201904.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.MONTH._201904",
+      "theme_terms": [
+        "payload",
+        "public",
+        "org",
+        "other",
+        "actor",
+        "created",
+        "repo"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "month _202008"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.MONTH._202008 is a table covering org, public, payload, actor. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.MONTH._202008"
+      ],
+      "dimension_columns": [
+        "payload",
+        "type",
+        "id",
+        "other"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "org appears across 6 related tables",
+        "public appears across 6 related tables",
+        "payload appears across 6 related tables",
+        "type appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "id appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.MONTH._202008.",
+        "Preserve exact snake_case column spellings such as org, public, payload, type, actor, id."
+      ],
+      "profile_id": "github_repos_date_month_202008_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/MONTH/_202008.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.MONTH._202008",
+      "theme_terms": [
+        "org",
+        "public",
+        "payload",
+        "actor",
+        "other",
+        "repo",
+        "created"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "month _202204"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.MONTH._202204 is a table covering created, repo, actor, payload. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.MONTH._202204"
+      ],
+      "dimension_columns": [
+        "type",
+        "payload",
+        "other",
+        "id"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "created_at appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "type appears across 6 related tables",
+        "payload appears across 6 related tables",
+        "other appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.MONTH._202204.",
+        "Preserve exact snake_case column spellings such as created_at, repo, actor, type, payload, other."
+      ],
+      "profile_id": "github_repos_date_month_202204_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/MONTH/_202204.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.MONTH._202204",
+      "theme_terms": [
+        "created",
+        "repo",
+        "actor",
+        "payload",
+        "other",
+        "public",
+        "org"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "month _202312"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.MONTH._202312 is a table covering repo, other, public, created. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.MONTH._202312"
+      ],
+      "dimension_columns": [
+        "id",
+        "other",
+        "payload",
+        "type"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "repo appears across 6 related tables",
+        "id appears across 6 related tables",
+        "other appears across 6 related tables",
+        "public appears across 6 related tables",
+        "created_at appears across 6 related tables",
+        "org appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.MONTH._202312.",
+        "Preserve exact snake_case column spellings such as repo, id, other, public, created_at, org."
+      ],
+      "profile_id": "github_repos_date_month_202312_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/MONTH/_202312.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.MONTH._202312",
+      "theme_terms": [
+        "repo",
+        "other",
+        "public",
+        "created",
+        "org",
+        "payload",
+        "actor"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "month _202406"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.MONTH._202406 is a table covering payload, actor, other, public. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.MONTH._202406"
+      ],
+      "dimension_columns": [
+        "payload",
+        "type",
+        "other",
+        "id"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "payload appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "type appears across 6 related tables",
+        "other appears across 6 related tables",
+        "id appears across 6 related tables",
+        "public appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.MONTH._202406.",
+        "Preserve exact snake_case column spellings such as payload, actor, type, other, id, public."
+      ],
+      "profile_id": "github_repos_date_month_202406_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/MONTH/_202406.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.MONTH._202406",
+      "theme_terms": [
+        "payload",
+        "actor",
+        "other",
+        "public",
+        "created",
+        "repo",
+        "org"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "year _2011"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.YEAR._2011 is a table covering org, actor, payload, created. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.YEAR._2011"
+      ],
+      "dimension_columns": [
+        "id",
+        "type",
+        "payload",
+        "other"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "id appears across 6 related tables",
+        "type appears across 6 related tables",
+        "org appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "payload appears across 6 related tables",
+        "created_at appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.YEAR._2011.",
+        "Preserve exact snake_case column spellings such as id, type, org, actor, payload, created_at."
+      ],
+      "profile_id": "github_repos_date_year_2011_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/YEAR/_2011.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.YEAR._2011",
+      "theme_terms": [
+        "org",
+        "actor",
+        "payload",
+        "created",
+        "repo",
+        "other",
+        "public"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "year _2012"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.YEAR._2012 is a table covering payload, org, created, other. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.YEAR._2012"
+      ],
+      "dimension_columns": [
+        "payload",
+        "type",
+        "id",
+        "other"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "payload appears across 6 related tables",
+        "org appears across 6 related tables",
+        "created_at appears across 6 related tables",
+        "type appears across 6 related tables",
+        "id appears across 6 related tables",
+        "other appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.YEAR._2012.",
+        "Preserve exact snake_case column spellings such as payload, org, created_at, type, id, other."
+      ],
+      "profile_id": "github_repos_date_year_2012_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/YEAR/_2012.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.YEAR._2012",
+      "theme_terms": [
+        "payload",
+        "org",
+        "created",
+        "other",
+        "public",
+        "repo",
+        "actor"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "year _2013"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.YEAR._2013 is a table covering org, repo, public, other. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.YEAR._2013"
+      ],
+      "dimension_columns": [
+        "type",
+        "other",
+        "payload",
+        "id"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "org appears across 6 related tables",
+        "type appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "public appears across 6 related tables",
+        "other appears across 6 related tables",
+        "created_at appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.YEAR._2013.",
+        "Preserve exact snake_case column spellings such as org, type, repo, public, other, created_at."
+      ],
+      "profile_id": "github_repos_date_year_2013_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/YEAR/_2013.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.YEAR._2013",
+      "theme_terms": [
+        "org",
+        "repo",
+        "public",
+        "other",
+        "created",
+        "payload",
+        "actor"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "year _2015"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.YEAR._2015 is a table covering other, payload, created, repo. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.YEAR._2015"
+      ],
+      "dimension_columns": [
+        "other",
+        "payload",
+        "type",
+        "id"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "other appears across 6 related tables",
+        "payload appears across 6 related tables",
+        "type appears across 6 related tables",
+        "created_at appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "org appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.YEAR._2015.",
+        "Preserve exact snake_case column spellings such as other, payload, type, created_at, repo, org."
+      ],
+      "profile_id": "github_repos_date_year_2015_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/YEAR/_2015.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.YEAR._2015",
+      "theme_terms": [
+        "other",
+        "payload",
+        "created",
+        "repo",
+        "org",
+        "actor",
+        "public"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "year _2016"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.YEAR._2016 is a table covering repo, org, other, created. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.YEAR._2016"
+      ],
+      "dimension_columns": [
+        "id",
+        "other",
+        "type",
+        "payload"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "repo appears across 6 related tables",
+        "id appears across 6 related tables",
+        "org appears across 6 related tables",
+        "other appears across 6 related tables",
+        "created_at appears across 6 related tables",
+        "type appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.YEAR._2016.",
+        "Preserve exact snake_case column spellings such as repo, id, org, other, created_at, type."
+      ],
+      "profile_id": "github_repos_date_year_2016_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/YEAR/_2016.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.YEAR._2016",
+      "theme_terms": [
+        "repo",
+        "org",
+        "other",
+        "created",
+        "payload",
+        "actor",
+        "public"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "year _2017"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.YEAR._2017 is a table covering created, public, payload, other. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.YEAR._2017"
+      ],
+      "dimension_columns": [
+        "type",
+        "id",
+        "payload",
+        "other"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "type appears across 6 related tables",
+        "created_at appears across 6 related tables",
+        "id appears across 6 related tables",
+        "public appears across 6 related tables",
+        "payload appears across 6 related tables",
+        "other appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.YEAR._2017.",
+        "Preserve exact snake_case column spellings such as type, created_at, id, public, payload, other."
+      ],
+      "profile_id": "github_repos_date_year_2017_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/YEAR/_2017.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.YEAR._2017",
+      "theme_terms": [
+        "created",
+        "public",
+        "payload",
+        "other",
+        "actor",
+        "org",
+        "repo"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "year _2018"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.YEAR._2018 is a table covering public, payload, actor, repo. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.YEAR._2018"
+      ],
+      "dimension_columns": [
+        "id",
+        "type",
+        "payload",
+        "other"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "public appears across 6 related tables",
+        "id appears across 6 related tables",
+        "type appears across 6 related tables",
+        "payload appears across 6 related tables",
+        "actor appears across 6 related tables",
+        "repo appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.YEAR._2018.",
+        "Preserve exact snake_case column spellings such as public, id, type, payload, actor, repo."
+      ],
+      "profile_id": "github_repos_date_year_2018_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/YEAR/_2018.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.YEAR._2018",
+      "theme_terms": [
+        "public",
+        "payload",
+        "actor",
+        "repo",
+        "other",
+        "org",
+        "created"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "year _2019"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.YEAR._2019 is a table covering actor, repo, created, org. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.YEAR._2019"
+      ],
+      "dimension_columns": [
+        "type",
+        "payload",
+        "other",
+        "id"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "actor appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "created_at appears across 6 related tables",
+        "type appears across 6 related tables",
+        "org appears across 6 related tables",
+        "payload appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.YEAR._2019.",
+        "Preserve exact snake_case column spellings such as actor, repo, created_at, type, org, payload."
+      ],
+      "profile_id": "github_repos_date_year_2019_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/YEAR/_2019.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.YEAR._2019",
+      "theme_terms": [
+        "actor",
+        "repo",
+        "created",
+        "org",
+        "payload",
+        "other",
+        "public"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "year _2020"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.YEAR._2020 is a table covering actor, org, other, created. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.YEAR._2020"
+      ],
+      "dimension_columns": [
+        "type",
+        "id",
+        "other",
+        "payload"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "actor appears across 6 related tables",
+        "org appears across 6 related tables",
+        "type appears across 6 related tables",
+        "id appears across 6 related tables",
+        "other appears across 6 related tables",
+        "created_at appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.YEAR._2020.",
+        "Preserve exact snake_case column spellings such as actor, org, type, id, other, created_at."
+      ],
+      "profile_id": "github_repos_date_year_2020_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/YEAR/_2020.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.YEAR._2020",
+      "theme_terms": [
+        "actor",
+        "org",
+        "other",
+        "created",
+        "repo",
+        "public",
+        "payload"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    },
+    {
+      "abstraction_kind": "table",
+      "aliases": [
+        "year _2023"
+      ],
+      "caveats": [
+        "Contains semi-structured columns that often need exact field validation."
+      ],
+      "compact_semantic_summary": "GITHUB_REPOS_DATE.YEAR._2023 is a table covering org, repo, payload, other. It exposes 9 exact columns. Typical lookup starts from id. Time fields include created_at. Measure columns include created_at.",
+      "confidence": 0.75,
+      "covered_tables": [
+        "GITHUB_REPOS_DATE.YEAR._2023"
+      ],
+      "dimension_columns": [
+        "id",
+        "payload",
+        "type",
+        "other"
+      ],
+      "grain_hint": "One row per logical record; keyed by id; with time anchored by created_at.",
+      "join_anchors": [
+        "org appears across 6 related tables",
+        "id appears across 6 related tables",
+        "repo appears across 6 related tables",
+        "payload appears across 6 related tables",
+        "type appears across 6 related tables",
+        "other appears across 6 related tables"
+      ],
+      "key_columns": [
+        "id"
+      ],
+      "measure_columns": [
+        "created_at"
+      ],
+      "naming_rules": [
+        "Use exact table name GITHUB_REPOS_DATE.YEAR._2023.",
+        "Preserve exact snake_case column spellings such as org, id, repo, payload, type, other."
+      ],
+      "profile_id": "github_repos_date_year_2023_table",
+      "provenance_inputs": [
+        "/Users/minh/work/Spider2/spider2-snow/resource/databases/GITHUB_REPOS_DATE/YEAR/_2023.json"
+      ],
+      "repeated_column_templates": [],
+      "source_column_count": 9,
+      "source_sample_row_count": 5,
+      "table_name": "GITHUB_REPOS_DATE.YEAR._2023",
+      "theme_terms": [
+        "org",
+        "repo",
+        "payload",
+        "other",
+        "created",
+        "actor",
+        "public"
+      ],
+      "time_columns": [
+        "created_at"
+      ]
+    }
+  ],
+  "theme_terms": [
+    "other",
+    "repo",
+    "payload",
+    "created",
+    "actor",
+    "public",
+    "org",
+    "sample",
+    "symlink",
+    "target"
+  ]
+}

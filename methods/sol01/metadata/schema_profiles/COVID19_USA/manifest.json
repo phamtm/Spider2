@@ -1,0 +1,11 @@
+{
+  "artifact_hash": "91ed5cf9af35e9ac6ad7b75432d48b66ca903a0c00d43d79b1f1bf5825ce3b02",
+  "builder_version": "schema-profile-builder-v1",
+  "db": "COVID19_USA",
+  "family_profile_count": 0,
+  "generated_at": "2026-05-15T03:29:06.893582+00:00",
+  "prompt_template_version": "schema-profile-template-v1",
+  "source_schema_hash": "d6a2d8b7ea93573b3621e33161fbacbc4d3e50471601a50eae2fd29624612527",
+  "summarizer_version": "schema-profile-deterministic-v1",
+  "table_profile_count": 285
+}

@@ -20,10 +20,10 @@ from sol01.models import (
     Task,
 )
 from sol01.schema.db_index import load_db_index
-from sol01.schema.large_schema_summaries import load_large_schema_summary_registry
 from sol01.schema.resolver import resolve_schema_context
 from sol01.schema.schema_context import build_available_schema_context
 from sol01.schema.schema_context_cache import SchemaContextCache, build_schema_context_cache
+from sol01.schema.schema_profiles import load_schema_profile_catalog, profile_by_id
 
 DEFAULT_GOLD_TABLE_PATH = REPO_ROOT / "methods" / "gold-tables" / "spider2-snow-gold-tables.jsonl"
 DEFAULT_SCHEMA_CONTEXT_OBJECT_CUTOFF = DEFAULT_SCHEMA_CONTEXT_EVAL_POLICY.object_cutoff
@@ -154,8 +154,9 @@ def run_schema_context_eval(
         gold_tables = _stable_tables(gold_tables_by_instance.get(task.instance_id, ()))
         if not gold_tables:
             continue
-        covered_summary_ids = _covered_summary_ids(gold_tables)
-        if covered_only and not covered_summary_ids:
+        schema_profile_catalog = load_schema_profile_catalog(task.db)
+        covered_profile_ids = _covered_profile_ids(gold_tables, schema_profile_catalog)
+        if covered_only and not covered_profile_ids:
             continue
 
         db_index = dict(db_index_loader(task.db))
@@ -207,8 +208,8 @@ def run_schema_context_eval(
             "instance_id": task.instance_id,
             "db": task.db,
             "gold_tables": gold_tables,
-            "covered_gold_tables": _covered_tables(gold_tables),
-            "covered_summary_ids": covered_summary_ids,
+            "covered_gold_tables": _covered_tables(gold_tables, schema_profile_catalog),
+            "covered_profile_ids": covered_profile_ids,
             "schema_context_object_ids": [item.schema_object.object_id for item in cutoff_objects],
             "context_tables": context_tables,
             "context_gold_tables": context_gold_tables,
@@ -325,7 +326,7 @@ def _build_report(
     return SchemaContextEvalReport(
         task_count=task_count,
         object_cutoff=object_cutoff,
-        covered_task_count=sum(1 for row in rows if row["covered_summary_ids"]),
+        covered_task_count=sum(1 for row in rows if row["covered_profile_ids"]),
         pre_resolver_gold_recall=_mean_float(row["pre_resolver_gold_recall"] for row in rows),
         pre_resolver_any_gold_recall=_mean_bool(row["pre_resolver_any_gold"] for row in rows),
         post_resolver_gold_recall=_mean_float(row["post_resolver_gold_recall"] for row in rows),
@@ -386,16 +387,25 @@ def _schema_object_tables(schema_object: SchemaObject) -> list[str]:
     return tables
 
 
-def _covered_summary_ids(gold_tables: Sequence[str]) -> list[str]:
-    registry = load_large_schema_summary_registry()
+def _covered_profile_ids(
+    gold_tables: Sequence[str],
+    catalog,
+) -> list[str]:
+    profiles = profile_by_id(catalog)
     return sorted(
-        {summary.summary_id for table in gold_tables for summary in registry.match_table_ref(table)}
+        profile_id
+        for profile_id, profile in profiles.items()
+        if any(table in profile.covered_tables for table in gold_tables)
     )
 
 
-def _covered_tables(gold_tables: Sequence[str]) -> list[str]:
-    registry = load_large_schema_summary_registry()
-    return [table for table in gold_tables if registry.match_table_ref(table)]
+def _covered_tables(gold_tables: Sequence[str], catalog) -> list[str]:
+    profiles = profile_by_id(catalog)
+    return [
+        table
+        for table in gold_tables
+        if any(table in profile.covered_tables for profile in profiles.values())
+    ]
 
 
 def _gold_overlap(gold_tables: Sequence[str], candidate_tables: Sequence[str]) -> list[str]:
@@ -530,7 +540,7 @@ def _baseline_recall_regression(
         "post_resolver_gold_recall": post_recall,
         "baseline_post_resolver_gold_recall": baseline_post,
         "missing_gold_tables": row["missing_gold_tables"],
-        "covered_summary_ids": row["covered_summary_ids"],
+        "covered_profile_ids": row["covered_profile_ids"],
     }
 
 
@@ -562,7 +572,7 @@ def _incomplete_recall_regression(row: Mapping[str, Any]) -> dict[str, Any] | No
         "pre_resolver_gold_recall": pre_recall,
         "post_resolver_gold_recall": post_recall,
         "missing_gold_tables": row["missing_gold_tables"],
-        "covered_summary_ids": row["covered_summary_ids"],
+        "covered_profile_ids": row["covered_profile_ids"],
     }
 
 
@@ -575,7 +585,7 @@ def _prompt_size_wins(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]
             "resolved_prompt_chars": row["resolved_prompt_chars"],
             "prompt_chars_saved": row["prompt_chars_saved"],
             "prompt_reduction": row["prompt_reduction"],
-            "covered_summary_ids": row["covered_summary_ids"],
+            "covered_profile_ids": row["covered_profile_ids"],
         }
         for row in rows
         if float(row["prompt_reduction"]) >= DEFAULT_PROMPT_WIN_THRESHOLD

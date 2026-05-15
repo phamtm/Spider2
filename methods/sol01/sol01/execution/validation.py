@@ -295,7 +295,8 @@ def _resolve_column(column: exp.Column, table_schema: TableSchema) -> _ColumnRes
             matched=True,
             ok=False,
             error=(
-                f"Use {_suggested_column_reference(column, exact_match)} instead of {column.sql()}; "
+                f"Use {_suggested_column_reference(column, exact_match)} "
+                f"instead of {column.sql()}; "
                 f"Snowflake uppercases unquoted identifiers to {upper_name}."
             ),
         )

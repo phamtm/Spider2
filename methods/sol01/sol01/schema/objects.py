@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 
 from sol01.infra.policy import DEFAULT_SCHEMA_CONTEXT_POLICY
 from sol01.models import SchemaObject, TableSchema
@@ -32,6 +32,7 @@ def build_schema_objects(
     max_join_candidates_per_column: int = DEFAULT_MAX_JOIN_CANDIDATES_PER_COLUMN,
     family_similarity_threshold: float = DEFAULT_SCHEMA_CONTEXT_POLICY.family_similarity_threshold,
     compact_only: bool = False,
+    compact_table_keys: Collection[str] = (),
 ) -> list[SchemaObject]:
     """Build deterministic schema objects from a database table index.
 
@@ -40,6 +41,10 @@ def build_schema_objects(
     expand selected tables into exact metadata.
     """
     objects: list[SchemaObject] = []
+
+    compact_table_key_set = {
+        table_key.strip() for table_key in compact_table_keys if table_key.strip()
+    }
 
     if compact_only:
         for table_key in sorted(db_index):
@@ -58,6 +63,8 @@ def build_schema_objects(
         table = db_index[table_key]
         table_full_name = _table_full_name(table_key, table)
         objects.append(_table_object(table_key, table, table_full_name))
+        if table_key in compact_table_key_set:
+            continue
         objects.extend(_column_object(ref) for ref in column_refs if ref.table_key == table_key)
         objects.extend(_column_group_objects(table_key, table, table_full_name))
         objects.extend(
@@ -77,7 +84,7 @@ def build_schema_objects(
     )
     objects.extend(
         join_candidate_objects(
-            column_refs,
+            [ref for ref in column_refs if ref.table_key not in compact_table_key_set],
             max_join_candidates=max_join_candidates,
             max_join_candidates_per_column=max_join_candidates_per_column,
         )

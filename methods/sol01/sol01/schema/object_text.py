@@ -5,17 +5,13 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 from sol01.infra.policy import DEFAULT_SCHEMA_RENDER_POLICY
-from sol01.models import SchemaObject
-from sol01.schema.large_schema_summaries import (
-    LargeSchemaSummary,
-    LargeSchemaSummaryRegistry,
-    load_large_schema_summary_registry,
+from sol01.models import SchemaObject, SchemaProfileCatalog
+from sol01.schema.schema_profile_rendering import (
+    render_schema_profile_payload,
+    render_schema_profile_search_terms,
+    render_schema_profile_text,
 )
-from sol01.schema.summary_rendering import (
-    render_summary_payload,
-    render_summary_search_terms,
-    render_summary_text,
-)
+from sol01.schema.schema_profiles import schema_profiles_for_object
 from sol01.schema.utils import _metadata_text, _string_list
 
 MAX_FAMILY_MEMBERS_IN_PROMPT = DEFAULT_SCHEMA_RENDER_POLICY.family_members_in_prompt
@@ -23,18 +19,18 @@ MAX_COLUMNS_IN_PROMPT = DEFAULT_SCHEMA_RENDER_POLICY.table_columns_in_prompt
 MAX_SAMPLE_LITERAL_CHARS = DEFAULT_SCHEMA_RENDER_POLICY.sample_literal_chars
 
 
-def annotate_summary_metadata(
+def annotate_schema_profile_metadata(
     schema_objects: Iterable[SchemaObject],
     *,
-    large_schema_summary_registry: LargeSchemaSummaryRegistry | None = None,
+    schema_profile_catalog: SchemaProfileCatalog | None = None,
 ) -> list[SchemaObject]:
-    """Attach summary metadata to table and family objects when relevant."""
+    """Attach generated schema-profile metadata to table and family objects when relevant."""
 
-    registry = large_schema_summary_registry or load_large_schema_summary_registry()
+    catalog = schema_profile_catalog
     annotated: list[SchemaObject] = []
     for obj in schema_objects:
-        summaries = large_schema_summaries_for_object(obj, registry=registry)
-        if not summaries:
+        profiles = schema_profiles_for_object(obj, catalog=catalog)
+        if not profiles:
             annotated.append(obj)
             continue
         annotated.append(
@@ -42,7 +38,7 @@ def annotate_summary_metadata(
                 update={
                     "metadata": {
                         **obj.metadata,
-                        **summary_metadata(summaries),
+                        **schema_profile_metadata(profiles),
                     }
                 }
             )
@@ -53,9 +49,9 @@ def annotate_summary_metadata(
 def build_object_planning_text(obj: SchemaObject) -> str:
     """Return planner-visible text for one schema object."""
 
-    summaries = summary_payloads(obj)
+    profiles = schema_profile_payloads(obj)
     if obj.object_type == "table":
-        return _table_planning_text(obj, summaries=summaries)
+        return _table_planning_text(obj, profiles=profiles)
     if obj.object_type == "column":
         column_type = _metadata_text(obj, "column_type")
         return _join_sentences(
@@ -78,83 +74,51 @@ def build_object_planning_text(obj: SchemaObject) -> str:
     if obj.object_type == "sample_value":
         literal = _safe_literal(obj.metadata.get("value", obj.name))
         return f"Sample value {obj.table_name}.{obj.column_name} = {literal}."
-    return _family_planning_text(obj, summaries=summaries)
+    return _family_planning_text(obj, profiles=profiles)
 
 
-def object_has_large_schema_summary(obj: SchemaObject) -> bool:
-    return bool(summary_payloads(obj))
+def object_has_schema_profile(obj: SchemaObject) -> bool:
+    return bool(schema_profile_payloads(obj))
 
 
-def summary_payloads(obj: SchemaObject) -> list[dict[str, object]]:
-    raw = obj.metadata.get("large_schema_summaries")
+def schema_profile_payloads(obj: SchemaObject) -> list[dict[str, object]]:
+    raw = obj.metadata.get("schema_profiles")
     if not isinstance(raw, list):
         return []
     return [item for item in raw if isinstance(item, dict)]
 
 
-def summary_metadata(summaries: list[LargeSchemaSummary]) -> dict[str, object]:
+def schema_profile_metadata(profiles: list[object]) -> dict[str, object]:
     return {
-        "large_schema_summaries": [
+        "schema_profiles": [
             {
-                **render_summary_payload(summary),
-                "text": render_summary_text([summary]),
-                "search_terms": render_summary_search_terms([summary]),
+                **render_schema_profile_payload(profile),
+                "text": render_schema_profile_text([profile]),
+                "search_terms": render_schema_profile_search_terms([profile]),
             }
-            for summary in summaries
+            for profile in profiles
         ],
-        "summary_ids": [summary.summary_id for summary in summaries],
-        "summary_aliases": _stable_unique(
-            alias for summary in summaries for alias in summary.aliases
+        "schema_profile_ids": [str(profile.profile_id) for profile in profiles],
+        "schema_profile_aliases": _stable_unique(
+            alias for profile in profiles for alias in getattr(profile, "aliases", [])
         ),
     }
 
 
-def large_schema_summaries_for_object(
-    obj: SchemaObject,
-    *,
-    registry: LargeSchemaSummaryRegistry | None = None,
-) -> list[LargeSchemaSummary]:
-    if obj.object_type == "table":
-        refs = _table_ref_candidates(obj)
-    elif obj.object_type == "family":
-        refs = _string_list(obj.metadata.get("member_table_refs"))
-        canonical = _metadata_text(obj, "canonical_member")
-        if canonical:
-            refs = [canonical, *refs]
-    else:
-        return []
-    return large_schema_summaries_for_refs(refs, registry=registry)
-
-
-def large_schema_summaries_for_refs(
-    refs: Iterable[str],
-    *,
-    registry: LargeSchemaSummaryRegistry | None = None,
-) -> list[LargeSchemaSummary]:
-    registry = registry or load_large_schema_summary_registry()
-    by_id: dict[str, LargeSchemaSummary] = {}
-    for ref in refs:
-        if ref.count(".") not in {1, 2}:
-            continue
-        for summary in registry.match_table_ref(ref):
-            by_id.setdefault(summary.summary_id, summary)
-    return [by_id[summary_id] for summary_id in sorted(by_id)]
-
-
-def render_summary_text_from_payloads(payloads: list[dict[str, object]]) -> str:
+def render_schema_profile_text_from_payloads(payloads: list[dict[str, object]]) -> str:
     if not payloads:
         return ""
     parts = [str(payload.get("text") or "").strip() for payload in payloads]
     return _join_sentences(part for part in parts if part)
 
 
-def _table_planning_text(obj: SchemaObject, *, summaries: list[dict[str, object]]) -> str:
+def _table_planning_text(obj: SchemaObject, *, profiles: list[dict[str, object]]) -> str:
     table_ref = obj.table_name or obj.name
-    if summaries:
+    if profiles:
         return _join_sentences(
             [
                 f"Table {table_ref}.",
-                render_summary_text_from_payloads(summaries),
+                render_schema_profile_text_from_payloads(profiles),
             ]
         )
     columns = _column_summaries(obj.metadata.get("columns"))
@@ -173,16 +137,16 @@ def _table_planning_text(obj: SchemaObject, *, summaries: list[dict[str, object]
     )
 
 
-def _family_planning_text(obj: SchemaObject, *, summaries: list[dict[str, object]]) -> str:
+def _family_planning_text(obj: SchemaObject, *, profiles: list[dict[str, object]]) -> str:
     common_columns = _string_list(obj.metadata.get("common_columns"))
     canonical = _metadata_text(obj, "canonical_member")
-    if summaries:
+    if profiles:
         return _join_sentences(
             [
                 f"Table family {obj.name}.",
                 f"Canonical member: {canonical}." if canonical else "",
                 _field_list("Common columns", common_columns),
-                render_summary_text_from_payloads(summaries),
+                render_schema_profile_text_from_payloads(profiles),
             ]
         )
     members = _string_list(obj.metadata.get("member_table_refs"))
@@ -217,22 +181,6 @@ def _column_summaries(raw_columns: object) -> list[dict[str, str]]:
     return summaries
 
 
-def _table_ref_candidates(obj: SchemaObject) -> list[str]:
-    candidates = [
-        obj.table_name,
-        _metadata_text(obj, "full_name"),
-        _metadata_text(obj, "table_full_name"),
-    ]
-    database = _metadata_text(obj, "database_name")
-    schema_name = _metadata_text(obj, "schema_name")
-    short_name = _metadata_text(obj, "short_name")
-    if schema_name and short_name:
-        candidates.append(
-            f"{database}.{schema_name}.{short_name}" if database else f"{schema_name}.{short_name}"
-        )
-    return _stable_unique([candidate for candidate in candidates if candidate])
-
-
 def _side_ref(side: dict[str, object]) -> str:
     table_name = str(side.get("table_full_name") or "").strip()
     column_name = str(side.get("column_name") or "").strip()
@@ -258,10 +206,10 @@ def _mapping(value: object) -> dict[str, object]:
 
 
 def _safe_literal(value: object) -> str:
-    text = str(value).strip().replace("\n", " ").replace("\r", " ")
+    text = " ".join(str(value).split())
     if len(text) <= MAX_SAMPLE_LITERAL_CHARS:
         return repr(text)
-    return repr(f"{text[: MAX_SAMPLE_LITERAL_CHARS - 3]}...")
+    return repr(text[: MAX_SAMPLE_LITERAL_CHARS - 3] + "...")
 
 
 def _field_list(label: str, values: list[str]) -> str:
@@ -270,22 +218,25 @@ def _field_list(label: str, values: list[str]) -> str:
     return f"{label}: {', '.join(values)}."
 
 
+def _bounded_list(values: Iterable[str], limit: int) -> list[str]:
+    bounded = [value for value in values if value]
+    if len(bounded) <= limit:
+        return bounded
+    hidden = len(bounded) - limit
+    return [*bounded[:limit], f"... {hidden} more"]
+
+
 def _join_sentences(parts: Iterable[str]) -> str:
-    return " ".join(part.strip() for part in parts if part.strip())
-
-
-def _bounded_list(values: list[str], limit: int) -> list[str]:
-    if len(values) <= limit:
-        return values
-    return [*values[:limit], f"... {len(values) - limit} more"]
+    return " ".join(part.strip() for part in parts if part and part.strip())
 
 
 def _stable_unique(values: Iterable[str]) -> list[str]:
     seen: set[str] = set()
-    unique: list[str] = []
+    ordered: list[str] = []
     for value in values:
-        if value in seen:
+        normalized = value.strip().casefold()
+        if not normalized or normalized in seen:
             continue
-        seen.add(value)
-        unique.append(value)
-    return unique
+        seen.add(normalized)
+        ordered.append(value.strip())
+    return ordered

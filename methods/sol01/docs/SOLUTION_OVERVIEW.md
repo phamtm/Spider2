@@ -241,21 +241,24 @@ Included sample values are schema metadata evidence. If a question mentions an
 included sample value, the solver can keep that value tied to its native column
 instead of converting it into an invented rule.
 
-## Curated Large-Schema Summaries
+## Generated Schema Profiles
 
-Curated summaries live in
-`methods/sol01/metadata/large_schema_summaries.json`. They compact repeated
-table families and wide repeated column groups before planner selection and
-resolver expansion.
+Generated per-DB schema profiles live under
+`methods/sol01/metadata/schema_profiles/<DB>/`. They compact repeated table
+families and wide tables before planner selection and resolver expansion.
 
-Add or edit a summary when a schema family has a stable shape that should be
-represented as one logical object. Each entry defines:
+Build or refresh them from raw Spider2 schema metadata with:
 
-- `summary_id`: lower_snake_case stable ID
-- `schema_copies`: database/schema locations covered by the same shape
-- `match`: either exact `table_names` or a regex `table_pattern`, optionally
-  with an inclusive suffix range
-- `purpose` and `grain`
+```bash
+uv run sol01 build-schema-profiles --db <DB>
+uv run sol01 build-schema-profiles --all
+```
+
+Each database gets:
+
+- `catalog.json`: generated table and family abstractions for that DB only
+- `manifest.json`: provenance, versions, source schema hash, generated-at
+  timestamp, and artifact hash
 - stable columns, repeated-column rules, inclusive ranges, quoting rules,
   examples, and aliases
 

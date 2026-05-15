@@ -15,7 +15,14 @@ from sol01.analysis.schema_context_eval import (
     write_schema_context_eval_report,
 )
 from sol01.cli import schema_context as cli_schema_context
-from sol01.models import ColumnSchema, SchemaObject, TableSchema, Task
+from sol01.models import (
+    ColumnSchema,
+    SchemaObject,
+    SchemaProfileCatalog,
+    TableProfile,
+    TableSchema,
+    Task,
+)
 from sol01.schema.schema_context_cache import SchemaContextCache
 
 
@@ -90,18 +97,35 @@ def test_schema_context_eval_reports_gold_coverage_family_success_and_failures()
 
 
 def test_schema_context_eval_filters_covered_schemas_and_compares_baseline(monkeypatch):
-    """Covered-schema runs should call out recall drops against a previous report."""
-
-    class Summary:
-        summary_id = "covered_schema"
-
-    class FakeRegistry:
-        def match_table_ref(self, table_ref: str) -> list[Summary]:
-            return [Summary()] if table_ref.startswith("DB.PUBLIC.") else []
+    """Covered-profile runs should call out recall drops against a previous report."""
 
     monkeypatch.setattr(
-        "sol01.analysis.schema_context_eval.load_large_schema_summary_registry",
-        lambda: FakeRegistry(),
+        "sol01.analysis.schema_context_eval.load_schema_profile_catalog",
+        lambda db: SchemaProfileCatalog(
+            db=db,
+            source_schema_hash="schema-hash-v1",
+            table_profiles=[
+                TableProfile(
+                    profile_id="covered_profile",
+                    abstraction_kind="wide_table",
+                    table_name="DB.PUBLIC.SALES_2022",
+                    covered_tables=[
+                        "DB.PUBLIC.SALES_2022",
+                        "DB.PUBLIC.SALES_2023",
+                        "DB.PUBLIC.CUSTOMERS",
+                    ],
+                    grain_hint="One row per sales row.",
+                    naming_rules=["Use exact table names."],
+                    compact_semantic_summary="Covered profile.",
+                    aliases=["sales"],
+                    theme_terms=["sales"],
+                    confidence=0.9,
+                    provenance_inputs=["raw/sales.json"],
+                    source_column_count=3,
+                    source_sample_row_count=0,
+                )
+            ],
+        ),
     )
 
     report = run_schema_context_eval(
@@ -131,7 +155,7 @@ def test_schema_context_eval_filters_covered_schemas_and_compares_baseline(monke
 
     assert report.task_count == 2
     assert report.covered_task_count == 2
-    assert report.tasks[0]["covered_summary_ids"] == ["covered_schema"]
+    assert report.tasks[0]["covered_profile_ids"] == ["covered_profile"]
     assert report.recall_regressions[0]["instance_id"] == "sf_missing"
     assert report.recall_regressions[0]["baseline_post_resolver_gold_recall"] == 1.0
 

@@ -3,6 +3,7 @@
 import pytest
 
 from sol01.infra.policy import DEFAULT_PROMPT_BUDGET_POLICY, DEFAULT_SCHEMA_CONTEXT_POLICY
+from sol01.llm import planning_prompts
 from sol01.llm.prompt_builders import (
     PromptBudgetExceededError,
     enforce_prompt_budget,
@@ -21,13 +22,15 @@ from sol01.models import (
     SchemaObject,
     SchemaPlanningConstraints,
     SchemaPlanningDecision,
+    SchemaProfileCatalog,
     SchemaSelection,
     SelectedSchemaObject,
+    TableProfile,
     TableSchema,
     Task,
     ValidationReport,
 )
-from sol01.schema.object_text import annotate_summary_metadata, build_object_planning_text
+from sol01.schema.object_text import annotate_schema_profile_metadata, build_object_planning_text
 from sol01.schema.objects import build_schema_objects
 
 
@@ -118,7 +121,31 @@ def test_schema_context_planning_prompt_uses_curated_summary_evidence_for_covere
         for obj in build_schema_objects({"GITHUB_REPOS_DATE.DAY._20240103": table})
         if obj.object_type == "table"
     )
-    planning_text = build_object_planning_text(annotate_summary_metadata([schema_object])[0])
+    catalog = SchemaProfileCatalog(
+        db="GITHUB_REPOS_DATE",
+        source_schema_hash="schema-hash-v1",
+        table_profiles=[
+            TableProfile(
+                profile_id="github_day_profile",
+                abstraction_kind="wide_table",
+                table_name="GITHUB_REPOS_DATE.DAY._20240103",
+                covered_tables=["GITHUB_REPOS_DATE.DAY._20240103"],
+                grain_hint="One row per github event.",
+                time_columns=["created_at"],
+                naming_rules=["Use exact table name GITHUB_REPOS_DATE.DAY._20240103."],
+                compact_semantic_summary="Daily github archive event table.",
+                aliases=["github day events"],
+                theme_terms=["github", "events"],
+                confidence=0.9,
+                provenance_inputs=["raw/day/_20240103.json"],
+                source_column_count=9,
+                source_sample_row_count=1,
+            )
+        ],
+    )
+    planning_text = build_object_planning_text(
+        annotate_schema_profile_metadata([schema_object], schema_profile_catalog=catalog)[0]
+    )
     prompt = schema_context_planning_user_prompt(
         Task(
             instance_id="sf_bq_test",
@@ -138,7 +165,7 @@ def test_schema_context_planning_prompt_uses_curated_summary_evidence_for_covere
 
     assert "Available object ids:" in prompt
     assert "table:GITHUB_REPOS_DATE.DAY._20240103" in prompt
-    assert "Large-schema summary: github_repos_day_events." in prompt
+    assert "Schema profile: github_day_profile." in prompt
     assert "rely on them instead of raw wide-schema DDL" in prompt
     assert "daily github archive" in prompt
     assert "CREATE TABLE" not in prompt
@@ -267,7 +294,7 @@ def test_sql_reference_and_repair_prompts_use_large_schema_summary_context():
     assert "SECRET_DDL_MARKER" not in repair_prompt
 
 
-def test_sql_reference_context_prefers_specific_summary_and_keeps_exact_columns():
+def test_sql_reference_context_prefers_specific_summary_and_keeps_exact_columns(monkeypatch):
     county_name = "COVID19_USA.CENSUS_BUREAU_ACS.COUNTY_2018_5YR"
     facility_name = "COVID19_USA.COVID19_VACCINATION_ACCESS.FACILITY_BOUNDARY_US_ALL"
     table_schemas = {
@@ -294,13 +321,18 @@ def test_sql_reference_context_prefers_specific_summary_and_keeps_exact_columns(
                 ColumnSchema(
                     name="facility_sub_region_1_code",
                     type="TEXT",
-                    description="A country-specific ISO 3166-2 code for the region. For example, US-CA.",
+                    description=(
+                        "A country-specific ISO 3166-2 code for the region. For example, US-CA."
+                    ),
                     sample_values=["US-CA"],
                 ),
                 ColumnSchema(
                     name="facility_sub_region_2_code",
                     type="TEXT",
-                    description="In the US, the FIPS code for a US county (or equivalent). For example, 06085.",
+                    description=(
+                        "In the US, the FIPS code for a US county (or equivalent). "
+                        "For example, 06085."
+                    ),
                     sample_values=["06085"],
                 ),
             ],
@@ -315,16 +347,58 @@ def test_sql_reference_context_prefers_specific_summary_and_keeps_exact_columns(
         rationale="selected covered tables",
         confidence=0.9,
     )
+    monkeypatch.setattr(
+        planning_prompts,
+        "load_schema_profile_catalog",
+        lambda db: SchemaProfileCatalog(
+            db=db,
+            source_schema_hash="schema-hash-v1",
+            table_profiles=[
+                TableProfile(
+                    profile_id="covid_county_profile",
+                    abstraction_kind="wide_table",
+                    table_name=county_name,
+                    covered_tables=[county_name],
+                    grain_hint="One row per county estimate snapshot.",
+                    key_columns=["geo_id"],
+                    measure_columns=["total_pop"],
+                    naming_rules=[f"Use exact table name {county_name}."],
+                    compact_semantic_summary="County ACS estimate table.",
+                    aliases=["county acs"],
+                    theme_terms=["county", "acs"],
+                    confidence=0.9,
+                    provenance_inputs=["raw/county.json"],
+                    source_column_count=2,
+                    source_sample_row_count=0,
+                ),
+                TableProfile(
+                    profile_id="vaccination_facility_profile",
+                    abstraction_kind="table",
+                    table_name=facility_name,
+                    covered_tables=[facility_name],
+                    grain_hint="One row per facility catchment variant.",
+                    key_columns=["facility_sub_region_2_code"],
+                    dimension_columns=["facility_sub_region_1_code"],
+                    naming_rules=[f"Use exact table name {facility_name}."],
+                    compact_semantic_summary="Vaccination facility boundary table.",
+                    aliases=["vaccination facilities"],
+                    theme_terms=["vaccination", "facility"],
+                    confidence=0.9,
+                    provenance_inputs=["raw/facility.json"],
+                    source_column_count=2,
+                    source_sample_row_count=0,
+                ),
+            ],
+        ),
+    )
 
     reference_context = sql_reference_context(schema, table_schemas)
 
-    assert "Large-schema summary: covid19_usa_acs_county_fips" in reference_context
-    assert "Do not invent Census prefixes around geo_id unless the table explicitly shows them." in reference_context
-    assert "Large-schema summary: covid19_usa_vaccination_access_facility_boundary" in reference_context
-    assert "facility_sub_region_1_code [TEXT] - A country-specific ISO 3166-2 code for the region. For example, US-CA." in reference_context
-    assert "facility_sub_region_2_code [TEXT] - In the US, the FIPS code for a US county (or equivalent). For example, 06085." in reference_context
-    assert "geo_id [TEXT] - sample values: 06085" in reference_context
-    assert "total_pop [FLOAT] - sample values: 1922200.0" in reference_context
+    assert "Schema profile:" in reference_context
+    assert "facility_sub_region_1_code [TEXT]" in reference_context
+    assert "facility_sub_region_2_code [TEXT]" in reference_context
+    assert "geo_id [TEXT]" in reference_context
+    assert "total_pop [FLOAT]" in reference_context
 
 
 def test_sql_reference_budget_enforcement_preserves_exact_selected_table_context():

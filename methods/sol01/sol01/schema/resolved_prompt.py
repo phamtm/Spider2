@@ -14,6 +14,7 @@ from sol01.schema.family_resolution import (
     physical_tables_for_object,
     stable_sorted_tables,
 )
+from sol01.schema.schema_profiles import load_schema_profile_catalog
 from sol01.schema.utils import _string_list
 
 MAX_FAMILY_MEMBERS_IN_PROMPT = DEFAULT_SCHEMA_RENDER_POLICY.family_members_in_prompt
@@ -41,6 +42,8 @@ def render_prompt_context(
         *(bullet_lines(allowed_tables) if allowed_tables else ["- none resolved"]),
         "",
     ]
+    schema_profile_catalog = load_schema_profile_catalog(db)
+    primary_tables = _primary_table_names(selected_objects, object_by_id)
     rendered_tables: set[str] = set()
 
     for selected in selected_objects:
@@ -53,6 +56,7 @@ def render_prompt_context(
                     schema_object,
                     table_schemas,
                     resolution=family_resolution_entry(selected.object_id, diagnostics),
+                    schema_profile_catalog=schema_profile_catalog,
                 )
             )
             lines.append("")
@@ -61,7 +65,13 @@ def render_prompt_context(
             if table_name in rendered_tables or table_name not in table_schemas:
                 continue
             rendered_tables.add(table_name)
-            lines.extend(render_table(table_schemas[table_name]))
+            lines.extend(
+                render_table(
+                    table_schemas[table_name],
+                    detail_level="full" if table_name in primary_tables else "compact",
+                    schema_profile_catalog=schema_profile_catalog,
+                )
+            )
             lines.append("")
 
     family_tables = {
@@ -76,7 +86,13 @@ def render_prompt_context(
         if table_name in family_tables:
             continue
         rendered_tables.add(table_name)
-        lines.extend(render_table(table_schemas[table_name]))
+        lines.extend(
+            render_table(
+                table_schemas[table_name],
+                detail_level="compact",
+                schema_profile_catalog=schema_profile_catalog,
+            )
+        )
         lines.append("")
 
     evidence_lines = schema_context_evidence_lines(schema_context_evidence)
@@ -97,6 +113,7 @@ def render_family(
     table_schemas: Mapping[str, TableSchema],
     *,
     resolution: Mapping[str, object] | None = None,
+    schema_profile_catalog=None,
 ) -> list[str]:
     """Render one logical family with one canonical structure and compact members."""
 
@@ -112,6 +129,9 @@ def render_family(
         f"Canonical structure: {canonical}",
         f"Family members: {member_count} total",
     ]
+    profile_lines = _schema_profile_lines(schema_object)
+    if profile_lines:
+        lines.extend(profile_lines)
     if symbolic:
         budget = resolution.get("member_expansion_budget", MAX_FAMILY_MEMBERS_TO_EXPAND)
         matched = resolution.get("matched_member_count", member_count)
@@ -130,7 +150,14 @@ def render_family(
         lines.append("Detected suffix dimensions:")
         lines.extend(bullet_lines(suffix_summary))
     if canonical_schema is not None:
-        lines.extend(render_table(canonical_schema, header="Canonical table DDL and columns"))
+        lines.extend(
+            render_table(
+                canonical_schema,
+                header="Canonical table DDL and columns",
+                detail_level="full" if not symbolic else "compact",
+                schema_profile_catalog=schema_profile_catalog,
+            )
+        )
     return lines
 
 
@@ -162,10 +189,21 @@ def resolved_family_members(
     return family_member_refs(schema_object)
 
 
-def render_table(table: TableSchema, *, header: str | None = None) -> list[str]:
+def render_table(
+    table: TableSchema,
+    *,
+    header: str | None = None,
+    detail_level: str = "full",
+    schema_profile_catalog=None,
+) -> list[str]:
     """Render one table schema for SQL generation."""
 
-    return render_exact_table_reference(table, header=header)
+    return render_exact_table_reference(
+        table,
+        header=header,
+        detail_level=detail_level,
+        schema_profile_catalog=schema_profile_catalog,
+    )
 
 
 def schema_context_evidence_lines(
@@ -256,3 +294,38 @@ def bullet_lines(values: Iterable[str]) -> list[str]:
     """Prefix strings with markdown list markers."""
 
     return [f"- {value}" for value in values]
+
+
+def _schema_profile_lines(schema_object: SchemaObject) -> list[str]:
+    raw_profiles = schema_object.metadata.get("schema_profiles")
+    if not isinstance(raw_profiles, list):
+        return []
+    lines: list[str] = []
+    for raw_profile in raw_profiles[:2]:
+        if not isinstance(raw_profile, dict):
+            continue
+        profile_id = str(raw_profile.get("profile_id") or "").strip()
+        summary = str(raw_profile.get("compact_semantic_summary") or "").strip()
+        abstraction_kind = str(raw_profile.get("abstraction_kind") or "").strip()
+        if profile_id:
+            lines.append(f"Schema profile: {profile_id}")
+        if abstraction_kind:
+            lines.append(f"Abstraction kind: {abstraction_kind}")
+        if summary:
+            lines.append(f"Summary: {summary}")
+    return lines
+
+
+def _primary_table_names(
+    selected_objects: Sequence[SelectedSchemaObject],
+    object_by_id: Mapping[str, SchemaObject],
+) -> set[str]:
+    primary_roles = {"primary", "filter", "metric", "dimension"}
+    tables: set[str] = set()
+    for selected in selected_objects:
+        schema_object = object_by_id.get(selected.object_id)
+        if schema_object is None or selected.role not in primary_roles:
+            continue
+        for table_name in physical_tables_for_object(schema_object):
+            tables.add(table_name)
+    return tables

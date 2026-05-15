@@ -20,15 +20,59 @@ from sol01.cli.common import format_rate
 from sol01.cli.run import load_run_tasks
 from sol01.infra.config import DEFAULT_DOTENV_PATH, SchemaContextConfig
 from sol01.output.output import OUTPUTS_ROOT, ensure_run_paths
+from sol01.schema.index import SNOW_METADATA_ROOT
 from sol01.schema.schema_context_cache import (
     DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT,
     prewarm_schema_context_caches,
 )
+from sol01.schema.schema_profiles import (
+    DEFAULT_SCHEMA_PROFILE_ROOT,
+    build_schema_profiles,
+)
 
 
 def register(app: typer.Typer) -> None:
+    app.command("build-schema-profiles")(build_schema_profiles_command)
     app.command("prewarm-schema-context")(prewarm_schema_context_command)
     app.command("schema-context-eval")(schema_context_eval_command)
+
+
+def build_schema_profiles_command(
+    dbs: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--db",
+            help="Database name to build. Repeat for multiple databases.",
+        ),
+    ] = None,
+    all_dbs: Annotated[
+        bool,
+        typer.Option(
+            "--all/--no-all",
+            help="Build profiles for every database under Spider2 raw metadata.",
+        ),
+    ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force/--no-force",
+            help="Rewrite profile artifacts even when the source schema and versions match.",
+        ),
+    ] = False,
+) -> None:
+    """Build generated per-database schema-profile artifacts from raw metadata only."""
+
+    targets = list(dbs or [])
+    if all_dbs:
+        targets.extend(path.name for path in sorted(SNOW_METADATA_ROOT.iterdir()) if path.is_dir())
+    target_dbs = sorted({db.strip() for db in targets if db.strip()})
+    if not target_dbs:
+        raise typer.BadParameter("Pass at least one --db value or use --all.")
+
+    results = build_schema_profiles(target_dbs, force=force)
+    changed = sum(1 for result in results if result.changed)
+    typer.echo(f"Built {len(results)} schema profile catalog(s) into {DEFAULT_SCHEMA_PROFILE_ROOT}")
+    typer.echo(f"Changed catalogs: {changed}")
 
 
 def prewarm_schema_context_command(

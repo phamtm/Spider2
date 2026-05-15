@@ -177,9 +177,9 @@ The runtime code follows the same split:
 - `sol01/llm/sql_prompts.py`: SQL generation and repair prompts
 - `sol01/recovery_signals.py`: schema-expansion trigger detection
 
-Large-schema summaries keep very wide or repeated schemas compact. For ordinary
-schemas, the planner works from the full logical metadata object set instead of
-from a ranked shortlist.
+Generated schema profiles keep very wide or repeated schemas compact. For
+ordinary schemas, the planner works from the full logical metadata object set
+instead of from a ranked shortlist.
 
 Cache layout:
 
@@ -190,28 +190,28 @@ Cache layout:
 - `methods/sol01/.cache/schema_context_cache/<DB>/versions/<cache_key>/`:
   `manifest.json` and `objects.jsonl`
 
-Large-schema summaries live in
-`methods/sol01/metadata/large_schema_summaries.json`. Add or edit one summary
-when a schema has repeated table families or very wide repeated column groups
-that should be represented compactly. Each summary must define:
+Generated schema profiles live under
+`methods/sol01/metadata/schema_profiles/<DB>/catalog.json` and
+`methods/sol01/metadata/schema_profiles/<DB>/manifest.json`.
 
-- `summary_id`: lower_snake_case stable ID
-- `schema_copies`: database/schema locations covered by the same shape
-- `match`: exact `table_names` or a regex `table_pattern`, optionally with an
-  inclusive suffix range
-- `purpose`, `grain`, stable columns, repeated-column rules, quoting rules,
-  examples, and aliases
+Build or refresh them with:
 
-Do not include benchmark answers, gold SQL, instance IDs, or question-specific
-hints. Registry validation rejects those tokens, and the schema-context cache
-key includes the summary registry hash, so summary edits naturally create a new
-cache version.
+```bash
+uv run sol01 build-schema-profiles --db <DB>
+uv run sol01 build-schema-profiles --all
+```
+
+Each per-DB catalog stores generated table and family abstractions. Each
+manifest records provenance such as the source schema hash, builder version,
+summarizer version, template version, generated timestamp, and artifact hash.
+Profile validation rejects benchmark IDs, gold SQL, trace-like text, and
+question-shaped leakage.
 
 Runtime schema-context settings can be set in the shell or `methods/sol01/.env`:
 
 - `SOL01_SCHEMA_FAMILY_SIMILARITY_THRESHOLD`, default `0.82`
 - `SOL01_SCHEMA_MAX_LINKED_DOC_CHARS`, default `6000`
-- `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `24000`
+- `SOL01_SCHEMA_MAX_PROMPT_CHARS`, default `60000`
 
 Those env-configured values override the defaults from `infra/policy.py`. The
 remaining prompt and render heuristics stay code-defaulted on purpose so the

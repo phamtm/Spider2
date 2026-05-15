@@ -24,10 +24,11 @@ This note records verification for the schema-context selection work tracked by
 - Runtime code imports offline gold-table labels only through the
   `schema-context-eval` CLI path. The coordinator, planner, SQL generation, and
   repair paths do not import or load gold-table data.
-- Curated large-schema summaries live in
-  `methods/sol01/metadata/large_schema_summaries.json`. Edits are validated by
-  `sol01/schema/large_schema_summaries.py`, and the summary registry hash is
-  part of the schema-context cache key.
+- Generated schema profiles live under
+  `methods/sol01/metadata/schema_profiles/<DB>/`. Build them with
+  `uv run sol01 build-schema-profiles --db <DB>` or `--all`. The per-DB
+  catalog hash is part of the schema-context cache key, so profile changes
+  naturally create a new cache version.
 
 ## Focused Tests
 

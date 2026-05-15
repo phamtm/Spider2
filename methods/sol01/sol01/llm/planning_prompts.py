@@ -16,7 +16,7 @@ from sol01.models import (
     Task,
 )
 from sol01.schema.exact_reference_context import render_exact_sql_reference_context
-from sol01.schema.large_schema_summaries import load_large_schema_summary_registry
+from sol01.schema.schema_profiles import load_schema_profile_catalog
 
 
 def sql_reference_context(
@@ -29,7 +29,7 @@ def sql_reference_context(
         db=schema.db,
         expanded_tables=schema.expanded_tables,
         table_schemas=table_schemas,
-        large_schema_summary_registry=load_large_schema_summary_registry(),
+        schema_profile_catalog=load_schema_profile_catalog(schema.db),
     )
 
 
@@ -153,11 +153,12 @@ def _format_schema_context_planning_user_prompt(
         "Available object ids:\n"
         f"{json.dumps(available_ids, indent=2)}\n\n"
         "Select only logical schema objects from the planner-visible schema metadata above. "
-        "This is already the complete selector input for this database: either curated "
-        "large-schema summaries or the full logical metadata object set. "
+        "This is already the complete selector input for this database: either generated "
+        "schema profiles or the full logical metadata object set. "
         "Do not invent object ids, table names, column names, joins, families, suffixes, "
         "versions, or date constraints that are not grounded in the question, documents, "
-        "or planner-visible schema metadata. When summaries are present, rely on them "
+        "or planner-visible schema metadata. "
+        "When compact schema profiles are present, rely on them "
         "instead of raw wide-schema DDL.\n\n"
         "Return a SchemaPlanningDecision. Populate selected_objects with object ids from "
         "Available object ids and roles such as primary, supporting, join, filter, metric, "

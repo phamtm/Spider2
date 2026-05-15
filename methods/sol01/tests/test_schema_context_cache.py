@@ -2,29 +2,39 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
-from sol01.models import ColumnSchema, TableSchema
-from sol01.schema.large_schema_summaries import load_large_schema_summary_registry
+from sol01.infra.fs_cache import stable_hash, write_json
+from sol01.models import (
+    ColumnSchema,
+    SchemaProfileCatalog,
+    SchemaProfileManifest,
+    TableProfile,
+    TableSchema,
+)
 from sol01.schema.schema_context_cache import (
     SCHEMA_CONTEXT_CACHE_KEY_LENGTH,
     SchemaContextCacheError,
     SchemaContextCacheLockTimeout,
-    _covered_table_keys,
     _version_dir,
     build_schema_context_cache,
     load_current_schema_context_cache,
     schema_context_cache_key,
     schema_source_hash,
 )
+from sol01.schema.schema_profiles import (
+    SCHEMA_PROFILE_BUILDER_VERSION,
+    SCHEMA_PROFILE_SUMMARIZER_VERSION,
+    SCHEMA_PROFILE_TEMPLATE_VERSION,
+    compact_table_keys_for_profiles,
+    schema_profile_catalog_path,
+    schema_profile_manifest_path,
+)
 
 
 def _db_index(*, extra_column: bool = False) -> dict[str, TableSchema]:
-    """Return a compact schema index with table, column, join, and sample chunks."""
-
     order_columns = [
         ColumnSchema(name="ORDER_ID", type="TEXT"),
         ColumnSchema(name="CUSTOMER_ID", type="TEXT"),
@@ -40,7 +50,7 @@ def _db_index(*, extra_column: bool = False) -> dict[str, TableSchema]:
             full_name="DB.PUBLIC.ORDERS",
             ddl="",
             columns=order_columns,
-            sample_rows=[{"STATUS": "open"}, {"STATUS": "closed"}, {"STATUS": "open"}],
+            sample_rows=[{"STATUS": "open"}, {"STATUS": "closed"}],
             searchable_text="orders",
         ),
         "DB.PUBLIC.CUSTOMERS": TableSchema(
@@ -67,65 +77,93 @@ def _build(tmp_path: Path, **kwargs):
     )
 
 
-def _write_custom_summary_registry(path: Path) -> Path:
-    path.write_text(
-        json.dumps(
-            {
-                "summaries": [
-                    {
-                        "summary_id": "orders_custom_summary",
-                        "schema_copies": [
-                            {"database": "DB", "schema_name": "PUBLIC"},
-                        ],
-                        "match": {"table_names": ["ORDERS"]},
-                        "purpose": "Custom order lifecycle fact table.",
-                        "grain": "One row per order in the custom registry.",
-                        "stable_columns": ["ORDER_ID", "CUSTOMER_ID", "STATUS"],
-                        "repeated_column_rules": ["No repeated physical table family."],
-                        "quote_spelling_rules": ["Use ORDERS exactly as spelled."],
-                        "examples": ["ORDERS", "ORDERS", "ORDERS"],
-                        "aliases": ["custom order registry", "order lifecycle"],
-                    }
-                ]
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+def _write_schema_profile(
+    profile_root: Path,
+    *,
+    db: str = "DB",
+    source_schema_hash: str = "schema-hash-v1",
+    summary: str = "Order lifecycle fact table.",
+) -> None:
+    schema_profile_catalog_path(db, profile_root=profile_root).parent.mkdir(
+        parents=True, exist_ok=True
     )
-    return path
+    catalog = SchemaProfileCatalog(
+        db=db,
+        source_schema_hash=source_schema_hash,
+        table_profiles=[
+            TableProfile(
+                profile_id="orders_profile",
+                abstraction_kind="wide_table",
+                table_name="DB.PUBLIC.ORDERS",
+                covered_tables=["DB.PUBLIC.ORDERS"],
+                grain_hint="One row per order.",
+                key_columns=["ORDER_ID", "CUSTOMER_ID"],
+                dimension_columns=["STATUS"],
+                naming_rules=["Use exact table name DB.PUBLIC.ORDERS."],
+                compact_semantic_summary=summary,
+                aliases=["orders"],
+                theme_terms=["orders", "status"],
+                confidence=0.9,
+                provenance_inputs=["raw/orders.json"],
+                source_column_count=3,
+                source_sample_row_count=2,
+            )
+        ],
+    )
+    artifact_hash = stable_hash(catalog.model_dump(mode="json"))
+    manifest = SchemaProfileManifest(
+        db=db,
+        source_schema_hash=source_schema_hash,
+        builder_version=SCHEMA_PROFILE_BUILDER_VERSION,
+        summarizer_version=SCHEMA_PROFILE_SUMMARIZER_VERSION,
+        prompt_template_version=SCHEMA_PROFILE_TEMPLATE_VERSION,
+        generated_at="2026-05-15T00:00:00+00:00",
+        artifact_hash=artifact_hash,
+        table_profile_count=1,
+        family_profile_count=0,
+    )
+    write_json(
+        schema_profile_catalog_path(db, profile_root=profile_root),
+        catalog.model_dump(mode="json"),
+    )
+    write_json(
+        schema_profile_manifest_path(db, profile_root=profile_root),
+        manifest.model_dump(mode="json"),
+    )
 
 
-def test_builds_loads_and_validates_schema_context_cache_for_one_database(tmp_path):
-    index = _build(tmp_path)
+def test_builds_loads_and_validates_schema_context_cache_for_one_database_without_profiles(
+    tmp_path,
+):
+    cache = _build(tmp_path)
 
-    assert index.cache_dir.exists()
-    assert {path.name for path in index.cache_dir.iterdir()} == {"manifest.json", "objects.jsonl"}
+    assert cache.cache_dir.exists()
+    assert {path.name for path in cache.cache_dir.iterdir()} == {"manifest.json", "objects.jsonl"}
 
     loaded = load_current_schema_context_cache("DB", cache_root=tmp_path)
 
-    assert loaded.cache_key == index.cache_key
+    assert loaded.cache_key == cache.cache_key
     assert loaded.manifest["source_schema_hash"] == schema_source_hash(_db_index())
-    assert loaded.manifest["curated_summary_registry_hash"]
-    assert loaded.manifest["curated_summary_registry_version"] == "large-schema-summaries-v1"
+    assert loaded.manifest["schema_profile_catalog_hash"] is None
+    assert loaded.manifest["schema_profile_builder_version"] == SCHEMA_PROFILE_BUILDER_VERSION
     assert loaded.manifest["context_mode"] == "full_metadata"
 
 
-def test_cache_key_changes_for_schema_versions_model_metadata_family_threshold_and_summaries():
+def test_cache_key_changes_for_schema_versions_family_threshold_and_profile_hash():
     source_hash = schema_source_hash(_db_index())
     base = {
         "db": "DB",
         "source_schema_hash": source_hash,
         "family_similarity_threshold": 0.82,
-        "curated_summary_registry_hash": "summary-hash-v1",
+        "schema_profile_catalog_hash": "profile-hash-v1",
     }
 
     baseline = schema_context_cache_key(**base)
     assert len(baseline) == SCHEMA_CONTEXT_CACHE_KEY_LENGTH
-
     assert schema_context_cache_key(**{**base, "source_schema_hash": "different"}) != baseline
     assert schema_context_cache_key(**{**base, "family_similarity_threshold": 0.9}) != baseline
     assert (
-        schema_context_cache_key(**{**base, "curated_summary_registry_hash": "summary-hash-v2"})
+        schema_context_cache_key(**{**base, "schema_profile_catalog_hash": "profile-hash-v2"})
         != baseline
     )
 
@@ -182,109 +220,78 @@ def test_changed_schema_source_publishes_separate_version_directory(tmp_path):
     assert _version_dir(tmp_path, "DB", second.cache_key).exists()
 
 
-def test_changed_summary_registry_content_publishes_separate_version_directory(tmp_path):
-    registry_path = tmp_path / "large_schema_summaries.json"
-    registry_path.write_text('{"summaries": []}\n', encoding="utf-8")
+def test_changed_profile_artifact_content_publishes_separate_version_directory(tmp_path):
+    profile_root = tmp_path / "schema_profiles"
     cache_root = tmp_path / "cache"
+    _write_schema_profile(profile_root, summary="Order lifecycle fact table.")
 
-    first = _build(cache_root, curated_summary_registry_path=registry_path)
-    _write_custom_summary_registry(registry_path)
-    second = _build(cache_root, curated_summary_registry_path=registry_path)
+    first = _build(cache_root, schema_profile_root=profile_root)
+    _write_schema_profile(
+        profile_root,
+        summary="Order lifecycle table with explicit status semantics.",
+    )
+    second = _build(cache_root, schema_profile_root=profile_root)
 
     assert first.cache_key != second.cache_key
     assert (
-        first.manifest["curated_summary_registry_hash"]
-        != second.manifest["curated_summary_registry_hash"]
+        first.manifest["schema_profile_catalog_hash"]
+        != second.manifest["schema_profile_catalog_hash"]
     )
-    assert first.manifest["curated_summary_registry_version"] == "large-schema-summaries-v1"
-    assert second.manifest["curated_summary_registry_version"] == "large-schema-summaries-v1"
     assert _version_dir(cache_root, "DB", first.cache_key).exists()
     assert _version_dir(cache_root, "DB", second.cache_key).exists()
 
 
-def test_custom_summary_registry_drives_coverage_and_object_metadata(tmp_path):
-    registry_path = _write_custom_summary_registry(tmp_path / "custom_summaries.json")
-    cache = _build(tmp_path / "cache", curated_summary_registry_path=registry_path)
+def test_profile_artifact_drives_adaptive_compaction_and_object_metadata(tmp_path):
+    profile_root = tmp_path / "schema_profiles"
+    _write_schema_profile(profile_root)
+    cache = _build(tmp_path / "cache", schema_profile_root=profile_root)
 
     object_ids = {obj.object_id for obj in cache.objects}
     orders_object = next(obj for obj in cache.objects if obj.object_id == "table:DB.PUBLIC.ORDERS")
+    customers_object = next(
+        obj for obj in cache.objects if obj.object_id == "table:DB.PUBLIC.CUSTOMERS"
+    )
 
-    assert cache.manifest["context_mode"] == "compact_catalog"
+    assert cache.manifest["context_mode"] == "adaptive_profiles"
     assert "column:DB.PUBLIC.ORDERS#STATUS" not in object_ids
-    assert "table:DB.PUBLIC.CUSTOMERS" in object_ids
-    assert "column:DB.PUBLIC.CUSTOMERS#CUSTOMER_ID" not in object_ids
-    assert orders_object.metadata["summary_ids"] == ["orders_custom_summary"]
-    assert orders_object.metadata["large_schema_summaries"][0]["text"].startswith(
-        "Large-schema summary: orders_custom_summary."
+    assert "column:DB.PUBLIC.CUSTOMERS#CUSTOMER_ID" in object_ids
+    assert orders_object.metadata["schema_profile_ids"] == ["orders_profile"]
+    assert orders_object.metadata["schema_profiles"][0]["text"].startswith(
+        "Schema profile: orders_profile."
     )
+    assert "schema_profiles" not in customers_object.metadata
 
 
-def test_compact_catalog_keeps_uncovered_tables_without_join_candidates(tmp_path):
-    covered_table = TableSchema(
-        name="_20240103",
-        database_name="GITHUB_REPOS_DATE",
-        schema_name="DAY",
-        full_name="GITHUB_REPOS_DATE.DAY._20240103",
-        ddl="",
-        columns=[
-            ColumnSchema(name="public", type="BOOLEAN"),
-            ColumnSchema(name="actor", type="VARIANT"),
-            ColumnSchema(name="created_at", type="TIMESTAMP"),
-        ],
-        sample_rows=[],
-        searchable_text="github events",
+def test_adaptive_profiles_keep_unprofiled_tables_visible_and_exact(tmp_path):
+    profile_root = tmp_path / "schema_profiles"
+    catalog = SchemaProfileCatalog(
+        db="GITHUB_REPOS_DATE",
+        source_schema_hash="schema-hash-v1",
+        table_profiles=[],
+        family_profiles=[],
     )
-    uncovered_table = TableSchema(
-        name="REPOSITORIES",
-        database_name="GITHUB_REPOS_DATE",
-        schema_name="DAY",
-        full_name="GITHUB_REPOS_DATE.DAY.REPOSITORIES",
-        ddl="",
-        columns=[ColumnSchema(name="ID", type="TEXT"), ColumnSchema(name="NAME", type="TEXT")],
-        sample_rows=[],
-        searchable_text="repository metadata",
+    manifest = SchemaProfileManifest(
+        db="GITHUB_REPOS_DATE",
+        source_schema_hash="schema-hash-v1",
+        builder_version=SCHEMA_PROFILE_BUILDER_VERSION,
+        summarizer_version=SCHEMA_PROFILE_SUMMARIZER_VERSION,
+        prompt_template_version=SCHEMA_PROFILE_TEMPLATE_VERSION,
+        generated_at="2026-05-15T00:00:00+00:00",
+        artifact_hash=stable_hash(catalog.model_dump(mode="json")),
+        table_profile_count=0,
+        family_profile_count=0,
     )
-    db_index = {
-        "GITHUB_REPOS_DATE.DAY._20240103": covered_table,
-        "GITHUB_REPOS_DATE.DAY.REPOSITORIES": uncovered_table,
-    }
-    cache = build_schema_context_cache(
-        "GITHUB_REPOS_DATE",
-        db_index=db_index,
-        cache_root=tmp_path,
-        lock_timeout_seconds=0.1,
+    schema_profile_catalog_path("GITHUB_REPOS_DATE", profile_root=profile_root).parent.mkdir(
+        parents=True, exist_ok=True
     )
-
-    object_ids = {obj.object_id for obj in cache.objects}
-    object_types = {obj.object_type for obj in cache.objects}
-
-    assert cache.manifest["context_mode"] == "compact_catalog"
-    assert "table:GITHUB_REPOS_DATE.DAY._20240103" in object_ids
-    assert "table:GITHUB_REPOS_DATE.DAY.REPOSITORIES" in object_ids
-    assert not any(oid.startswith("column:") for oid in object_ids)
-    assert not any(oid.startswith("join_candidate:") for oid in object_ids)
-    assert "table" in object_types
-
-    summary_object = next(
-        obj for obj in cache.objects if obj.object_id == "table:GITHUB_REPOS_DATE.DAY._20240103"
+    write_json(
+        schema_profile_catalog_path("GITHUB_REPOS_DATE", profile_root=profile_root),
+        catalog.model_dump(mode="json"),
     )
-    assert summary_object.metadata.get("large_schema_summaries")
-
-
-def test_compact_catalog_preserves_table_object_for_every_input_table(tmp_path):
-    registry_path = _write_custom_summary_registry(tmp_path / "custom_summaries.json")
-    cache = _build(tmp_path / "cache", curated_summary_registry_path=registry_path)
-
-    visible_tables = {
-        obj.table_name
-        for obj in cache.objects
-        if obj.object_type == "table" and obj.table_name is not None
-    }
-
-    assert visible_tables == {"DB.PUBLIC.CUSTOMERS", "DB.PUBLIC.ORDERS"}
-
-
-def test_covered_table_keys_matches_tables_against_summary_registry():
+    write_json(
+        schema_profile_manifest_path("GITHUB_REPOS_DATE", profile_root=profile_root),
+        manifest.model_dump(mode="json"),
+    )
     db_index = {
         "GITHUB_REPOS_DATE.DAY._20240103": TableSchema(
             name="_20240103",
@@ -292,7 +299,7 @@ def test_covered_table_keys_matches_tables_against_summary_registry():
             schema_name="DAY",
             full_name="GITHUB_REPOS_DATE.DAY._20240103",
             ddl="",
-            columns=[ColumnSchema(name="public", type="BOOLEAN")],
+            columns=[ColumnSchema(name="PUBLIC", type="BOOLEAN")],
             sample_rows=[],
             searchable_text="github events",
         ),
@@ -302,13 +309,48 @@ def test_covered_table_keys_matches_tables_against_summary_registry():
             schema_name="DAY",
             full_name="GITHUB_REPOS_DATE.DAY.REPOSITORIES",
             ddl="",
-            columns=[ColumnSchema(name="ID", type="TEXT")],
+            columns=[ColumnSchema(name="ID", type="TEXT"), ColumnSchema(name="NAME", type="TEXT")],
             sample_rows=[],
             searchable_text="repositories",
         ),
     }
-    registry = load_large_schema_summary_registry()
 
-    covered = _covered_table_keys(db_index, registry)
+    cache = build_schema_context_cache(
+        "GITHUB_REPOS_DATE",
+        db_index=db_index,
+        cache_root=tmp_path,
+        schema_profile_root=profile_root,
+        lock_timeout_seconds=0.1,
+    )
 
-    assert covered == {"GITHUB_REPOS_DATE.DAY._20240103"}
+    object_ids = {obj.object_id for obj in cache.objects}
+    assert cache.manifest["context_mode"] == "full_metadata"
+    assert "table:GITHUB_REPOS_DATE.DAY._20240103" in object_ids
+    assert "column:GITHUB_REPOS_DATE.DAY._20240103#PUBLIC" in object_ids
+    assert "column:GITHUB_REPOS_DATE.DAY.REPOSITORIES#NAME" in object_ids
+
+
+def test_compact_table_keys_come_from_profile_catalog():
+    catalog = SchemaProfileCatalog(
+        db="DB",
+        source_schema_hash="schema-hash-v1",
+        table_profiles=[
+            TableProfile(
+                profile_id="orders_profile",
+                abstraction_kind="wide_table",
+                table_name="DB.PUBLIC.ORDERS",
+                covered_tables=["DB.PUBLIC.ORDERS"],
+                grain_hint="One row per order.",
+                naming_rules=["Use exact table name DB.PUBLIC.ORDERS."],
+                compact_semantic_summary="Order fact table.",
+                aliases=["orders"],
+                theme_terms=["orders"],
+                confidence=0.9,
+                provenance_inputs=["raw/orders.json"],
+                source_column_count=3,
+                source_sample_row_count=0,
+            )
+        ],
+    )
+
+    assert compact_table_keys_for_profiles(catalog) == {"DB.PUBLIC.ORDERS"}

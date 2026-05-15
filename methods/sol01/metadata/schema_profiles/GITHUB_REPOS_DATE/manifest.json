@@ -1,0 +1,11 @@
+{
+  "artifact_hash": "98970378a8bc5ab6abea8873c1d905ad07ed71740c84334400c339adf69ea408",
+  "builder_version": "schema-profile-builder-v1",
+  "db": "GITHUB_REPOS_DATE",
+  "family_profile_count": 0,
+  "generated_at": "2026-05-15T03:29:07.063215+00:00",
+  "prompt_template_version": "schema-profile-template-v1",
+  "source_schema_hash": "4fea0d82443682d107a311f6ad9c8cee44a57faf92091f8736cb634344806c9c",
+  "summarizer_version": "schema-profile-deterministic-v1",
+  "table_profile_count": 38
+}

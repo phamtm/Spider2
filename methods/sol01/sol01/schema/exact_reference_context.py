@@ -5,18 +5,22 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 
-from sol01.models import ColumnSchema, TableSchema
-from sol01.schema.large_schema_summaries import (
-    LargeSchemaSummary,
-    LargeSchemaSummaryRegistry,
-    load_large_schema_summary_registry,
+from sol01.models import (
+    ColumnSchema,
+    FamilyProfile,
+    SchemaProfileCatalog,
+    TableProfile,
+    TableSchema,
 )
-from sol01.schema.summary_rendering import render_summary_lines
+from sol01.schema.schema_profile_rendering import render_schema_profile_lines
+from sol01.schema.schema_profiles import load_schema_profile_catalog
 
 _GROUP_ORDER = ("TEXT", "NUMERIC", "BOOLEAN", "DATE/TIME", "OTHER")
 _COLUMNS_PER_LINE = 8
 _KEY_COLUMN_NOTE_LIMIT = 10
 _SAMPLE_VALUES_PER_NOTE = 3
+_FULL_DETAIL_TABLE_LIMIT = 4
+_COMPACT_COLUMN_PREVIEW_LIMIT = 12
 
 
 def render_exact_sql_reference_context(
@@ -24,16 +28,18 @@ def render_exact_sql_reference_context(
     db: str,
     expanded_tables: Iterable[str],
     table_schemas: dict[str, TableSchema],
-    large_schema_summary_registry: LargeSchemaSummaryRegistry | None = None,
+    schema_profile_catalog: SchemaProfileCatalog | None = None,
 ) -> str:
-    """Render exact selected-table context without curated summary fallback."""
+    """Render exact selected-table context with profile-backed compacting."""
 
+    catalog = schema_profile_catalog or load_schema_profile_catalog(db)
     lines = [
         "SQL reference context:",
         f"Database: {db}",
         "Selected tables:",
     ]
-    for table_name in sorted(expanded_tables):
+    sorted_expanded_tables = sorted(expanded_tables)
+    for table_name in sorted_expanded_tables:
         lines.append(f"- {table_name}")
 
     if not table_schemas:
@@ -49,11 +55,14 @@ def render_exact_sql_reference_context(
         return "\n".join(lines)
 
     lines.extend(["", "Selected table details:"])
+    full_detail_tables = set(sorted_expanded_tables[:_FULL_DETAIL_TABLE_LIMIT])
     for table_name in sorted(table_schemas):
+        detail_level = "full" if table_name in full_detail_tables else "compact"
         lines.extend(
             render_exact_table_reference(
                 table_schemas[table_name],
-                large_schema_summary_registry=large_schema_summary_registry,
+                detail_level=detail_level,
+                schema_profile_catalog=catalog,
             )
         )
         lines.append("")
@@ -65,18 +74,19 @@ def render_exact_table_reference(
     table: TableSchema,
     *,
     header: str | None = None,
-    large_schema_summary_registry: LargeSchemaSummaryRegistry | None = None,
+    detail_level: str = "full",
+    schema_profile_catalog: SchemaProfileCatalog | None = None,
 ) -> list[str]:
     """Render one exact table card from indexed column metadata."""
 
     table_name = table.full_name or table.name
     lines = [f"{header or 'Table'}: {table_name}"]
-    summary = _best_large_schema_summary_for_table(
+    profiles = _profiles_for_table(
         table,
-        registry=large_schema_summary_registry,
+        catalog=schema_profile_catalog,
     )
-    if summary is not None:
-        lines.extend(render_summary_lines(summary))
+    for profile in profiles[:2]:
+        lines.extend(render_schema_profile_lines(profile))
     if not table.columns:
         if table.ddl.strip():
             lines.extend(["DDL:", "```sql", table.ddl.strip(), "```"])
@@ -85,12 +95,45 @@ def render_exact_table_reference(
         return lines
 
     lines.append(f"Column count: {len(table.columns)}")
+    if detail_level == "compact":
+        lines.extend(_compact_exact_column_lines(table, profiles=profiles))
+        return lines
+
     lines.append("Exact columns by type:")
     lines.extend(_grouped_column_lines(table.columns))
     note_lines = _key_column_note_lines(table.columns)
     if note_lines:
         lines.append("Key column notes:")
         lines.extend(note_lines)
+    return lines
+
+
+def _compact_exact_column_lines(
+    table: TableSchema,
+    *,
+    profiles: Sequence[TableProfile | FamilyProfile],
+) -> list[str]:
+    labels_by_name = {column.name: _column_label(column) for column in table.columns}
+    lines: list[str] = []
+    if profiles:
+        profile = profiles[0]
+        for title, names in (
+            ("Exact key columns", profile.key_columns),
+            ("Exact time columns", profile.time_columns),
+            ("Exact measure columns", profile.measure_columns),
+            ("Exact dimension columns", profile.dimension_columns),
+        ):
+            labels = [labels_by_name[name] for name in names if name in labels_by_name]
+            if labels:
+                lines.append(f"{title}: {', '.join(labels[:_COMPACT_COLUMN_PREVIEW_LIMIT])}")
+    preview = [_column_label(column) for column in table.columns[:_COMPACT_COLUMN_PREVIEW_LIMIT]]
+    if preview:
+        suffix = (
+            f", ... {len(table.columns) - _COMPACT_COLUMN_PREVIEW_LIMIT} more"
+            if len(table.columns) > _COMPACT_COLUMN_PREVIEW_LIMIT
+            else ""
+        )
+        lines.append(f"Exact column preview: {', '.join(preview)}{suffix}")
     return lines
 
 
@@ -196,52 +239,25 @@ def _looks_semantically_important(name: str) -> bool:
     )
 
 
-def _best_large_schema_summary_for_table(
+def _profiles_for_table(
     table: TableSchema,
     *,
-    registry: LargeSchemaSummaryRegistry | None = None,
-) -> LargeSchemaSummary | None:
-    registry = registry or load_large_schema_summary_registry()
-    database, schema_name, table_name = _table_identity_parts(table)
-    matches: list[LargeSchemaSummary] = []
-    if schema_name and table_name:
-        matches = registry.match_table(
-            database=database,
-            schema_name=schema_name,
-            table_name=table_name,
-        )
-    if not matches:
-        table_ref = table.full_name or table.name
-        if table_ref.count(".") in {1, 2}:
-            matches = registry.match_table_ref(table_ref)
-    if not matches:
-        return None
-    return sorted(matches, key=_summary_specificity_key)[0]
-
-
-def _summary_specificity_key(summary: LargeSchemaSummary) -> tuple[int, int, int, str]:
-    exact_table_names = len(summary.match.table_names)
-    pattern_length = len(summary.match.table_pattern or "")
-    schema_copy_count = len(summary.schema_copies)
-    return (
-        0 if exact_table_names else 1,
-        schema_copy_count,
-        -pattern_length,
-        summary.summary_id,
+    catalog: SchemaProfileCatalog | None = None,
+) -> list[TableProfile | FamilyProfile]:
+    if catalog is None:
+        return []
+    table_name = table.full_name or table.name
+    matches: list[TableProfile | FamilyProfile] = []
+    matches.extend(
+        profile for profile in catalog.table_profiles if table_name in profile.covered_tables
     )
-
-
-def _table_identity_parts(table: TableSchema) -> tuple[str, str, str]:
-    database = table.database_name or ""
-    schema_name = table.schema_name or ""
-    table_name = table.name
-    full_name = table.full_name or ""
-    parts = [part for part in full_name.split(".") if part]
-    if len(parts) == 3:
-        database = database or parts[0]
-        schema_name = schema_name or parts[1]
-        table_name = parts[2]
-    elif len(parts) == 2:
-        schema_name = schema_name or parts[0]
-        table_name = parts[1]
-    return database, schema_name, table_name
+    matches.extend(
+        profile for profile in catalog.family_profiles if table_name in profile.covered_tables
+    )
+    return sorted(
+        {profile.profile_id: profile for profile in matches}.values(),
+        key=lambda profile: (
+            0 if profile.abstraction_kind in {"exact_family", "wide_table"} else 1,
+            profile.profile_id,
+        ),
+    )

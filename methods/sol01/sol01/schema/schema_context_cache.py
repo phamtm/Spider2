@@ -29,18 +29,18 @@ from sol01.infra.paths import REPO_ROOT
 from sol01.infra.policy import DEFAULT_SCHEMA_CONTEXT_CACHE_POLICY
 from sol01.models import SchemaObject, TableSchema
 from sol01.schema.db_index import load_db_index
-from sol01.schema.large_schema_summaries import (
-    DEFAULT_LARGE_SCHEMA_SUMMARY_PATH,
-    LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
-    LargeSchemaSummaryRegistry,
-    large_schema_summary_registry_hash,
-    load_large_schema_summary_registry,
-)
-from sol01.schema.object_text import annotate_summary_metadata
+from sol01.schema.object_text import annotate_schema_profile_metadata
 from sol01.schema.objects import build_schema_objects
+from sol01.schema.schema_profiles import (
+    DEFAULT_SCHEMA_PROFILE_ROOT,
+    SCHEMA_PROFILE_BUILDER_VERSION,
+    compact_table_keys_for_profiles,
+    load_schema_profile_catalog,
+    schema_profile_catalog_hash,
+)
 
 OBJECT_BUILDER_VERSION = "schema-objects-v5"
-MANIFEST_VERSION = 5
+MANIFEST_VERSION = 6
 REQUIRED_CACHE_ARTIFACTS = frozenset({"objects.jsonl", "manifest.json"})
 REQUIRED_MANIFEST_FIELDS = frozenset(
     {
@@ -49,8 +49,8 @@ REQUIRED_MANIFEST_FIELDS = frozenset(
         "cache_key",
         "source_schema_hash",
         "object_builder_version",
-        "curated_summary_registry_hash",
-        "curated_summary_registry_version",
+        "schema_profile_catalog_hash",
+        "schema_profile_builder_version",
         "family_similarity_threshold",
         "context_mode",
         "object_count",
@@ -90,7 +90,7 @@ def build_schema_context_cache(
     db_index: Mapping[str, TableSchema] | None = None,
     config: SchemaContextConfig | None = None,
     cache_root: Path = DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT,
-    curated_summary_registry_path: Path = DEFAULT_LARGE_SCHEMA_SUMMARY_PATH,
+    schema_profile_root: Path = DEFAULT_SCHEMA_PROFILE_ROOT,
     lock_timeout_seconds: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
     lock_poll_seconds: float = DEFAULT_LOCK_POLL_SECONDS,
 ) -> SchemaContextCache:
@@ -100,14 +100,12 @@ def build_schema_context_cache(
     config = config or SchemaContextConfig()
     db_index = dict(db_index) if db_index is not None else _load_db_index(db)
     source_hash = schema_source_hash(db_index)
-    curated_summary_registry_hash = large_schema_summary_registry_hash(
-        curated_summary_registry_path
-    )
+    profile_catalog_hash = schema_profile_catalog_hash(db, profile_root=schema_profile_root)
     cache_key = schema_context_cache_key(
         db=db,
         source_schema_hash=source_hash,
         family_similarity_threshold=config.family_similarity_threshold,
-        curated_summary_registry_hash=curated_summary_registry_hash,
+        schema_profile_catalog_hash=profile_catalog_hash,
     )
     version_dir = _version_dir(cache_root, db, cache_key)
     current_path = _current_pointer_path(cache_root, db)
@@ -219,16 +217,15 @@ def build_schema_context_cache(
         if version_dir.exists():
             quarantine_invalid_directory(version_dir)
 
-        registry = load_large_schema_summary_registry(curated_summary_registry_path)
-        covered_table_keys = _covered_table_keys(db_index, registry)
-        context_mode = "compact_catalog" if covered_table_keys else "full_metadata"
-        build_index = db_index
+        catalog = load_schema_profile_catalog(db, profile_root=schema_profile_root)
+        compact_table_keys = compact_table_keys_for_profiles(catalog)
+        context_mode = "adaptive_profiles" if compact_table_keys else "full_metadata"
         objects = build_schema_objects(
-            build_index,
+            db_index,
             family_similarity_threshold=config.family_similarity_threshold,
-            compact_only=(context_mode == "compact_catalog"),
+            compact_table_keys=compact_table_keys,
         )
-        objects = annotate_summary_metadata(objects, large_schema_summary_registry=registry)
+        objects = annotate_schema_profile_metadata(objects, schema_profile_catalog=catalog)
         _validate_table_object_coverage(db_index, objects)
         logger.info(
             "schema context cache objects rendered",
@@ -236,8 +233,8 @@ def build_schema_context_cache(
             cache_key=cache_key,
             context_mode=context_mode,
             object_count=len(objects),
-            covered_table_count=len(covered_table_keys),
-            uncovered_table_count=max(0, len(db_index) - len(covered_table_keys)),
+            compact_table_count=len(compact_table_keys),
+            exact_table_count=max(0, len(db_index) - len(compact_table_keys)),
         )
 
         temp_dir = _new_temp_version_dir(cache_root, db, cache_key)
@@ -248,7 +245,7 @@ def build_schema_context_cache(
                 cache_key=cache_key,
                 source_hash=source_hash,
                 family_similarity_threshold=config.family_similarity_threshold,
-                curated_summary_registry_hash=curated_summary_registry_hash,
+                schema_profile_catalog_hash_value=profile_catalog_hash,
                 context_mode=context_mode,
                 objects=objects,
             )
@@ -377,18 +374,18 @@ def schema_context_cache_key(
     db: str,
     source_schema_hash: str,
     family_similarity_threshold: float,
-    curated_summary_registry_hash: str,
+    schema_profile_catalog_hash: str | None,
 ) -> str:
     """Return a deterministic cache key for all inputs that affect schema context artifacts."""
 
     return stable_hash(
         {
             "cache_schema": MANIFEST_VERSION,
-            "curated_summary_registry_hash": curated_summary_registry_hash,
-            "curated_summary_registry_version": LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
             "db": db,
             "family_similarity_threshold": family_similarity_threshold,
             "object_builder_version": OBJECT_BUILDER_VERSION,
+            "schema_profile_builder_version": SCHEMA_PROFILE_BUILDER_VERSION,
+            "schema_profile_catalog_hash": schema_profile_catalog_hash,
             "source_schema_hash": source_schema_hash,
         }
     )[:SCHEMA_CONTEXT_CACHE_KEY_LENGTH]
@@ -401,7 +398,7 @@ def _write_cache_artifacts(
     cache_key: str,
     source_hash: str,
     family_similarity_threshold: float,
-    curated_summary_registry_hash: str,
+    schema_profile_catalog_hash_value: str | None,
     context_mode: str,
     objects: Sequence[SchemaObject],
 ) -> None:
@@ -412,8 +409,8 @@ def _write_cache_artifacts(
         "cache_key": cache_key,
         "source_schema_hash": source_hash,
         "object_builder_version": OBJECT_BUILDER_VERSION,
-        "curated_summary_registry_hash": curated_summary_registry_hash,
-        "curated_summary_registry_version": LARGE_SCHEMA_SUMMARY_REGISTRY_VERSION,
+        "schema_profile_catalog_hash": schema_profile_catalog_hash_value,
+        "schema_profile_builder_version": SCHEMA_PROFILE_BUILDER_VERSION,
         "family_similarity_threshold": family_similarity_threshold,
         "context_mode": context_mode,
         "object_count": len(objects),
@@ -518,22 +515,6 @@ def _artifact_names(cache_dir: Path) -> frozenset[str]:
     return frozenset(path.name for path in cache_dir.iterdir())
 
 
-def _covered_table_keys(
-    db_index: Mapping[str, TableSchema],
-    registry: LargeSchemaSummaryRegistry,
-) -> set[str]:
-    """Return db-index keys whose tables match at least one curated summary."""
-
-    covered: set[str] = set()
-    for table_key, table in db_index.items():
-        database = table.database_name or ""
-        schema_name = table.schema_name or ""
-        table_name = table.name or table_key
-        if registry.match_table(database=database, schema_name=schema_name, table_name=table_name):
-            covered.add(table_key)
-    return covered
-
-
 def _validate_table_object_coverage(
     db_index: Mapping[str, TableSchema],
     objects: Sequence[SchemaObject],
@@ -541,9 +522,7 @@ def _validate_table_object_coverage(
     """Fail fast if planner-visible objects hide any physical table."""
 
     visible_table_ids = {
-        obj.object_id
-        for obj in objects
-        if obj.object_type == "table" and obj.table_name
+        obj.object_id for obj in objects if obj.object_type == "table" and obj.table_name
     }
     missing: list[str] = []
     for table_key, table in db_index.items():
