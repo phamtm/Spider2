@@ -10,6 +10,7 @@ import pytest
 from sol01.models import ColumnSchema, TableSchema
 from sol01.schema.large_schema_summaries import load_large_schema_summary_registry
 from sol01.schema.schema_context_cache import (
+    SCHEMA_CONTEXT_CACHE_KEY_LENGTH,
     SchemaContextCacheError,
     SchemaContextCacheLockTimeout,
     _covered_table_keys,
@@ -119,6 +120,7 @@ def test_cache_key_changes_for_schema_versions_model_metadata_family_threshold_a
     }
 
     baseline = schema_context_cache_key(**base)
+    assert len(baseline) == SCHEMA_CONTEXT_CACHE_KEY_LENGTH
 
     assert schema_context_cache_key(**{**base, "source_schema_hash": "different"}) != baseline
     assert schema_context_cache_key(**{**base, "family_similarity_threshold": 0.9}) != baseline

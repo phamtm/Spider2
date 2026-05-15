@@ -267,6 +267,66 @@ def test_sql_reference_and_repair_prompts_use_large_schema_summary_context():
     assert "SECRET_DDL_MARKER" not in repair_prompt
 
 
+def test_sql_reference_context_prefers_specific_summary_and_keeps_exact_columns():
+    county_name = "COVID19_USA.CENSUS_BUREAU_ACS.COUNTY_2018_5YR"
+    facility_name = "COVID19_USA.COVID19_VACCINATION_ACCESS.FACILITY_BOUNDARY_US_ALL"
+    table_schemas = {
+        county_name: TableSchema(
+            name="COUNTY_2018_5YR",
+            database_name="COVID19_USA",
+            schema_name="CENSUS_BUREAU_ACS",
+            full_name=county_name,
+            ddl="",
+            columns=[
+                ColumnSchema(name="geo_id", type="TEXT", sample_values=["06085"]),
+                ColumnSchema(name="total_pop", type="FLOAT", sample_values=["1922200.0"]),
+            ],
+            sample_rows=[],
+            searchable_text="county acs",
+        ),
+        facility_name: TableSchema(
+            name="FACILITY_BOUNDARY_US_ALL",
+            database_name="COVID19_USA",
+            schema_name="COVID19_VACCINATION_ACCESS",
+            full_name=facility_name,
+            ddl="",
+            columns=[
+                ColumnSchema(
+                    name="facility_sub_region_1_code",
+                    type="TEXT",
+                    description="A country-specific ISO 3166-2 code for the region. For example, US-CA.",
+                    sample_values=["US-CA"],
+                ),
+                ColumnSchema(
+                    name="facility_sub_region_2_code",
+                    type="TEXT",
+                    description="In the US, the FIPS code for a US county (or equivalent). For example, 06085.",
+                    sample_values=["06085"],
+                ),
+            ],
+            sample_rows=[],
+            searchable_text="vaccination facility boundary",
+        ),
+    }
+    schema = SchemaSelection(
+        db="COVID19_USA",
+        selected_object_ids=[f"table:{county_name}", f"table:{facility_name}"],
+        expanded_tables=[county_name, facility_name],
+        rationale="selected covered tables",
+        confidence=0.9,
+    )
+
+    reference_context = sql_reference_context(schema, table_schemas)
+
+    assert "Large-schema summary: covid19_usa_acs_county_fips" in reference_context
+    assert "Do not invent Census prefixes around geo_id unless the table explicitly shows them." in reference_context
+    assert "Large-schema summary: covid19_usa_vaccination_access_facility_boundary" in reference_context
+    assert "facility_sub_region_1_code [TEXT] - A country-specific ISO 3166-2 code for the region. For example, US-CA." in reference_context
+    assert "facility_sub_region_2_code [TEXT] - In the US, the FIPS code for a US county (or equivalent). For example, 06085." in reference_context
+    assert "geo_id [TEXT] - sample values: 06085" in reference_context
+    assert "total_pop [FLOAT] - sample values: 1922200.0" in reference_context
+
+
 def test_sql_reference_budget_enforcement_preserves_exact_selected_table_context():
     table_name = "COVID19_USA.COVID19_USAFACTS.CONFIRMED_CASES"
     table_schemas = {

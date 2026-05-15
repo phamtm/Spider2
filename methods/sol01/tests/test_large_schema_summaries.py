@@ -19,7 +19,9 @@ def test_default_large_schema_summary_registry_loads_required_coverage():
     assert {
         "github_repos_day_events",
         "bls_qcew_quarterly_area_industry",
+        "covid19_usa_acs_county_fips",
         "census_bureau_acs_geography_year_estimates",
+        "covid19_usa_vaccination_access_facility_boundary",
         "covid19_usafacts_wide_daily_counts",
         "covid19_jhu_csse_wide_daily_counts",
         "covid19_open_data_wide_public_health",
@@ -62,9 +64,18 @@ def test_registry_matches_regex_families_exact_tables_and_duplicate_schema_copie
     assert _ids(registry.match_table_ref("FEC.CENSUS_BUREAU_ACS.COUNTY_2021_1YR")) == [
         "census_bureau_acs_geography_year_estimates"
     ]
+    assert _ids(registry.match_table_ref("COVID19_USA.CENSUS_BUREAU_ACS.COUNTY_2018_5YR")) == [
+        "covid19_usa_acs_county_fips",
+        "census_bureau_acs_geography_year_estimates",
+    ]
     assert _ids(registry.match_table_ref("SDOH.CENSUS_BUREAU_ACS.BLOCKGROUP_2018_5YR")) == [
         "census_bureau_acs_geography_year_estimates"
     ]
+    assert _ids(
+        registry.match_table_ref(
+            "COVID19_USA.COVID19_VACCINATION_ACCESS.FACILITY_BOUNDARY_US_ALL"
+        )
+    ) == ["covid19_usa_vaccination_access_facility_boundary"]
 
     assert _ids(
         registry.match_table_ref("COVID19_OPEN_WORLD_BANK.COVID19_OPEN_DATA.COMPATIBILITY_VIEW")

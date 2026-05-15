@@ -16,6 +16,7 @@ from sol01.models import (
     Task,
 )
 from sol01.schema.exact_reference_context import render_exact_sql_reference_context
+from sol01.schema.large_schema_summaries import load_large_schema_summary_registry
 
 
 def sql_reference_context(
@@ -28,6 +29,7 @@ def sql_reference_context(
         db=schema.db,
         expanded_tables=schema.expanded_tables,
         table_schemas=table_schemas,
+        large_schema_summary_registry=load_large_schema_summary_registry(),
     )
 
 

@@ -13,22 +13,29 @@ import pytest
 
 from sol01.coordinator import run_task
 from sol01.infra.config import RuntimeConfig, SchemaContextConfig
+from sol01.infra.logging import configure_logging
 from sol01.infra.policy import DEFAULT_SOLVER_POLICY, SolverPolicy
 from sol01.llm.client import PromptSpec
 from sol01.models import (
+    AttemptRecord,
     ColumnSchema,
+    ExecutionResult,
     FinalAnswer,
     Intent,
     SchemaContextObject,
     SchemaObject,
     SchemaPlanningDecision,
+    SchemaSelection,
     SelectedSchemaObject,
     SQLCandidate,
     SQLCandidateBatch,
     TableSchema,
     Task,
+    ValidationReport,
 )
 from sol01.output.output import ensure_run_paths
+from sol01.pipeline_recovery import _run_sql_recovery
+from sol01.pipeline_state import TaskRun
 
 SALES_TABLE = "TEST_DB.PUBLIC.SALES"
 ORDERS_TABLE = "TEST_DB.PUBLIC.ORDERS"
@@ -567,3 +574,79 @@ def test_schema_expansion_rejects_hallucinated_context_selection(
     assert expansion["planner"]["planner"]["rejected_object_ids"] == [
         "table:TEST_DB.PUBLIC.DOES_NOT_EXIST"
     ]
+
+
+def test_sql_recovery_log_includes_reason(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    repaired_candidate = _candidate("SELECT ORDER_ID, AMOUNT FROM TEST_DB.PUBLIC.ORDERS")
+
+    monkeypatch.setattr(
+        "sol01.pipeline_recovery.run_prompt",
+        lambda *args, **kwargs: repaired_candidate,
+    )
+
+    def fake_evaluate_and_record_candidate(run: TaskRun, *, candidate: SQLCandidate, stage: str):
+        attempt = AttemptRecord(
+            stage=stage,
+            sql=candidate.sql,
+            explanation=candidate.explanation,
+            assumptions=candidate.assumptions,
+            constraint_ledger=candidate.constraint_ledger,
+            unsupported_assumptions=candidate.unsupported_assumptions,
+            candidate_confidence=candidate.confidence,
+            validation=ValidationReport(ok=True),
+            execution_result=ExecutionResult(ok=True, row_count=1),
+            score=1000.0,
+        )
+        run.attempts.append(attempt)
+        return attempt
+
+    monkeypatch.setattr(
+        "sol01.pipeline_recovery.evaluate_and_record_candidate",
+        fake_evaluate_and_record_candidate,
+    )
+
+    task = Task(instance_id="sf_sql_repair", db="TEST_DB", question="Show broken totals.")
+    configure_logging("INFO", use_colors=False)
+    run = TaskRun(
+        task=task,
+        client=FakeLLMClient(outputs={}),
+        schema_context_config=SchemaContextConfig(),
+    )
+    run.intent = Intent(
+        summary="Show broken totals.",
+        entities=["orders"],
+        metrics=["amount"],
+        filters=[],
+        time_constraints=[],
+        output_expectation="order id and amount",
+        assumptions=[],
+    )
+    run.schema = SchemaSelection(
+        db="TEST_DB",
+        selected_object_ids=[f"table:{SALES_TABLE}"],
+        expanded_tables=[SALES_TABLE],
+        rationale="selected needed tables",
+        confidence=0.9,
+    )
+    run.sql_reference_context = "schema context"
+    best = AttemptRecord(
+        stage="initial_2",
+        sql=f"SELECT BROKEN_SQL FROM {SALES_TABLE}",
+        explanation="broken",
+        candidate_confidence=0.2,
+        validation=ValidationReport(ok=True),
+        execution_result=ExecutionResult(ok=False, row_count=0, error="syntax error"),
+        score=-100.0,
+    )
+
+    action = _run_sql_recovery(run, best=best)
+
+    captured = capsys.readouterr()
+    combined_output = f"{captured.out}\n{captured.err}"
+    assert "recovery action requested" in combined_output
+    assert "action=sql" in combined_output
+    assert "reason=best_attempt_not_executable" in combined_output
+    assert action.trigger == "best_attempt_not_executable"

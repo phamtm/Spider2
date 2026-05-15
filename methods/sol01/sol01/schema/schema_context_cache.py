@@ -62,6 +62,7 @@ DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT = (
 DEFAULT_LOCK_TIMEOUT_SECONDS = DEFAULT_SCHEMA_CONTEXT_CACHE_POLICY.lock_timeout_seconds
 DEFAULT_LOCK_POLL_SECONDS = DEFAULT_SCHEMA_CONTEXT_CACHE_POLICY.lock_poll_seconds
 logger = get_logger(__name__)
+SCHEMA_CONTEXT_CACHE_KEY_LENGTH = 6
 
 
 class SchemaContextCacheError(RuntimeError):
@@ -390,7 +391,7 @@ def schema_context_cache_key(
             "object_builder_version": OBJECT_BUILDER_VERSION,
             "source_schema_hash": source_schema_hash,
         }
-    )
+    )[:SCHEMA_CONTEXT_CACHE_KEY_LENGTH]
 
 
 def _write_cache_artifacts(

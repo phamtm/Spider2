@@ -5,6 +5,7 @@ description = "Snowflake Spider2-snow solver using Pydantic AI and OpenRouter."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "google-cloud-bigquery>=3.38.0",
     "pandas>=2.2.0",
     "pydantic>=2.7.0",
     "pydantic-ai-slim[openai]>=0.0.19",

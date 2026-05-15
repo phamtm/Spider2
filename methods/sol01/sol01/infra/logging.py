@@ -35,9 +35,10 @@ def configure_logging(
             structlog.stdlib.add_logger_name,
             structlog.stdlib.add_log_level,
             structlog.stdlib.PositionalArgumentsFormatter(),
-            structlog.processors.TimeStamper(fmt="iso", utc=True),
+            structlog.processors.TimeStamper(fmt="%H:%M:%S", utc=True),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.UnicodeDecoder(),
+            _compact_level,
             structlog.dev.ConsoleRenderer(colors=_resolve_colors(use_colors, output_stream)),
         ],
         context_class=dict,
@@ -84,8 +85,15 @@ def _resolve_colors(use_colors: bool | None, stream: TextIO) -> bool:
     return sys.stderr.isatty()
 
 
+def _compact_level(_, __, event_dict: dict) -> dict:
+    """Embed level into the event string so ConsoleRenderer skips its padded formatting."""
+    level = event_dict.pop("level", "")
+    event_dict["event"] = f"[{level}] {event_dict.get('event', '')}"
+    return event_dict
+
+
 def _quiet_noisy_loggers() -> None:
     """Keep third-party HTTP chatter out of normal solver runs."""
 
-    for logger_name in ("httpx", "httpcore", "openai", "pydantic_ai"):
+    for logger_name in ("httpx", "httpcore", "openai", "pydantic_ai", "snowflake.connector"):
         std_logging.getLogger(logger_name).setLevel(std_logging.WARNING)

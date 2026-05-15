@@ -178,11 +178,13 @@ def _select_expansion_objects(
 def _run_sql_recovery(run: TaskRun, *, best) -> RecoveryAction:
     """Attempt one SQL-focused recovery for a non-executable best attempt."""
 
+    reason = "best_attempt_not_executable"
     logger.info(
         "recovery action requested",
         instance_id=run.task.instance_id,
         action="sql",
         best_stage=best.stage,
+        reason=reason,
     )
     repaired = run_prompt(
         run.client,
@@ -201,7 +203,7 @@ def _run_sql_recovery(run: TaskRun, *, best) -> RecoveryAction:
     attempt = evaluate_and_record_candidate(run, candidate=repaired, stage=RECOVERY_STAGE_SQL)
     return RecoveryAction(
         kind=RECOVERY_KIND_SQL,
-        trigger="best_attempt_not_executable",
+        trigger=reason,
         source_stage=best.stage,
         attempt_stage=attempt.stage,
         outcome=RECOVERY_OUTCOME_RECOVERED

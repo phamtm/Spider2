@@ -447,7 +447,7 @@ def test_load_records_extracts_trace_diagnostics_from_trace_json(tmp_path: Path)
               "prompt_budget": {
                 "planning_prompt_chars": 1200,
                 "sql_reference_context_chars": 900,
-                "max_schema_prompt_chars": 24000
+                "max_schema_prompt_chars": 48000
               }
             }
           },
@@ -492,7 +492,7 @@ def test_load_records_extracts_trace_diagnostics_from_trace_json(tmp_path: Path)
 
     assert len(records) == 1
     assert records[0].diagnostics == (
-        "prompt budget: planning=1200/24000, context=900/24000 | "
+        "prompt budget: planning=1200/48000, context=900/48000 | "
         "validation: missing grouped key StyleID | "
         "execution: Validation failed before execution. | "
         "shape: missing grouped key StyleID | "

@@ -110,6 +110,49 @@
       ]
     },
     {
+      "summary_id": "covid19_usa_acs_county_fips",
+      "schema_copies": [
+        {
+          "database": "COVID19_USA",
+          "schema_name": "CENSUS_BUREAU_ACS"
+        }
+      ],
+      "match": {
+        "table_pattern": "^COUNTY_\\d{4}_(?:1YR|3YR|5YR)$"
+      },
+      "purpose": "County-level American Community Survey estimate tables for the COVID19_USA database.",
+      "grain": "One row per US county or county-equivalent in the named survey year and estimate window.",
+      "stable_columns": [
+        "geo_id",
+        "total_pop"
+      ],
+      "repeated_column_rules": [
+        "geo_id is the county geography key used in these county tables.",
+        "total_pop is the total county population estimate at the same county grain as geo_id.",
+        "Other ACS measure columns stay at the county row grain rather than introducing lower-grain detail rows."
+      ],
+      "inclusive_ranges": [
+        "COUNTY_YYYY_1YR, COUNTY_YYYY_3YR, and COUNTY_YYYY_5YR table names encode the ACS year and estimate window."
+      ],
+      "quote_spelling_rules": [
+        "Use geo_id exactly.",
+        "Do not invent Census prefixes around geo_id unless the table explicitly shows them."
+      ],
+      "examples": [
+        "COUNTY_2012_5YR",
+        "COUNTY_2018_5YR",
+        "COUNTY_2019_5YR",
+        "COUNTY_2021_1YR"
+      ],
+      "aliases": [
+        "county acs",
+        "county fips",
+        "county population",
+        "county demographics",
+        "county geo id"
+      ]
+    },
+    {
       "summary_id": "census_bureau_acs_geography_year_estimates",
       "schema_copies": [
         {
@@ -165,6 +208,55 @@
         "geo id",
         "population estimates",
         "housing income education"
+      ]
+    },
+    {
+      "summary_id": "covid19_usa_vaccination_access_facility_boundary",
+      "schema_copies": [
+        {
+          "database": "COVID19_USA",
+          "schema_name": "COVID19_VACCINATION_ACCESS"
+        }
+      ],
+      "match": {
+        "table_pattern": "^FACILITY_BOUNDARY_US_(?:ALL|DRIVE|TRANSIT|WALK)$"
+      },
+      "purpose": "US vaccination site access and catchment-boundary tables with one row per site, transport mode, and travel-time threshold.",
+      "grain": "One row per vaccination site and boundary configuration, not one row per county.",
+      "stable_columns": [
+        "facility_place_id",
+        "facility_provider_id",
+        "facility_name",
+        "facility_sub_region_1",
+        "facility_sub_region_1_code",
+        "facility_sub_region_2",
+        "facility_sub_region_2_code"
+      ],
+      "repeated_column_rules": [
+        "facility_sub_region_1 stores the state or region name, such as California.",
+        "facility_sub_region_1_code stores an ISO 3166-2 style state code such as US-CA, not a plain two-digit FIPS code.",
+        "facility_sub_region_2_code stores the full county FIPS code in the US, such as 06085.",
+        "travel_time_threshold_minutes and mode_of_transportation distinguish multiple catchment-boundary rows for the same facility."
+      ],
+      "inclusive_ranges": [
+        "The ALL, DRIVE, TRANSIT, and WALK suffixes identify fixed table variants rather than date partitions."
+      ],
+      "quote_spelling_rules": [
+        "Use facility_sub_region_1_code and facility_sub_region_2_code exactly.",
+        "Do not split facility_sub_region_2_code into separate state and county pieces unless another selected table explicitly requires that."
+      ],
+      "examples": [
+        "FACILITY_BOUNDARY_US_ALL",
+        "FACILITY_BOUNDARY_US_DRIVE",
+        "FACILITY_BOUNDARY_US_TRANSIT",
+        "FACILITY_BOUNDARY_US_WALK"
+      ],
+      "aliases": [
+        "vaccination sites",
+        "vaccine access",
+        "facility boundary",
+        "county fips",
+        "google place id"
       ]
     },
     {

@@ -43,7 +43,7 @@ class SchemaContextPolicy:
 
     family_similarity_threshold: float = 0.82
     max_linked_doc_chars: int = 6000
-    max_schema_prompt_chars: int = 24000
+    max_schema_prompt_chars: int = 60000
 
 
 @dataclass(frozen=True)
