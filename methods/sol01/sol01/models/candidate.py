@@ -6,6 +6,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
+from sol01.workflow import RepairSkippedReason
+
 
 class SQLCandidate(BaseModel):
     """One SQL answer proposed by the LLM with its reasoning context."""
@@ -133,6 +135,6 @@ class AttemptRecord(BaseModel):
     elapsed_seconds: float = 0.0
     critic: dict[str, Any] | None = None
     candidate_review: dict[str, Any] | None = None
-    repair_skipped_reason: str | None = None
+    repair_skipped_reason: RepairSkippedReason | None = None
 
     _dataframe: Any = PrivateAttr(default=None)

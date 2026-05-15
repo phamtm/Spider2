@@ -7,7 +7,13 @@ import pandas as pd
 
 from sol01.progress_ui.constants import QUESTION_STATUS_ORDER, STATUS_LABELS, TABLE_VISIBLE_ROWS
 from sol01.progress_ui.models import Record
-from sol01.progress_ui.utils import is_missing_value, missing_to_na, normalize_tag_values
+from sol01.progress_ui.utils import (
+    is_missing_value,
+    missing_to_na,
+    normalize_tag_values,
+    tier_display,
+    truncate_text,
+)
 
 
 def _record_timestamp_sort_key(timestamp: datetime | None, fallback_index: int) -> datetime:
@@ -114,25 +120,6 @@ def prepare_display_frame(frame: pd.DataFrame) -> pd.DataFrame:
     return display
 
 
-def _truncate_text(value: Any, limit: int) -> str:
-    if is_missing_value(value):
-        return ""
-    text = str(value).strip()
-    if len(text) <= limit:
-        return text
-    return text[: max(limit - 1, 0)].rstrip() + "\u2026"
-
-
-def _tier_display(value: Any) -> str:
-    if is_missing_value(value):
-        return "Uncategorized"
-    try:
-        return f"Tier {int(float(value))}"
-    except (TypeError, ValueError):
-        text = str(value).strip()
-        return text or "Uncategorized"
-
-
 def _tier_sort_value(value: Any) -> int:
     if is_missing_value(value):
         return 9999
@@ -185,18 +172,18 @@ def prepare_question_table(frame: pd.DataFrame) -> pd.DataFrame:
     display["status_sort"] = display["status_sort"].fillna(len(QUESTION_STATUS_ORDER))
     display["tier_sort"] = display["primary_tier"].apply(_tier_sort_value)
     display["status"] = display["status"].astype(str).map(STATUS_LABELS).fillna(display["status"])
-    display["primary_tier"] = display["primary_tier"].apply(_tier_display)
+    display["primary_tier"] = display["primary_tier"].apply(tier_display)
     display["tags"] = display["tags"].apply(
         lambda value: ", ".join(normalize_tag_values(value)) or "\u2014"
     )
     display["instruction"] = display["instruction"].apply(
-        lambda value: _truncate_text(value, 120) or "\u2014"
+        lambda value: truncate_text(value, 120) or "\u2014"
     )
-    display["note"] = display["note"].apply(lambda value: _truncate_text(value, 80) or "\u2014")
+    display["note"] = display["note"].apply(lambda value: truncate_text(value, 80) or "\u2014")
     display["diagnostics"] = display["diagnostics"].apply(
-        lambda value: _truncate_text(value, 120) or "\u2014"
+        lambda value: truncate_text(value, 120) or "\u2014"
     )
-    display["db"] = display["db"].apply(lambda value: _truncate_text(value, 48) or "\u2014")
+    display["db"] = display["db"].apply(lambda value: truncate_text(value, 48) or "\u2014")
 
     display = display.sort_values(
         by=["status_sort", "tier_sort", "instance_id"],
@@ -312,7 +299,7 @@ def prepare_debug_frame(frame: pd.DataFrame) -> pd.DataFrame:
             lambda value: "" if is_missing_value(value) else str(value)
         )
     if "primary_tier" in debug.columns:
-        debug["primary_tier"] = debug["primary_tier"].apply(_tier_display)
+        debug["primary_tier"] = debug["primary_tier"].apply(tier_display)
     if "tags" in debug.columns:
         debug["tags"] = debug["tags"].apply(
             lambda value: ", ".join(normalize_tag_values(value)) or "\u2014"
@@ -324,7 +311,7 @@ def prepare_debug_frame(frame: pd.DataFrame) -> pd.DataFrame:
             )
     if "diagnostics" in debug.columns:
         debug["diagnostics"] = debug["diagnostics"].apply(
-            lambda value: "" if is_missing_value(value) else _truncate_text(value, 120)
+            lambda value: "" if is_missing_value(value) else truncate_text(value, 120)
         )
     if "category_available" not in debug.columns:
         debug["category_available"] = False

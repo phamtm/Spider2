@@ -34,6 +34,7 @@ from sol01.pipeline_state import TaskRun
 from sol01.schema.db_index import load_db_index
 from sol01.schema.index import CACHE_PATH
 from sol01.schema.schema_context_cache import build_schema_context_cache
+from sol01.workflow import TASK_STATUS_FAILED, TASK_STATUS_SKIPPED, TASK_STATUS_SUCCESS
 
 logger = get_logger(__name__)
 
@@ -117,9 +118,9 @@ def run_tasks(
     logger.info(
         "run complete",
         run_id=run_id,
-        success_count=sum(1 for result in results if result.status == "success"),
-        failed_count=sum(1 for result in results if result.status == "failed"),
-        skipped_count=sum(1 for result in results if result.status == "skipped"),
+        success_count=sum(1 for result in results if result.status == TASK_STATUS_SUCCESS),
+        failed_count=sum(1 for result in results if result.status == TASK_STATUS_FAILED),
+        skipped_count=sum(1 for result in results if result.status == TASK_STATUS_SKIPPED),
     )
     return results
 

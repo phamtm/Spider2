@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from pydantic import BaseModel
@@ -10,12 +11,37 @@ from sol01.candidates.evaluator import evaluate_candidate
 from sol01.infra.config import SchemaContextConfig
 from sol01.infra.logging import get_logger
 from sol01.llm.client import LLMClient
-from sol01.llm.planning_prompts import schema_context_planning_user_prompt
+from sol01.llm.planning_prompts import (
+    sanitize_schema_planning_decision,
+    schema_context_planning_user_prompt,
+)
 from sol01.llm.prompt_budget import enforce_prompt_budget
-from sol01.models import AttemptRecord, SQLCandidate, Task
+from sol01.models import (
+    AttemptRecord,
+    SchemaContextObject,
+    SchemaPlanningDecision,
+    SQLCandidate,
+    TableSchema,
+    Task,
+)
 from sol01.pipeline_state import TaskRun
+from sol01.schema.schema_context import build_available_schema_context
+from sol01.schema.schema_context_cache import SchemaContextCache, build_schema_context_cache
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class SchemaPlanningRun:
+    """Shared planning result used by initial planning and schema recovery."""
+
+    cache: SchemaContextCache
+    schema_context_objects: list[SchemaContextObject]
+    context_diagnostics: dict[str, object]
+    planning_prompt: str
+    decision: SchemaPlanningDecision
+    planner_diagnostics: dict[str, object]
+    prompt_budget: dict[str, object]
 
 
 def build_planning_prompt(
@@ -78,6 +104,54 @@ def prompt_budget_diagnostics(
             }
         )
     return diagnostics
+
+
+def run_schema_planning(
+    *,
+    task: Task,
+    docs_context: str | None,
+    client: LLMClient,
+    prompt_hashes: dict[str, str],
+    schema_context_config: SchemaContextConfig,
+    db_index: dict[str, TableSchema] | None = None,
+    schema_context_cache: SchemaContextCache | None = None,
+) -> SchemaPlanningRun:
+    """Run the shared planner flow and return the sanitized decision plus diagnostics."""
+
+    cache = schema_context_cache or build_schema_context_cache(
+        task.db,
+        db_index=db_index,
+        config=schema_context_config,
+    )
+    schema_context_objects, context_diagnostics = build_available_schema_context(cache)
+    planning_prompt = build_planning_prompt(
+        task,
+        docs_context,
+        schema_context_objects,
+        schema_context_config=schema_context_config,
+    )
+    decision = run_prompt(
+        client,
+        prompt_hashes=prompt_hashes,
+        prompt_name="planning",
+        output_type=SchemaPlanningDecision,
+        user_prompt=planning_prompt,
+    )
+    sanitized_decision, planner_diagnostics = sanitize_schema_planning_decision(
+        decision, schema_context_objects
+    )
+    return SchemaPlanningRun(
+        cache=cache,
+        schema_context_objects=schema_context_objects,
+        context_diagnostics=context_diagnostics,
+        planning_prompt=planning_prompt,
+        decision=sanitized_decision,
+        planner_diagnostics=planner_diagnostics,
+        prompt_budget=prompt_budget_diagnostics(
+            planning_prompt=planning_prompt,
+            schema_context_config=schema_context_config,
+        ),
+    )
 
 
 def log_candidate(instance_id: str, attempt: AttemptRecord) -> None:

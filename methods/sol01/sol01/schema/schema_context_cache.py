@@ -26,6 +26,7 @@ from sol01.infra.fs_cache import (
 )
 from sol01.infra.logging import get_logger
 from sol01.infra.paths import REPO_ROOT
+from sol01.infra.policy import DEFAULT_SCHEMA_CONTEXT_CACHE_POLICY
 from sol01.models import SchemaObject, TableSchema
 from sol01.schema.db_index import load_db_index
 from sol01.schema.large_schema_summaries import (
@@ -58,8 +59,8 @@ REQUIRED_MANIFEST_FIELDS = frozenset(
 DEFAULT_SCHEMA_CONTEXT_CACHE_ROOT = (
     REPO_ROOT / "methods" / "sol01" / ".cache" / "schema_context_cache"
 ).resolve()
-DEFAULT_LOCK_TIMEOUT_SECONDS = 60.0
-DEFAULT_LOCK_POLL_SECONDS = 0.1
+DEFAULT_LOCK_TIMEOUT_SECONDS = DEFAULT_SCHEMA_CONTEXT_CACHE_POLICY.lock_timeout_seconds
+DEFAULT_LOCK_POLL_SECONDS = DEFAULT_SCHEMA_CONTEXT_CACHE_POLICY.lock_poll_seconds
 logger = get_logger(__name__)
 
 

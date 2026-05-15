@@ -11,7 +11,6 @@ from sol01.candidates.verification import (
 )
 from sol01.infra.logging import get_logger
 from sol01.infra.policy import DEFAULT_RECOVERY_SIGNAL_POLICY
-from sol01.llm.planning_prompts import sanitize_schema_planning_decision
 from sol01.llm.sql_prompts import (
     candidate_review_prompt,
     semantic_repair_prompt,
@@ -21,18 +20,17 @@ from sol01.llm.sql_prompts import (
 from sol01.models import (
     CandidateReviewReport,
     ConfidenceReport,
-    SchemaPlanningDecision,
     SelectedSchemaObject,
     SQLCandidate,
     SQLCandidateBatch,
 )
 from sol01.pipeline_state import TaskRun, current_best
 from sol01.pipeline_support import (
-    build_planning_prompt,
     checked_schema_prompt,
     evaluate_and_record_candidate,
     prompt_budget_diagnostics,
     run_prompt,
+    run_schema_planning,
 )
 from sol01.recovery_signals import schema_expansion_trigger
 from sol01.schema.db_index import load_db_index
@@ -43,8 +41,37 @@ from sol01.schema.expansion import (
     schema_context_with_expansion,
     schema_expansion_query,
 )
-from sol01.schema.schema_context import build_available_schema_context
 from sol01.schema.schema_context_cache import build_schema_context_cache
+from sol01.workflow import (
+    RECOVERY_KIND_SCHEMA,
+    RECOVERY_KIND_SEMANTIC,
+    RECOVERY_KIND_SQL,
+    RECOVERY_OUTCOME_DB_INDEX_UNAVAILABLE,
+    RECOVERY_OUTCOME_EXPANDED,
+    RECOVERY_OUTCOME_EXPANDED_FAILED,
+    RECOVERY_OUTCOME_EXPANDED_NO_CANDIDATE,
+    RECOVERY_OUTCOME_NO_NEW_TABLES,
+    RECOVERY_OUTCOME_RECOVERED,
+    RECOVERY_OUTCOME_STILL_FAILED,
+    RECOVERY_STAGE_SCHEMA,
+    RECOVERY_STAGE_SEMANTIC,
+    RECOVERY_STAGE_SQL,
+    REPAIR_SKIPPED_REASON_ATTEMPT_BUDGET,
+    REPAIR_SKIPPED_REASON_SEMANTIC_BUDGET,
+    STOP_REASON_ATTEMPT_BUDGET_EXHAUSTED,
+    STOP_REASON_NO_ATTEMPTS,
+    STOP_REASON_NO_RECOVERY_NEEDED,
+    STOP_REASON_REVIEW_COMPLETE,
+    STOP_REASON_SCHEMA_RECOVERY_COMPLETE,
+    STOP_REASON_SEMANTIC_REPAIR_BUDGET_EXHAUSTED,
+    STOP_REASON_SQL_RECOVERY_COMPLETE,
+    CandidateReviewTrace,
+    RecoveryKind,
+    RecoveryOutcome,
+    RecoveryStopReason,
+    RecoveryTrace,
+    is_initial_attempt_stage,
+)
 
 logger = get_logger(__name__)
 
@@ -53,10 +80,10 @@ logger = get_logger(__name__)
 class RecoveryAction:
     """Typed recovery action record that can be serialized into traces."""
 
-    kind: str
+    kind: RecoveryKind
     trigger: str
     source_stage: str
-    outcome: str
+    outcome: RecoveryOutcome
     attempt_stage: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
 
@@ -78,41 +105,41 @@ def run_recovery_stage(run: TaskRun) -> TaskRun:
     actions: list[RecoveryAction] = []
     remaining_semantic_repairs = run.policy.semantic_repairs
     review_ran = False
-    stop_reason = "no_attempts"
+    stop_reason: RecoveryStopReason = STOP_REASON_NO_ATTEMPTS
 
     while True:
         best = current_best(run)
         if best is None:
-            stop_reason = "no_attempts"
+            stop_reason = STOP_REASON_NO_ATTEMPTS
             break
 
         schema_trigger = schema_expansion_trigger(best)
         if schema_trigger is not None:
             if len(run.attempts) >= run.policy.max_attempts:
-                best.repair_skipped_reason = "attempt budget exhausted"
-                stop_reason = "attempt_budget_exhausted"
+                best.repair_skipped_reason = REPAIR_SKIPPED_REASON_ATTEMPT_BUDGET
+                stop_reason = STOP_REASON_ATTEMPT_BUDGET_EXHAUSTED
                 break
 
             action = _run_schema_recovery(run, best=best, trigger=schema_trigger)
             actions.append(action)
-            if action.outcome == "expanded":
-                stop_reason = "schema_recovery_complete"
+            if action.outcome == RECOVERY_OUTCOME_EXPANDED:
+                stop_reason = STOP_REASON_SCHEMA_RECOVERY_COMPLETE
                 break
-            if action.outcome != "expanded_failed":
+            if action.outcome != RECOVERY_OUTCOME_EXPANDED_FAILED:
                 stop_reason = action.outcome
                 break
             continue
 
         if not best.execution_result.ok:
             if len(run.attempts) >= run.policy.max_attempts:
-                best.repair_skipped_reason = "attempt budget exhausted"
-                stop_reason = "attempt_budget_exhausted"
+                best.repair_skipped_reason = REPAIR_SKIPPED_REASON_ATTEMPT_BUDGET
+                stop_reason = STOP_REASON_ATTEMPT_BUDGET_EXHAUSTED
                 break
 
             action = _run_sql_recovery(run, best=best)
             actions.append(action)
-            if action.outcome == "recovered":
-                stop_reason = "sql_recovery_complete"
+            if action.outcome == RECOVERY_OUTCOME_RECOVERED:
+                stop_reason = STOP_REASON_SQL_RECOVERY_COMPLETE
                 break
             continue
 
@@ -120,38 +147,38 @@ def run_recovery_stage(run: TaskRun) -> TaskRun:
             review = _run_candidate_review(run, best=best)
             review_ran = True
             if not review.should_repair:
-                stop_reason = "review_complete"
+                stop_reason = STOP_REASON_REVIEW_COMPLETE
                 break
             if remaining_semantic_repairs < 1:
                 best = current_best(run, preferred_stage=review.preferred_stage) or best
-                best.repair_skipped_reason = "semantic repair budget exhausted"
-                stop_reason = "semantic_repair_budget_exhausted"
+                best.repair_skipped_reason = REPAIR_SKIPPED_REASON_SEMANTIC_BUDGET
+                stop_reason = STOP_REASON_SEMANTIC_REPAIR_BUDGET_EXHAUSTED
                 break
             if len(run.attempts) >= run.policy.max_attempts:
                 best = current_best(run, preferred_stage=review.preferred_stage) or best
-                best.repair_skipped_reason = "attempt budget exhausted"
-                stop_reason = "attempt_budget_exhausted"
+                best.repair_skipped_reason = REPAIR_SKIPPED_REASON_ATTEMPT_BUDGET
+                stop_reason = STOP_REASON_ATTEMPT_BUDGET_EXHAUSTED
                 break
 
             actions.append(_run_semantic_recovery(run, best=best, review=review))
             remaining_semantic_repairs -= 1
             continue
 
-        stop_reason = "no_recovery_needed"
+        stop_reason = STOP_REASON_NO_RECOVERY_NEEDED
         break
 
-    run.recovery_payload = {
-        "priority_order": list(DEFAULT_RECOVERY_SIGNAL_POLICY.priority_order),
-        "attempts_before_recovery": len(
-            [attempt for attempt in run.attempts if attempt.stage.startswith("initial_")]
+    run.recovery_payload = RecoveryTrace(
+        priority_order=list(DEFAULT_RECOVERY_SIGNAL_POLICY.priority_order),
+        attempts_before_recovery=len(
+            [attempt for attempt in run.attempts if is_initial_attempt_stage(attempt.stage)]
         ),
-        "attempts_after_recovery": len(run.attempts),
-        "max_attempts": run.policy.max_attempts,
-        "semantic_repairs_allowed": run.policy.semantic_repairs,
-        "semantic_repairs_remaining": remaining_semantic_repairs,
-        "actions": [action.as_trace_payload() for action in actions],
-        "stop_reason": stop_reason,
-    }
+        attempts_after_recovery=len(run.attempts),
+        max_attempts=run.policy.max_attempts,
+        semantic_repairs_allowed=run.policy.semantic_repairs,
+        semantic_repairs_remaining=remaining_semantic_repairs,
+        actions=[action.as_trace_payload() for action in actions],
+        stop_reason=stop_reason,
+    )
     return run
 
 
@@ -163,45 +190,31 @@ def _select_expansion_objects(
 ) -> tuple[list[SelectedSchemaObject], list[Any], dict[str, object]]:
     """Select and sanitize schema objects for one expansion attempt."""
 
-    schema_context_objects, context_diagnostics = build_available_schema_context(
-        schema_context_cache
-    )
     expansion_task = run.task.model_copy(
         update={"question": f"{run.task.question}\n\nSchema expansion evidence:\n{expansion_query}"}
     )
-    planning_prompt = build_planning_prompt(
-        expansion_task,
-        run.docs_context,
-        schema_context_objects,
-        schema_context_config=run.schema_context_config,
-    )
-    decision = run_prompt(
-        run.client,
+    planning = run_schema_planning(
+        task=expansion_task,
+        docs_context=run.docs_context,
+        client=run.client,
         prompt_hashes=run.prompt_hashes,
-        prompt_name="planning",
-        output_type=SchemaPlanningDecision,
-        user_prompt=planning_prompt,
-    )
-    sanitized_decision, planner_diagnostics = sanitize_schema_planning_decision(
-        decision, schema_context_objects
+        schema_context_config=run.schema_context_config,
+        schema_context_cache=schema_context_cache,
     )
     current_ids = set(run.schema.selected_object_ids)
     selected_additions = [
         selected
-        for selected in sanitized_decision.selected_objects
+        for selected in planning.decision.selected_objects
         if selected.object_id not in current_ids
     ]
     diagnostics: dict[str, object] = {
-        "available_context": context_diagnostics,
-        "planner": planner_diagnostics,
-        "prompt_budget": prompt_budget_diagnostics(
-            planning_prompt=planning_prompt,
-            schema_context_config=run.schema_context_config,
-        ),
-        "rationale": sanitized_decision.rationale,
-        "confidence": sanitized_decision.confidence,
+        "available_context": planning.context_diagnostics,
+        "planner": planning.planner_diagnostics,
+        "prompt_budget": planning.prompt_budget,
+        "rationale": planning.decision.rationale,
+        "confidence": planning.decision.confidence,
     }
-    return selected_additions, schema_context_objects, diagnostics
+    return selected_additions, planning.schema_context_objects, diagnostics
 
 
 def _run_sql_recovery(run: TaskRun, *, best) -> RecoveryAction:
@@ -226,13 +239,15 @@ def _run_sql_recovery(run: TaskRun, *, best) -> RecoveryAction:
             run.docs_context,
         ),
     )
-    attempt = evaluate_and_record_candidate(run, candidate=repaired, stage="recovery_sql")
+    attempt = evaluate_and_record_candidate(run, candidate=repaired, stage=RECOVERY_STAGE_SQL)
     return RecoveryAction(
-        kind="sql",
+        kind=RECOVERY_KIND_SQL,
         trigger="best_attempt_not_executable",
         source_stage=best.stage,
         attempt_stage=attempt.stage,
-        outcome="recovered" if attempt.execution_result.ok else "still_failed",
+        outcome=RECOVERY_OUTCOME_RECOVERED
+        if attempt.execution_result.ok
+        else RECOVERY_OUTCOME_STILL_FAILED,
     )
 
 
@@ -268,10 +283,10 @@ def _run_candidate_review(run: TaskRun, *, best) -> CandidateReviewReport:
             review_reason=review_reason,
         ),
     )
-    run.candidate_review_payload = {
-        "review_reason": review_reason,
+    run.candidate_review_payload = CandidateReviewTrace(
+        review_reason=review_reason,
         **review.model_dump(mode="json"),
-    }
+    )
     annotated = current_best(run, preferred_stage=review.preferred_stage) or best
     annotated.critic = {
         "confidence": review.confidence,
@@ -279,7 +294,7 @@ def _run_candidate_review(run: TaskRun, *, best) -> CandidateReviewReport:
         "should_repair": review.should_repair,
         "repair_focus": review.repair_focus,
     }
-    annotated.candidate_review = run.candidate_review_payload
+    annotated.candidate_review = run.candidate_review_payload.model_dump(mode="json")
 
     logger.info(
         "candidate review complete",
@@ -326,13 +341,15 @@ def _run_semantic_recovery(
             run.docs_context,
         ),
     )
-    attempt = evaluate_and_record_candidate(run, candidate=repaired, stage="recovery_semantic")
+    attempt = evaluate_and_record_candidate(run, candidate=repaired, stage=RECOVERY_STAGE_SEMANTIC)
     return RecoveryAction(
-        kind="semantic",
+        kind=RECOVERY_KIND_SEMANTIC,
         trigger=review.repair_focus or "critic_requested_repair",
         source_stage=best.stage,
         attempt_stage=attempt.stage,
-        outcome="recovered" if attempt.execution_result.ok else "still_failed",
+        outcome=RECOVERY_OUTCOME_RECOVERED
+        if attempt.execution_result.ok
+        else RECOVERY_OUTCOME_STILL_FAILED,
     )
 
 
@@ -348,10 +365,10 @@ def _run_schema_recovery(
         db_index = load_db_index(run.task.db)
     except Exception:
         return RecoveryAction(
-            kind="schema",
+            kind=RECOVERY_KIND_SCHEMA,
             trigger=trigger,
             source_stage=best.stage,
-            outcome="db_index_unavailable",
+            outcome=RECOVERY_OUTCOME_DB_INDEX_UNAVAILABLE,
             details={
                 "decision": None,
                 "added_tables": [],
@@ -431,10 +448,10 @@ def _run_schema_recovery(
 
     if not added_tables:
         action = RecoveryAction(
-            kind="schema",
+            kind=RECOVERY_KIND_SCHEMA,
             trigger=trigger,
             source_stage=best.stage,
-            outcome="no_new_tables",
+            outcome=RECOVERY_OUTCOME_NO_NEW_TABLES,
             details=details,
         )
         run.schema_context = schema_context_with_expansion(
@@ -474,10 +491,10 @@ def _run_schema_recovery(
 
     if not batch.candidates:
         action = RecoveryAction(
-            kind="schema",
+            kind=RECOVERY_KIND_SCHEMA,
             trigger=trigger,
             source_stage=best.stage,
-            outcome="expanded_no_candidate",
+            outcome=RECOVERY_OUTCOME_EXPANDED_NO_CANDIDATE,
             details=details,
         )
         run.schema_context = schema_context_with_expansion(
@@ -489,14 +506,16 @@ def _run_schema_recovery(
     attempt = evaluate_and_record_candidate(
         run,
         candidate=batch.candidates[0],
-        stage="recovery_schema",
+        stage=RECOVERY_STAGE_SCHEMA,
     )
     action = RecoveryAction(
-        kind="schema",
+        kind=RECOVERY_KIND_SCHEMA,
         trigger=trigger,
         source_stage=best.stage,
         attempt_stage=attempt.stage,
-        outcome="expanded" if attempt.execution_result.ok else "expanded_failed",
+        outcome=RECOVERY_OUTCOME_EXPANDED
+        if attempt.execution_result.ok
+        else RECOVERY_OUTCOME_EXPANDED_FAILED,
         details=details,
     )
     run.schema_context = schema_context_with_expansion(

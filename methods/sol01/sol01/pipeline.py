@@ -10,12 +10,10 @@ from sol01.candidates.verification import (
 )
 from sol01.infra.logging import get_logger
 from sol01.infra.strings import question_preview
-from sol01.llm.planning_prompts import sanitize_schema_planning_decision
 from sol01.llm.sql_prompts import sql_generation_batch_prompt
 from sol01.loading.docs import load_document_text
 from sol01.models import (
     FinalAnswer,
-    SchemaPlanningDecision,
     SchemaSelection,
     SQLCandidateBatch,
     Task,
@@ -26,16 +24,15 @@ from sol01.output.output import (
 )
 from sol01.pipeline_state import TaskRun
 from sol01.pipeline_support import (
-    build_planning_prompt,
     checked_schema_prompt,
     evaluate_and_record_candidate,
     prompt_budget_diagnostics,
     run_prompt,
+    run_schema_planning,
 )
 from sol01.schema.db_index import load_db_index
 from sol01.schema.resolver import resolve_schema_context
-from sol01.schema.schema_context import build_available_schema_context
-from sol01.schema.schema_context_cache import build_schema_context_cache
+from sol01.workflow import TASK_STATUS_SKIPPED, initial_attempt_stage
 
 logger = get_logger(__name__)
 
@@ -70,7 +67,7 @@ def check_skip(
     )
     return FinalAnswer(
         instance_id=task.instance_id,
-        status="skipped",
+        status=TASK_STATUS_SKIPPED,
         sql=existing_trace.get("final_sql"),
         csv_path=existing_trace.get("csv_path"),
         trace_path=str(task_trace_path),
@@ -93,38 +90,22 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
     )
 
     db_index = load_db_index(run.task.db)
-    schema_context_cache = build_schema_context_cache(
-        run.task.db,
-        db_index=db_index,
-        config=run.schema_context_config,
-    )
-    schema_context_objects, context_diagnostics = build_available_schema_context(
-        schema_context_cache
-    )
-    planning_prompt = build_planning_prompt(
-        run.task,
-        run.docs_context,
-        schema_context_objects,
-        schema_context_config=run.schema_context_config,
-    )
-    decision = run_prompt(
-        run.client,
+    planning = run_schema_planning(
+        task=run.task,
+        docs_context=run.docs_context,
+        client=run.client,
         prompt_hashes=run.prompt_hashes,
-        prompt_name="planning",
-        output_type=SchemaPlanningDecision,
-        user_prompt=planning_prompt,
-    )
-    sanitized_decision, planner_diagnostics = sanitize_schema_planning_decision(
-        decision, schema_context_objects
+        schema_context_config=run.schema_context_config,
+        db_index=db_index,
     )
     resolved = resolve_schema_context(
         db=run.task.db,
-        selected_objects=sanitized_decision.selected_objects,
-        canonical_schema_objects=schema_context_cache.objects,
+        selected_objects=planning.decision.selected_objects,
+        canonical_schema_objects=planning.cache.objects,
         db_index=db_index,
         question=run.task.question,
-        schema_context_evidence=schema_context_objects,
-        constraints=sanitized_decision.constraints,
+        schema_context_evidence=planning.schema_context_objects,
+        constraints=planning.decision.constraints,
     )
     sql_ref_context = checked_schema_prompt(
         "sql_reference_context",
@@ -132,33 +113,33 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
         run.schema_context_config,
     )
     prompt_budget = prompt_budget_diagnostics(
-        planning_prompt=planning_prompt,
+        planning_prompt=planning.planning_prompt,
         sql_reference_context=sql_ref_context,
         schema_context_config=run.schema_context_config,
     )
 
     run.schema = SchemaSelection(
         db=run.task.db,
-        selected_object_ids=[s.object_id for s in sanitized_decision.selected_objects],
+        selected_object_ids=[s.object_id for s in planning.decision.selected_objects],
         expanded_tables=list(resolved.resolved_tables),
-        rationale=sanitized_decision.rationale,
-        confidence=sanitized_decision.confidence,
+        rationale=planning.decision.rationale,
+        confidence=planning.decision.confidence,
         diagnostics={
-            "planning_prompt_chars": len(planning_prompt),
+            "planning_prompt_chars": len(planning.planning_prompt),
             "sql_reference_context_chars": len(sql_ref_context),
             "max_schema_prompt_chars": run.schema_context_config.max_schema_prompt_chars,
             "prompt_budget": prompt_budget,
-            "schema_context_object_count": len(schema_context_objects),
+            "schema_context_object_count": len(planning.schema_context_objects),
             "selected_objects": [
-                s.model_dump(mode="json") for s in sanitized_decision.selected_objects
+                s.model_dump(mode="json") for s in planning.decision.selected_objects
             ],
             "resolved_tables": list(resolved.resolved_tables),
-            "planner": planner_diagnostics,
+            "planner": planning.planner_diagnostics,
             "resolver": resolved.diagnostics,
         },
     )
     run.intent = augment_intent_with_value_groundings(
-        sanitized_decision.intent,
+        planning.decision.intent,
         task=run.task,
         schema=run.schema,
         table_schemas=resolved.table_schemas,
@@ -167,11 +148,11 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
     run.sql_reference_context = sql_ref_context
     run.schema_context = {
         "cache": {
-            "db": schema_context_cache.db,
-            "cache_key": schema_context_cache.cache_key,
-            "object_count": len(schema_context_cache.objects),
+            "db": planning.cache.db,
+            "cache_key": planning.cache.cache_key,
+            "object_count": len(planning.cache.objects),
         },
-        "available_context": context_diagnostics,
+        "available_context": planning.context_diagnostics,
         "schema_context_objects": [
             {
                 "object_id": item.schema_object.object_id,
@@ -180,9 +161,9 @@ def plan_schema(run: TaskRun, *, run_paths: RunPaths) -> TaskRun:
                 "table_name": item.schema_object.table_name,
                 "position": item.position,
             }
-            for item in schema_context_objects
+            for item in planning.schema_context_objects
         ],
-        "planner": planner_diagnostics,
+        "planner": planning.planner_diagnostics,
         "resolver": resolved.diagnostics,
         "prompt_budget": prompt_budget,
     }
@@ -232,5 +213,9 @@ def generate_initial_candidates(run: TaskRun) -> TaskRun:
         ),
     )
     for i, candidate in enumerate(batch.candidates[:candidate_limit]):
-        evaluate_and_record_candidate(run, candidate=candidate, stage=f"initial_{i + 1}")
+        evaluate_and_record_candidate(
+            run,
+            candidate=candidate,
+            stage=initial_attempt_stage(i + 1),
+        )
     return run

@@ -11,6 +11,7 @@ from sol01.infra.logging import get_logger
 from sol01.models import ExecutionResult, FinalAnswer
 from sol01.output.output import RunPaths, csv_path_for, write_sql, write_trace
 from sol01.pipeline_state import TaskRun, current_best
+from sol01.workflow import TASK_STATUS_FAILED, TASK_STATUS_SUCCESS
 
 logger = get_logger(__name__)
 
@@ -48,9 +49,9 @@ def write_task_output(
         "attempts": [attempt.model_dump(mode="json") for attempt in run.attempts],
     }
     if run.candidate_review_payload is not None:
-        trace_payload["candidate_review"] = run.candidate_review_payload
+        trace_payload["candidate_review"] = run.candidate_review_payload.model_dump(mode="json")
     if run.recovery_payload is not None:
-        trace_payload["recovery"] = run.recovery_payload
+        trace_payload["recovery"] = run.recovery_payload.model_dump(mode="json")
     if live_logging_enabled:
         trace_payload["llm_call_log_path"] = str(task_llm_log_path)
 
@@ -70,7 +71,7 @@ def write_task_output(
         )
         trace_payload.update(
             {
-                "status": "success",
+                "status": TASK_STATUS_SUCCESS,
                 "final_sql": best.sql,
                 "sql_path": str(sql_path),
                 "csv_path": str(csv_path),
@@ -82,7 +83,7 @@ def write_task_output(
         logger.info(
             "task complete",
             instance_id=task.instance_id,
-            status="success",
+            status=TASK_STATUS_SUCCESS,
             run_root=str(run_paths.root),
             attempts=len(run.attempts),
             best_stage=best.stage,
@@ -95,7 +96,7 @@ def write_task_output(
         )
         return FinalAnswer(
             instance_id=task.instance_id,
-            status="success",
+            status=TASK_STATUS_SUCCESS,
             sql=best.sql,
             csv_path=str(csv_path),
             trace_path=str(task_trace_path),
@@ -103,7 +104,7 @@ def write_task_output(
 
     trace_payload.update(
         {
-            "status": "failed",
+            "status": TASK_STATUS_FAILED,
             "final_sql": best.sql if best is not None else None,
             "csv_path": None,
         }
@@ -113,7 +114,7 @@ def write_task_output(
     logger.warning(
         "task complete",
         instance_id=task.instance_id,
-        status="failed",
+        status=TASK_STATUS_FAILED,
         run_root=str(run_paths.root),
         attempts=len(run.attempts),
         best_stage=best.stage if best is not None else None,
@@ -123,7 +124,7 @@ def write_task_output(
     )
     return FinalAnswer(
         instance_id=task.instance_id,
-        status="failed",
+        status=TASK_STATUS_FAILED,
         sql=best.sql if best is not None else None,
         csv_path=None,
         trace_path=str(task_trace_path),

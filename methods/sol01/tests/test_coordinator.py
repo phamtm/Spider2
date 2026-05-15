@@ -180,28 +180,15 @@ def db_index(monkeypatch: pytest.MonkeyPatch) -> dict[str, TableSchema]:
         lambda *args, **kwargs: schema_context_cache,
     )
     monkeypatch.setattr(
-        "sol01.pipeline.build_schema_context_cache",
-        lambda *args, **kwargs: schema_context_cache,
-    )
-    monkeypatch.setattr(
         "sol01.pipeline_recovery.build_schema_context_cache",
         lambda *args, **kwargs: schema_context_cache,
     )
     monkeypatch.setattr(
-        "sol01.pipeline.build_available_schema_context",
-        lambda *args, **kwargs: (
-            [
-                SchemaContextObject(schema_object=schema_objects[0], position=1),
-                SchemaContextObject(schema_object=schema_objects[1], position=2),
-            ],
-            {
-                "question_context": {"text": "test query"},
-                "context_counts": {"available_objects": 2},
-            },
-        ),
+        "sol01.pipeline_support.build_schema_context_cache",
+        lambda *args, **kwargs: schema_context_cache,
     )
     monkeypatch.setattr(
-        "sol01.pipeline_recovery.build_available_schema_context",
+        "sol01.pipeline_support.build_available_schema_context",
         lambda *args, **kwargs: (
             [
                 SchemaContextObject(schema_object=schema_objects[0], position=1),
@@ -483,11 +470,7 @@ def test_schema_expansion_selects_context_for_missing_column(
         )
 
     monkeypatch.setattr(
-        "sol01.pipeline.build_available_schema_context",
-        fake_build_available_schema_context,
-    )
-    monkeypatch.setattr(
-        "sol01.pipeline_recovery.build_available_schema_context",
+        "sol01.pipeline_support.build_available_schema_context",
         fake_build_available_schema_context,
     )
     task = Task(instance_id="sf_context_expand", db="TEST_DB", question="Show order totals.")

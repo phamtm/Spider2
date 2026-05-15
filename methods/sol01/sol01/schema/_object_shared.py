@@ -8,14 +8,15 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
+from sol01.infra.policy import DEFAULT_SCHEMA_OBJECT_POLICY
 from sol01.models import ColumnSchema, TableSchema
 
 PrimitiveType = Literal["string", "numeric", "boolean", "temporal", "semi_structured", "unknown"]
 
-DEFAULT_MAX_SAMPLE_VALUES_PER_COLUMN = 20
-DEFAULT_MAX_JOIN_CANDIDATES = 2_000
-DEFAULT_MAX_JOIN_CANDIDATES_PER_COLUMN = 100
-DEFAULT_MAX_FAMILY_VARIANT_COLUMNS = 20
+DEFAULT_MAX_SAMPLE_VALUES_PER_COLUMN = DEFAULT_SCHEMA_OBJECT_POLICY.max_sample_values_per_column
+DEFAULT_MAX_JOIN_CANDIDATES = DEFAULT_SCHEMA_OBJECT_POLICY.max_join_candidates
+DEFAULT_MAX_JOIN_CANDIDATES_PER_COLUMN = DEFAULT_SCHEMA_OBJECT_POLICY.max_join_candidates_per_column
+DEFAULT_MAX_FAMILY_VARIANT_COLUMNS = DEFAULT_SCHEMA_OBJECT_POLICY.max_family_variant_columns
 
 _KEY_TOKENS = {"id", "ids", "identifier", "uuid", "guid", "key", "pk", "fk"}
 _TIME_TOKENS = {

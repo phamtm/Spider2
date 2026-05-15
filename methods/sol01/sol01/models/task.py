@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from sol01.workflow import TaskStatus
 
 
 class Task(BaseModel):
@@ -62,7 +63,7 @@ class FinalAnswer(BaseModel):
     """The final per-task status recorded by the coordinator."""
 
     instance_id: str
-    status: Literal["success", "failed", "skipped"]
+    status: TaskStatus
     sql: str | None
     csv_path: str | None
     trace_path: str

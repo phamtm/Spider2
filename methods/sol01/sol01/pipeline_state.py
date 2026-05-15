@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Any
 
 from sol01.candidates.selection import select_winner
 from sol01.infra.config import SchemaContextConfig
 from sol01.infra.policy import DEFAULT_SOLVER_POLICY, SolverPolicy
 from sol01.llm.client import LLMClient
 from sol01.models import AttemptRecord, Intent, SchemaSelection, Task
+from sol01.workflow import CandidateReviewTrace, RecoveryTrace
 
 
 @dataclasses.dataclass
@@ -24,16 +24,16 @@ class TaskRun:
     # Set during plan_schema
     intent: Intent | None = None
     schema: SchemaSelection | None = None
-    table_schemas: dict[str, Any] = dataclasses.field(default_factory=dict)
+    table_schemas: dict[str, object] = dataclasses.field(default_factory=dict)
     sql_reference_context: str = ""
     docs_context: str | None = None
-    schema_context: dict[str, Any] = dataclasses.field(default_factory=dict)
+    schema_context: dict[str, object] = dataclasses.field(default_factory=dict)
 
     # Accumulated across stages
     prompt_hashes: dict[str, str] = dataclasses.field(default_factory=dict)
     attempts: list[AttemptRecord] = dataclasses.field(default_factory=list)
-    candidate_review_payload: dict[str, Any] | None = None
-    recovery_payload: dict[str, Any] | None = None
+    candidate_review_payload: CandidateReviewTrace | None = None
+    recovery_payload: RecoveryTrace | None = None
 
 
 def current_best(run: TaskRun, *, preferred_stage: str | None = None) -> AttemptRecord | None:

@@ -13,26 +13,12 @@ from sol01.progress_ui.constants import (
     STATUS_COLORS,
     STATUS_LABELS,
 )
-from sol01.progress_ui.utils import is_missing_value, normalize_tag_values
-
-
-def _truncate_text(value: Any, limit: int) -> str:
-    if is_missing_value(value):
-        return ""
-    text = str(value).strip()
-    if len(text) <= limit:
-        return text
-    return text[: max(limit - 1, 0)].rstrip() + "\u2026"
-
-
-def _tier_display(value: Any) -> str:
-    if is_missing_value(value):
-        return "Uncategorized"
-    try:
-        return f"Tier {int(float(value))}"
-    except (TypeError, ValueError):
-        text = str(value).strip()
-        return text or "Uncategorized"
+from sol01.progress_ui.utils import (
+    is_missing_value,
+    normalize_tag_values,
+    tier_display,
+    truncate_text,
+)
 
 
 def _status_dot_label(status: str) -> str:
@@ -54,11 +40,11 @@ def format_question_option(row: pd.Series | dict[str, Any]) -> str:
         parts.append(STATUS_LABELS.get(status, status.title()))
     tier = data.get("primary_tier")
     if not is_missing_value(tier):
-        parts.append(_tier_display(tier))
+        parts.append(tier_display(tier))
     db = data.get("db")
     if not is_missing_value(db):
         parts.append(str(db))
-    instruction = _truncate_text(data.get("instruction"), 80)
+    instruction = truncate_text(data.get("instruction"), 80)
     if instruction:
         parts.append(instruction)
     return " | ".join(parts)
@@ -75,7 +61,7 @@ def select_question_row(frame: pd.DataFrame, instance_id: str | None) -> dict[st
         str(row.get("status") or ""), str(row.get("status") or "")
     )
     tier = row.get("primary_tier")
-    row["primary_tier_label"] = _tier_display(tier)
+    row["primary_tier_label"] = tier_display(tier)
     row["tags_label"] = ", ".join(normalize_tag_values(row.get("tags"))) or "\u2014"
     row["instruction"] = (
         "" if is_missing_value(row.get("instruction")) else str(row.get("instruction"))

@@ -72,6 +72,16 @@ class SchemaRenderPolicy:
 
 
 @dataclass(frozen=True)
+class SchemaObjectPolicy:
+    """Bounds used while converting raw tables into schema objects."""
+
+    max_sample_values_per_column: int = 20
+    max_join_candidates: int = 2_000
+    max_join_candidates_per_column: int = 100
+    max_family_variant_columns: int = 20
+
+
+@dataclass(frozen=True)
 class FilterGroundingPolicy:
     """Caps for empty-result filter grounding probes."""
 
@@ -86,6 +96,14 @@ class RecoverySignalPolicy:
 
     priority_order: tuple[str, ...] = ("schema", "sql", "semantic")
     execution_error_preview_chars: int = 300
+
+
+@dataclass(frozen=True)
+class SchemaContextCachePolicy:
+    """Build-lock defaults for versioned schema-context caches."""
+
+    lock_timeout_seconds: float = 60.0
+    lock_poll_seconds: float = 0.1
 
 
 @dataclass(frozen=True)
@@ -112,7 +130,9 @@ DEFAULT_RUNTIME_PROFILE = RuntimeProfile()
 DEFAULT_SCHEMA_CONTEXT_POLICY = SchemaContextPolicy()
 DEFAULT_PROMPT_BUDGET_POLICY = PromptBudgetPolicy()
 DEFAULT_SCHEMA_RENDER_POLICY = SchemaRenderPolicy()
+DEFAULT_SCHEMA_OBJECT_POLICY = SchemaObjectPolicy()
 DEFAULT_FILTER_GROUNDING_POLICY = FilterGroundingPolicy()
 DEFAULT_RECOVERY_SIGNAL_POLICY = RecoverySignalPolicy()
+DEFAULT_SCHEMA_CONTEXT_CACHE_POLICY = SchemaContextCachePolicy()
 DEFAULT_EVAL_DATASET_POLICY = EvalDatasetPolicy()
 DEFAULT_SCHEMA_CONTEXT_EVAL_POLICY = SchemaContextEvalPolicy()

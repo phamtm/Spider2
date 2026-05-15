@@ -7,6 +7,7 @@ from typing import Any
 
 from sol01.candidates.scoring import best_attempt as _score_best
 from sol01.models import AttemptRecord
+from sol01.workflow import RECOVERY_STAGE_SCHEMA, RECOVERY_STAGE_SEMANTIC, RECOVERY_STAGE_SQL
 
 
 @dataclasses.dataclass
@@ -58,21 +59,23 @@ def select_winner(
 def final_winner_reason(
     winner: AttemptRecord | None,
     *,
-    candidate_review_payload: dict[str, Any] | None,
+    candidate_review_payload: Any | None,
 ) -> str | None:
     """Derive a human-readable reason for why this attempt is the final winner."""
     if winner is None:
         return None
     stage = winner.stage
-    if (
-        candidate_review_payload is not None
-        and candidate_review_payload.get("preferred_stage") == stage
-    ):
+    preferred_stage = None
+    if isinstance(candidate_review_payload, dict):
+        preferred_stage = candidate_review_payload.get("preferred_stage")
+    elif candidate_review_payload is not None:
+        preferred_stage = getattr(candidate_review_payload, "preferred_stage", None)
+    if preferred_stage is not None and preferred_stage == stage:
         return f"model preferred: {stage}"
-    if stage == "recovery_semantic":
+    if stage == RECOVERY_STAGE_SEMANTIC:
         return "recovery: semantic fix won"
-    if stage == "recovery_schema":
+    if stage == RECOVERY_STAGE_SCHEMA:
         return "recovery: schema fix won"
-    if stage == "recovery_sql":
+    if stage == RECOVERY_STAGE_SQL:
         return "recovery: SQL fix won"
     return f"score: best executable (stage={stage})"
