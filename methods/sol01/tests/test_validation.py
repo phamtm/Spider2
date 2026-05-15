@@ -221,6 +221,44 @@ def test_validate_sql_rejects_bare_lower_case_snowflake_columns():
     ]
 
 
+def test_validate_sql_rejects_bare_qualified_lower_case_snowflake_columns():
+    report = validate_sql(
+        f"""
+        SELECT p.collection_id
+        FROM {DICOM_PIVOT} AS p
+        WHERE p.collection_id IN ('Community', 'nsclc_radiomics')
+        """,
+        allowed_tables={DICOM_PIVOT},
+        table_schemas={DICOM_PIVOT: DICOM_PIVOT_SCHEMA},
+    )
+
+    assert report.ok is False
+    assert report.errors == [
+        'Use p."collection_id" instead of p.collection_id; '
+        "Snowflake uppercases unquoted identifiers to COLLECTION_ID."
+    ]
+
+
+def test_validate_sql_allows_qualified_quoted_columns_with_derived_alias_columns():
+    report = validate_sql(
+        f"""
+        SELECT p."collection_id", stats.sample_count
+        FROM {DICOM_PIVOT} AS p
+        LEFT JOIN (
+            SELECT "collection_id" AS collection_key, COUNT(*) AS sample_count
+            FROM {DICOM_PIVOT}
+            GROUP BY "collection_id"
+        ) AS stats
+            ON p."collection_id" = stats.collection_key
+        """,
+        allowed_tables={DICOM_PIVOT},
+        table_schemas={DICOM_PIVOT: DICOM_PIVOT_SCHEMA},
+    )
+
+    assert report.ok is True
+    assert report.errors == []
+
+
 def test_validate_sql_reports_scope_resolution_errors():
     report = validate_sql(
         """

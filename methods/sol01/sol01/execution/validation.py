@@ -276,7 +276,7 @@ def _resolve_column(column: exp.Column, table_schema: TableSchema) -> _ColumnRes
                 ok=False,
                 error=(
                     f"Unknown quoted column {column.sql()} on {table_schema.full_name}; "
-                    f'use "{exact_match}" instead.'
+                    f"use {_suggested_column_reference(column, exact_match)} instead."
                 ),
             )
         return _ColumnResolution(
@@ -295,7 +295,7 @@ def _resolve_column(column: exp.Column, table_schema: TableSchema) -> _ColumnRes
             matched=True,
             ok=False,
             error=(
-                f'Use "{exact_match}" instead of {column.sql()}; '
+                f"Use {_suggested_column_reference(column, exact_match)} instead of {column.sql()}; "
                 f"Snowflake uppercases unquoted identifiers to {upper_name}."
             ),
         )
@@ -321,6 +321,13 @@ def _casefold_names(exact_names: set[str]) -> dict[str, str]:
         else:
             matches[normalized] = name
     return {normalized: name for normalized, name in matches.items() if name is not None}
+
+
+def _suggested_column_reference(column: exp.Column, exact_name: str) -> str:
+    """Render one exact quoted replacement while preserving table qualifiers."""
+
+    qualifier = f"{column.table}." if column.table else ""
+    return f'{qualifier}"{exact_name}"'
 
 
 def _scope_source_tables(

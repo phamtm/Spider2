@@ -7,6 +7,7 @@ Rules for every candidate:
 - use Snowflake SQL syntax
 - use column identifiers exactly as shown in the DDL/schema context
 - quote columns that are quoted in the DDL; do not write bare mixed-case or lower-case column names
+- when quoting a column from an aliased table, preserve the qualifier, for example `pop."geo_id"` not `"geo_id"`
 - preserve fully qualified table names when they appear in the schema context
 - when a grouped entity has a stable identifier and a display label, keep both in the SELECT and GROUP BY unless the question explicitly asks to omit the identifier
 - if the answer contract includes `native_value_terms`, keep those as native column values and do not turn them into behavioral definitions
